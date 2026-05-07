@@ -3,28 +3,8 @@ const { AppError } = require("../../utils/errors");
 const { serializeMenuAccess } = require("../../utils/menu-access");
 const { resolveRequestUser } = require("../../utils/rbac");
 
-function longestCommonPath(paths) {
-  if (!paths.length) return "/dashboard";
-
-  const segments = paths.map((path) => String(path || "").split("/").filter(Boolean));
-  const minLength = Math.min(...segments.map((item) => item.length));
-  const common = [];
-
-  for (let index = 0; index < minLength; index += 1) {
-    const current = segments[0][index];
-    if (segments.every((item) => item[index] === current)) {
-      common.push(current);
-    } else {
-      break;
-    }
-  }
-
-  return common.length > 0 ? `/${common.join("/")}` : "/dashboard";
-}
-
 function normalizeMenuForResponse(menu, children) {
-  const childUrls = children.map((item) => item.url).filter(Boolean);
-  const url = menu.url || longestCommonPath(childUrls);
+  const url = typeof menu.url === "string" ? menu.url : "";
 
   return serializeMenuAccess({
     ...menu,
