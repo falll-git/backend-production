@@ -33,6 +33,10 @@ function normalizePhone(value) {
   return normalized ? normalized : undefined;
 }
 
+function normalizeReason(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function buildOnboardingStatus(user) {
   if (user.onboarding_status) {
     return user.onboarding_status;
@@ -322,7 +326,10 @@ exports.updateUser = async (id, payload) => {
   }
 
   if (typeof payload.is_active === "boolean") {
-    nextData.is_active = payload.is_active;
+    throw new AppError(
+      "Gunakan fitur Tutup Akses atau Aktifkan Kembali untuk mengubah status akun.",
+      422,
+    );
   }
 
   if (typeof payload.is_restrict === "boolean") {
@@ -367,6 +374,10 @@ exports.sendInvite = async (id) => {
     throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
+  if (!user.is_active) {
+    throw new AppError("Akses pengguna sedang ditutup.", 409);
+  }
+
   if (user.password_set_at) {
     throw new AppError("Pengguna sudah menyelesaikan aktivasi akun.", 400);
   }
@@ -386,11 +397,77 @@ exports.sendInvite = async (id) => {
   };
 };
 
-exports.deleteUser = async (id) => {
+exports.closeAccess = async (id, actorId, payload) => {
   const user = await repository.findById(id);
 
   if (!user) {
     throw new AppError("Pengguna tidak ditemukan.", 404);
+  }
+
+  if (id === actorId) {
+    throw new AppError("Anda tidak dapat menutup akses akun sendiri.", 422);
+  }
+
+  if (!user.is_active) {
+    throw new AppError("Akses pengguna sudah ditutup.", 409);
+  }
+
+  const now = new Date();
+  const reason = normalizeReason(payload.reason);
+  const updatedUser = await repository.updateAccessStatus({
+    id,
+    revokedAt: now,
+    data: {
+      is_active: false,
+      deactivated_at: now,
+      deactivated_by: actorId,
+      deactivation_reason: reason,
+      refresh_token: null,
+      refresh_token_expires_at: null,
+    },
+  });
+
+  await authRepository.invalidateInviteTokens(id, now);
+  await authRepository.invalidateResetPasswordTokens(id, now);
+
+  return serializeUser(updatedUser);
+};
+
+exports.reactivateAccess = async (id, actorId, payload) => {
+  const user = await repository.findById(id);
+
+  if (!user) {
+    throw new AppError("Pengguna tidak ditemukan.", 404);
+  }
+
+  if (user.is_active) {
+    throw new AppError("Akses pengguna sudah aktif.", 409);
+  }
+
+  const now = new Date();
+  const reason = normalizeReason(payload.reason);
+  const updatedUser = await repository.updateAccessStatus({
+    id,
+    data: {
+      is_active: true,
+      reactivated_at: now,
+      reactivated_by: actorId,
+      reactivation_reason: reason,
+    },
+  });
+
+  return serializeUser(updatedUser);
+};
+
+exports.deleteUser = async (id, actorId) => {
+  const user = await repository.findById(id);
+
+  if (!user) {
+    throw new AppError("Pengguna tidak ditemukan.", 404);
+  }
+
+  if (id === actorId) {
+    throw new AppError("Anda tidak dapat menghapus akun sendiri.", 422);
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
@@ -400,7 +477,7 @@ exports.deleteUser = async (id) => {
 
   if (totalDependencies > 0) {
     throw new AppError(
-      "Pengguna tidak dapat dihapus karena sudah digunakan oleh data operasional.",
+      "Pengguna ini sudah memiliki riwayat aktivitas, sehingga tidak dapat dihapus. Tutup akses pengguna untuk menutup akses tanpa menghapus riwayat data.",
       409,
     );
   }

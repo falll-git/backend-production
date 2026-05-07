@@ -67,7 +67,7 @@ exports.update = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    await service.deleteUser(req.params.id);
+    await service.deleteUser(req.params.id, req.user.id);
     successResponse(res, null, "Pengguna berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
@@ -84,6 +84,38 @@ exports.getMe = async (req, res) => {
     successResponse(res, data);
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.closeAccess = async (req, res) => {
+  try {
+    const result = await service.closeAccess(req.params.id, req.user.id, req.body);
+    successResponse(
+      res,
+      result,
+      "Pengguna berhasil dinonaktifkan. Akun tidak dapat login dan tidak akan muncul dalam pilihan proses baru.",
+    );
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.reactivateAccess = async (req, res) => {
+  try {
+    const result = await service.reactivateAccess(
+      req.params.id,
+      req.user.id,
+      req.body,
+    );
+    successResponse(res, result, "Pengguna berhasil diaktifkan kembali.");
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });

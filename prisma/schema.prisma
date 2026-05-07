@@ -24,11 +24,21 @@ model users {
   password_set_at          DateTime?
   invited_at               DateTime?
   activated_at             DateTime?
+  deactivated_at           DateTime?
+  deactivated_by           String?
+  deactivation_reason      String?
+  reactivated_at           DateTime?
+  reactivated_by           String?
+  reactivation_reason      String?
 
   role               roles                @relation(fields: [role_id], references: [id])
   division           divisions            @relation(fields: [division_id], references: [id])
   auth_action_tokens auth_action_tokens[]
   refresh_tokens     refresh_tokens[]
+  deactivator        users?               @relation("UsersDeactivator", fields: [deactivated_by], references: [id], onDelete: SetNull)
+  reactivator        users?               @relation("UsersReactivator", fields: [reactivated_by], references: [id], onDelete: SetNull)
+  deactivated_users  users[]              @relation("UsersDeactivator")
+  reactivated_users  users[]              @relation("UsersReactivator")
 
   sent_dispositions     incoming_mail_dispositions[] @relation("SenderDisposition")
   received_dispositions incoming_mail_dispositions[] @relation("ReceiverDisposition")
@@ -68,6 +78,9 @@ model users {
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+
+  @@index([deactivated_by])
+  @@index([reactivated_by])
 }
 
 enum user_onboarding_statuses {

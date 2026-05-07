@@ -1,5 +1,12 @@
 const prisma = require("../../config/prisma");
 
+const auditUserSelect = {
+  id: true,
+  name: true,
+  username: true,
+  email: true,
+};
+
 function getUserSelect() {
   return {
     id: true,
@@ -16,8 +23,20 @@ function getUserSelect() {
     password_set_at: true,
     invited_at: true,
     activated_at: true,
+    deactivated_at: true,
+    deactivated_by: true,
+    deactivation_reason: true,
+    reactivated_at: true,
+    reactivated_by: true,
+    reactivation_reason: true,
     created_at: true,
     updated_at: true,
+    deactivator: {
+      select: auditUserSelect,
+    },
+    reactivator: {
+      select: auditUserSelect,
+    },
     role: {
       select: {
         id: true,
@@ -231,6 +250,30 @@ exports.update = (id, data) => {
   });
 };
 
+exports.updateAccessStatus = ({ id, data, revokedAt = null }) => {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.users.update({
+      where: { id },
+      data,
+      select: getUserSelect(),
+    });
+
+    if (revokedAt) {
+      await tx.refresh_tokens.updateMany({
+        where: {
+          user_id: id,
+          revoked_at: null,
+        },
+        data: {
+          revoked_at: revokedAt,
+        },
+      });
+    }
+
+    return user;
+  });
+};
+
 exports.findAuthRecordById = (id) => {
   return prisma.users.findUnique({
     where: { id },
@@ -260,15 +303,34 @@ exports.findDependencySummary = (id) => {
           received_dispositions: true,
           sent_memo_dispositions: true,
           received_memo_dispositions: true,
+          created_incoming_mails: true,
+          updated_incoming_mails: true,
+          deleted_incoming_mails: true,
+          managed_incoming_mail_targets: true,
           created_digital_documents: true,
+          owned_digital_documents: true,
           updated_digital_documents: true,
           deleted_digital_documents: true,
+          related_digital_documents: true,
+          uploaded_document_files: true,
+          requested_digital_document_accesses: true,
+          owned_digital_document_accesses: true,
+          acted_digital_document_accesses: true,
+          borrowed_digital_document_loans: true,
+          approved_digital_document_loans: true,
+          rejected_digital_document_loans: true,
+          handed_over_digital_document_loans: true,
+          returned_digital_document_loans: true,
+          digital_document_activity_logs: true,
           created_outgoing_mails: true,
           updated_outgoing_mails: true,
           deleted_outgoing_mails: true,
           created_memorandums: true,
           updated_memorandums: true,
           deleted_memorandums: true,
+          managed_memorandum_targets: true,
+          deactivated_users: true,
+          reactivated_users: true,
         },
       },
     },

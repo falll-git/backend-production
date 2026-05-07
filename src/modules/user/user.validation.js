@@ -57,3 +57,21 @@ exports.updateUserSchema = Joi.object({
 }).min(1).messages({
   "object.min": "Tidak ada data yang diperbarui.",
 });
+
+exports.closeAccessSchema = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required().messages({
+    "any.required": "Alasan penutupan akses wajib diisi.",
+    "string.empty": "Alasan penutupan akses wajib diisi.",
+    "string.min": "Alasan penutupan akses minimal 5 karakter.",
+    "string.max": "Alasan penutupan akses maksimal 500 karakter.",
+  }),
+});
+
+exports.reactivateAccessSchema = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required().messages({
+    "any.required": "Alasan aktivasi ulang wajib diisi.",
+    "string.empty": "Alasan aktivasi ulang wajib diisi.",
+    "string.min": "Alasan aktivasi ulang minimal 5 karakter.",
+    "string.max": "Alasan aktivasi ulang maksimal 500 karakter.",
+  }),
+});

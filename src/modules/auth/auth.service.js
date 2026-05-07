@@ -306,6 +306,10 @@ exports.verifySetPasswordToken = async (token) => {
     throw new AppError("Tautan aktivasi tidak valid atau sudah kedaluwarsa.", 400);
   }
 
+  if (!actionToken.user.is_active) {
+    throw new AppError("Akses pengguna sedang ditutup.", 403);
+  }
+
   if (actionToken.user.password_set_at) {
     throw new AppError("Aktivasi akun sudah selesai.", 400);
   }
@@ -350,6 +354,10 @@ exports.setPassword = async ({ token, password }) => {
 
   if (!actionToken) {
     throw new AppError("Tautan aktivasi tidak valid atau sudah kedaluwarsa.", 400);
+  }
+
+  if (!actionToken.user.is_active) {
+    throw new AppError("Akses pengguna sedang ditutup.", 403);
   }
 
   if (actionToken.user.password_set_at) {
