@@ -1,5 +1,3 @@
-ALTER TYPE "digital_document_loan_statuses" ADD VALUE IF NOT EXISTS 'HANDED_OVER';
-
 DROP INDEX IF EXISTS "digital_document_loans_active_document_key";
 CREATE UNIQUE INDEX IF NOT EXISTS "digital_document_loans_active_document_key"
     ON "digital_document_loans"("document_id")
