@@ -12,9 +12,6 @@ function normalizeRoleType(value, fallback = ROLE_TYPES.ADDITIONAL) {
   if (value === undefined || value === null || value === "") return fallback;
 
   const normalized = String(value).trim().toUpperCase();
-  if (normalized === "DIVISION") {
-    return ROLE_TYPES.ADDITIONAL;
-  }
 
   if (normalized === ROLE_TYPES.MAIN || normalized === ROLE_TYPES.ADDITIONAL) {
     return normalized;

@@ -8,7 +8,7 @@ exports.createRoleSchema = Joi.object({
     "any.required": "Nama role wajib diisi.",
     "string.empty": "Nama role wajib diisi.",
   }),
-  type: Joi.string().valid("MAIN", "ADDITIONAL", "DIVISION").default("ADDITIONAL").optional().messages({
+  type: Joi.string().valid("MAIN", "ADDITIONAL").default("ADDITIONAL").optional().messages({
     "any.only": ROLE_TYPE_MESSAGE,
     "string.empty": ROLE_TYPE_MESSAGE,
   }),
@@ -18,7 +18,7 @@ exports.updateRoleSchema = Joi.object({
   name: Joi.string().trim().optional().messages({
     "string.empty": "Nama role wajib diisi.",
   }),
-  type: Joi.string().valid("MAIN", "ADDITIONAL", "DIVISION").optional().messages({
+  type: Joi.string().valid("MAIN", "ADDITIONAL").optional().messages({
     "any.only": ROLE_TYPE_MESSAGE,
     "string.empty": ROLE_TYPE_MESSAGE,
   }),
