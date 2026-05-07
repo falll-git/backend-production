@@ -135,7 +135,7 @@ async function deliverInvitation(user, invitation) {
     return buildPublicInvitationPayload(invitation, {
       channel: "manual",
       status: "manual_required",
-      reason: "SMTP_NOT_CONFIGURED",
+      reason: "RESEND_NOT_CONFIGURED",
     });
   }
 
@@ -155,7 +155,7 @@ async function deliverInvitation(user, invitation) {
     });
 
     return buildPublicInvitationPayload(invitation, {
-      channel: "smtp",
+      channel: "resend",
       status: result.status,
       message_id: result.messageId || null,
       accepted: result.accepted || [],
@@ -165,7 +165,7 @@ async function deliverInvitation(user, invitation) {
     return buildPublicInvitationPayload(invitation, {
       channel: "manual",
       status: "failed",
-      reason: "SMTP_SEND_FAILED",
+      reason: "RESEND_SEND_FAILED",
       error: error.message,
     });
   }
