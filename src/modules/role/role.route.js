@@ -8,7 +8,7 @@ const { createRoleSchema, updateRoleSchema } = require("./role.validation");
 
 const ROLE_MENU_URL = "/dashboard/parameter/role";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(ROLE_MENU_URL, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -16,7 +16,7 @@ router.post(
   validate(createRoleSchema),
   controller.create,
 );
-router.get("/:id", auth, controller.getById);
+router.get("/:id", auth, authorize(ROLE_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

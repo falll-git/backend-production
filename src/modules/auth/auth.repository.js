@@ -24,6 +24,7 @@ const authUserSelect = {
     select: {
       id: true,
       name: true,
+      type: true,
     },
   },
   division: {

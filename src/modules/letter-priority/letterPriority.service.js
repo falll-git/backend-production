@@ -34,7 +34,7 @@ exports.getLetterPriorityById = async (id) => {
   const letterPriority = await repository.findById(id);
 
   if (!letterPriority) {
-    throw new AppError("Letter priority not found", 404);
+    throw new AppError("Prioritas surat tidak ditemukan.", 404);
   }
 
   return letterPriority;
@@ -49,7 +49,7 @@ exports.createLetterPriority = async (payload) => {
   const existing = await repository.findByName(normalizedPayload.name);
 
   if (existing) {
-    throw new AppError("Letter priority name already exists", 409);
+    throw new AppError("Nama prioritas surat sudah digunakan.", 409);
   }
 
   return repository.create(normalizedPayload);
@@ -59,7 +59,7 @@ exports.updateLetterPriority = async (id, payload) => {
   const letterPriority = await repository.findById(id);
 
   if (!letterPriority) {
-    throw new AppError("Letter priority not found", 404);
+    throw new AppError("Prioritas surat tidak ditemukan.", 404);
   }
 
   const normalizedPayload = payload.name
@@ -72,7 +72,7 @@ exports.updateLetterPriority = async (id, payload) => {
   if (normalizedPayload.name) {
     const existing = await repository.findByName(normalizedPayload.name);
     if (existing && existing.id !== id) {
-      throw new AppError("Letter priority name already exists", 409);
+      throw new AppError("Nama prioritas surat sudah digunakan.", 409);
     }
   }
 
@@ -83,7 +83,7 @@ exports.deleteLetterPriority = async (id) => {
   const letterPriority = await repository.findById(id);
 
   if (!letterPriority) {
-    throw new AppError("Letter priority not found", 404);
+    throw new AppError("Prioritas surat tidak ditemukan.", 404);
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
@@ -92,7 +92,7 @@ exports.deleteLetterPriority = async (id) => {
 
   if (linkedIncomingMails > 0 || linkedOutgoingMails > 0) {
     throw new AppError(
-      "Letter priority cannot be deleted because it is still used by incoming or outgoing mails",
+      "Prioritas surat tidak dapat dihapus karena masih digunakan oleh surat masuk atau surat keluar.",
       409,
     );
   }

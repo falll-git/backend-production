@@ -6,29 +6,29 @@ async function resolveActiveDivisionManager(divisionId) {
     typeof divisionId === "string" ? divisionId.trim() : "";
 
   if (!normalizedDivisionId) {
-    throw new Error("Divisi tujuan wajib diisi");
+    throw new Error("Divisi tujuan wajib diisi.");
   }
 
   const division = await divisionRepository.findById(normalizedDivisionId);
 
   if (!division) {
-    throw new Error("Divisi tujuan tidak ditemukan");
+    throw new Error("Divisi tujuan tidak ditemukan.");
   }
 
   const managers = await userRepository.findActiveManagersByDivisionId(
     normalizedDivisionId,
-    "Manajer",
+    "Manager",
   );
 
   if (managers.length === 0) {
     throw new Error(
-      `Manajer aktif untuk divisi ${division.name} tidak ditemukan`,
+      `Manager aktif dengan akun teraktivasi untuk divisi ${division.name} tidak ditemukan.`,
     );
   }
 
   if (managers.length > 1) {
     throw new Error(
-      `Manajer aktif untuk divisi ${division.name} harus tepat satu orang`,
+      `Manager aktif dengan akun teraktivasi untuk divisi ${division.name} harus tepat satu orang.`,
     );
   }
 
@@ -38,6 +38,31 @@ async function resolveActiveDivisionManager(divisionId) {
   };
 }
 
+async function resolveActiveDivisionManagers(divisionIds) {
+  const normalizedDivisionIds = [
+    ...new Set(
+      (Array.isArray(divisionIds) ? divisionIds : [divisionIds])
+        .map((divisionId) =>
+          typeof divisionId === "string" ? divisionId.trim() : "",
+        )
+        .filter(Boolean),
+    ),
+  ];
+
+  if (normalizedDivisionIds.length === 0) {
+    throw new Error("Minimal satu divisi tujuan wajib diisi.");
+  }
+
+  const assignments = [];
+
+  for (const divisionId of normalizedDivisionIds) {
+    assignments.push(await resolveActiveDivisionManager(divisionId));
+  }
+
+  return assignments;
+}
+
 module.exports = {
   resolveActiveDivisionManager,
+  resolveActiveDivisionManagers,
 };

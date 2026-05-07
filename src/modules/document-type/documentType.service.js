@@ -48,7 +48,7 @@ exports.getDocumentTypeById = async (id) => {
   const documentType = await repository.findById(id);
 
   if (!documentType) {
-    throw new AppError("Document type not found", 404);
+    throw new AppError("Jenis dokumen tidak ditemukan.", 404);
   }
 
   return documentType;
@@ -66,11 +66,11 @@ exports.createDocumentType = async (payload) => {
   const existingByName = await repository.findByName(normalizedPayload.name);
 
   if (existingByCode) {
-    throw new AppError("Document type code already exists", 409);
+    throw new AppError("Kode jenis dokumen sudah digunakan.", 409);
   }
 
   if (existingByName) {
-    throw new AppError("Document type name already exists", 409);
+    throw new AppError("Nama jenis dokumen sudah digunakan.", 409);
   }
 
   return repository.create(normalizedPayload);
@@ -80,7 +80,7 @@ exports.updateDocumentType = async (id, payload) => {
   const documentType = await repository.findById(id);
 
   if (!documentType) {
-    throw new AppError("Document type not found", 404);
+    throw new AppError("Jenis dokumen tidak ditemukan.", 404);
   }
 
   const normalizedPayload = {
@@ -95,14 +95,14 @@ exports.updateDocumentType = async (id, payload) => {
   if (normalizedPayload.code) {
     const existingByCode = await repository.findByCode(normalizedPayload.code);
     if (existingByCode && existingByCode.id !== id) {
-      throw new AppError("Document type code already exists", 409);
+      throw new AppError("Kode jenis dokumen sudah digunakan.", 409);
     }
   }
 
   if (normalizedPayload.name) {
     const existingByName = await repository.findByName(normalizedPayload.name);
     if (existingByName && existingByName.id !== id) {
-      throw new AppError("Document type name already exists", 409);
+      throw new AppError("Nama jenis dokumen sudah digunakan.", 409);
     }
   }
 
@@ -113,7 +113,7 @@ exports.deleteDocumentType = async (id) => {
   const documentType = await repository.findById(id);
 
   if (!documentType) {
-    throw new AppError("Document type not found", 404);
+    throw new AppError("Jenis dokumen tidak ditemukan.", 404);
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
@@ -121,7 +121,7 @@ exports.deleteDocumentType = async (id) => {
 
   if (linkedDocuments > 0) {
     throw new AppError(
-      "Document type cannot be deleted because it is still used by digital documents",
+      "Jenis dokumen tidak dapat dihapus karena masih digunakan oleh dokumen digital.",
       409,
     );
   }

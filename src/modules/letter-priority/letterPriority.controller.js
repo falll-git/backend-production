@@ -39,7 +39,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Letter priority created successfully",
+      message: "Prioritas surat berhasil dibuat.",
     });
   } catch (err) {
     return res.status(resolveStatusCode(err, 400)).json({
@@ -54,7 +54,7 @@ exports.update = async (req, res) => {
     const result = await service.updateLetterPriority(req.params.id, req.body);
     return res.status(200).json({
       status: true,
-      message: "Letter priority updated successfully",
+      message: "Prioritas surat berhasil diperbarui.",
       data: result,
     });
   } catch (err) {
@@ -68,7 +68,7 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     await service.deleteLetterPriority(req.params.id);
-    successResponse(res, null, "Letter priority deleted successfully");
+    successResponse(res, null, "Prioritas surat berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
       status: false,

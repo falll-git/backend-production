@@ -1,21 +1,49 @@
 const prisma = require("../../config/prisma");
 
-const baseInclude = {
-  division: true,
-  creator: true,
-  updater: true,
-  deleter: true,
-  dispositions: {
-    orderBy: [{ disposed_at: "asc" }, { id: "asc" }],
-    include: {
-      receiver: true,
-      sender: true,
+const userSummarySelect = {
+  id: true,
+  name: true,
+  email: true,
+  role_id: true,
+  division_id: true,
+  role: {
+    select: {
+      id: true,
+      name: true,
+      type: true,
+    },
+  },
+  division: {
+    select: {
+      id: true,
+      name: true,
     },
   },
 };
 
-function loadById(id) {
-  return prisma.memorandums.findUnique({
+const baseInclude = {
+  origin_division: true,
+  creator: { select: userSummarySelect },
+  updater: { select: userSummarySelect },
+  deleter: { select: userSummarySelect },
+  target_divisions: {
+    orderBy: { created_at: "asc" },
+    include: {
+      division: true,
+      manager: { select: userSummarySelect },
+    },
+  },
+  dispositions: {
+    orderBy: [{ disposed_at: "asc" }, { id: "asc" }],
+    include: {
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
+    },
+  },
+};
+
+function loadById(id, client = prisma) {
+  return client.memorandums.findUnique({
     where: { id },
     include: baseInclude,
   });
@@ -39,8 +67,6 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.memorandums.findMany(query);
 };
 
-exports.count = (where) => prisma.memorandums.count({ where });
-
 exports.findById = (id) => {
   return prisma.memorandums.findFirst({
     where: { id, deleted_at: null },
@@ -48,33 +74,48 @@ exports.findById = (id) => {
   });
 };
 
-exports.createWithInitialReceivers = async (data, receiversData) => {
-  const memorandum = await prisma.memorandums.create({
-    data,
-  });
+exports.createWithInitialReceivers = async (
+  data,
+  receiversData,
+  targetDivisionsData = [],
+) => {
+  return prisma.$transaction(async (tx) => {
+    const memorandum = await tx.memorandums.create({
+      data,
+    });
 
-  await prisma.memorandum_dispositions.createMany({
-    data: receiversData.map((disposition) => ({
-      memorandums_id: memorandum.id,
-      receiver_id: disposition.receiver_id,
-      sender_id: disposition.sender_id,
-      parent_disposition_id: disposition.parent_disposition_id,
-      due_date: disposition.due_date,
-      start_date: disposition.start_date,
-      note: disposition.note,
-      status: disposition.status,
-    })),
-  });
+    if (targetDivisionsData.length > 0) {
+      await tx.memorandum_target_divisions.createMany({
+        data: targetDivisionsData.map((target) => ({
+          ...target,
+          memorandums_id: memorandum.id,
+        })),
+      });
+    }
 
-  return loadById(memorandum.id);
+    await tx.memorandum_dispositions.createMany({
+      data: receiversData.map((disposition) => ({
+        memorandums_id: memorandum.id,
+        receiver_id: disposition.receiver_id,
+        sender_id: disposition.sender_id,
+        parent_disposition_id: disposition.parent_disposition_id,
+        due_date: disposition.due_date,
+        start_date: disposition.start_date,
+        note: disposition.note,
+        status: disposition.status,
+      })),
+    });
+
+    return loadById(memorandum.id, tx);
+  });
 };
 
 exports.createDisposition = (data) => {
   return prisma.memorandum_dispositions.create({
     data,
     include: {
-      receiver: true,
-      sender: true,
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
     },
   });
 };
@@ -86,8 +127,8 @@ exports.findDispositionById = ({ memorandumId, dispositionId }) => {
       memorandums_id: memorandumId,
     },
     include: {
-      receiver: true,
-      sender: true,
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
     },
   });
 };
@@ -103,8 +144,8 @@ exports.findCurrentDispositionForReceiver = ({ memorandumId, receiverId }) => {
     },
     orderBy: [{ disposed_at: "desc" }, { id: "desc" }],
     include: {
-      receiver: true,
-      sender: true,
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
     },
   });
 };
@@ -114,8 +155,8 @@ exports.updateDisposition = (id, data) => {
     where: { id },
     data,
     include: {
-      receiver: true,
-      sender: true,
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
     },
   });
 };
@@ -127,13 +168,6 @@ exports.update = async (id, data) => {
   });
 
   return loadById(id);
-};
-
-exports.updateStoredFile = (id, file) => {
-  return prisma.memorandums.update({
-    where: { id },
-    data: { file },
-  });
 };
 
 exports.completeDispositions = (memorandumId) => {

@@ -2,79 +2,94 @@ const Joi = require("joi");
 
 exports.authSchema = Joi.object({
   username: Joi.string().trim().required().messages({
-    "string.empty": "Username is required",
+    "any.required": "Username wajib diisi.",
+    "string.empty": "Username wajib diisi.",
   }),
   password: Joi.string().required().messages({
-    "string.empty": "Password is required",
+    "any.required": "Password wajib diisi.",
+    "string.empty": "Password wajib diisi.",
   }),
 });
 
 exports.refreshTokenSchema = Joi.object({
   refreshToken: Joi.string().trim().required().messages({
-    "string.empty": "Refresh token is required",
+    "any.required": "Sesi login wajib disertakan.",
+    "string.empty": "Sesi login wajib disertakan.",
   }),
 });
 
 exports.changePasswordSchema = Joi.object({
   oldPassword: Joi.string().required().messages({
-    "string.empty": "Current password is required",
+    "any.required": "Password saat ini wajib diisi.",
+    "string.empty": "Password saat ini wajib diisi.",
   }),
   newPassword: Joi.string().min(8).required().messages({
-    "string.empty": "New password is required",
-    "string.min": "New password must be at least 8 characters",
+    "any.required": "Password baru wajib diisi.",
+    "string.empty": "Password baru wajib diisi.",
+    "string.min": "Password baru minimal 8 karakter.",
   }),
   confirmPassword: Joi.string()
     .valid(Joi.ref("newPassword"))
     .required()
     .messages({
-      "any.only": "Password confirmation does not match",
-      "string.empty": "Password confirmation is required",
+      "any.only": "Konfirmasi password tidak sesuai.",
+      "any.required": "Konfirmasi password wajib diisi.",
+      "string.empty": "Konfirmasi password wajib diisi.",
     }),
 });
 
 exports.forgotPasswordSchema = Joi.object({
   email: Joi.string().email().trim().required().messages({
-    "string.empty": "Email is required",
-    "string.email": "Email must be a valid email address",
+    "any.required": "Email wajib diisi.",
+    "string.empty": "Email wajib diisi.",
+    "string.email": "Format email tidak valid.",
   }),
 });
 
 exports.verifySetPasswordSchema = Joi.object({
   token: Joi.string().trim().required().messages({
-    "string.empty": "Invitation token is required",
+    "any.required": "Token aktivasi wajib disertakan.",
+    "string.empty": "Token aktivasi wajib disertakan.",
   }),
 });
 
 exports.setPasswordSchema = Joi.object({
   token: Joi.string().trim().required().messages({
-    "string.empty": "Invitation token is required",
+    "any.required": "Token aktivasi wajib disertakan.",
+    "string.empty": "Token aktivasi wajib disertakan.",
   }),
   password: Joi.string().min(8).required().messages({
-    "string.empty": "Password is required",
-    "string.min": "Password must be at least 8 characters",
+    "any.required": "Password wajib diisi.",
+    "string.empty": "Password wajib diisi.",
+    "string.min": "Password minimal 8 karakter.",
   }),
   confirmPassword: Joi.string().valid(Joi.ref("password")).required().messages({
-    "any.only": "Password confirmation does not match",
-    "string.empty": "Password confirmation is required",
+    "any.only": "Konfirmasi password tidak sesuai.",
+    "any.required": "Konfirmasi password wajib diisi.",
+    "string.empty": "Konfirmasi password wajib diisi.",
   }),
 });
 
 exports.verifyResetPasswordSchema = Joi.object({
   token: Joi.string().trim().required().messages({
-    "string.empty": "Reset password token is required",
+    "any.required": "Token reset password wajib disertakan.",
+    "string.empty": "Token reset password wajib disertakan.",
   }),
 });
 
 exports.resetPasswordSchema = Joi.object({
   token: Joi.string().trim().required().messages({
-    "string.empty": "Reset password token is required",
+    "any.required": "Token reset password wajib disertakan.",
+    "string.empty": "Token reset password wajib disertakan.",
   }),
   password: Joi.string().min(8).required().messages({
-    "string.empty": "Password is required",
-    "string.min": "Password must be at least 8 characters",
+    "any.required": "Password wajib diisi.",
+    "string.empty": "Password wajib diisi.",
+    "string.min": "Password minimal 8 karakter.",
   }),
   confirmPassword: Joi.string().valid(Joi.ref("password")).required().messages({
-    "any.only": "Password confirmation does not match",
-    "string.empty": "Password confirmation is required",
+    "any.only": "Konfirmasi password tidak sesuai.",
+    "any.required": "Konfirmasi password wajib diisi.",
+    "string.empty": "Konfirmasi password wajib diisi.",
   }),
 });

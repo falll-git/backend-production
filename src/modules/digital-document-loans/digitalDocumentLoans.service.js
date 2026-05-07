@@ -1,5 +1,6 @@
 const repository = require("./digitalDocumentLoans.repository");
 const digitalDocumentRepository = require("../digital-documents/digitalDocuments.repository");
+const prisma = require("../../config/prisma");
 const { AppError } = require("../../utils/errors");
 const {
   serializeDigitalDocumentLoan,
@@ -7,6 +8,8 @@ const {
 const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
+  canScopeAccessDocument,
+  isLegalIdentity,
 } = require("../../utils/digital-archive-access");
 
 function normalizeText(value) {
@@ -18,6 +21,22 @@ function normalizeText(value) {
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function assertLegalLoanActor(userId) {
+  const user = await prisma.users.findUnique({
+    where: {
+      id: userId,
+    },
+    include: {
+      role: true,
+      division: true,
+    },
+  });
+
+  if (!isLegalIdentity(user)) {
+    throw new AppError("Peminjaman fisik hanya dapat diproses oleh Legal", 403);
+  }
 }
 
 function buildSearchWhere(search) {
@@ -74,7 +93,17 @@ function buildWhere(query, userId) {
   };
 
   if (query.status) {
-    where.status = String(query.status).trim().toUpperCase();
+    const status = String(query.status).trim().toUpperCase();
+    if (status === "OVERDUE" || status === "TERLAMBAT") {
+      where.status = {
+        in: ["HANDED_OVER", "BORROWED"],
+      };
+      where.requested_due_date = {
+        lt: new Date(),
+      };
+    } else {
+      where.status = status;
+    }
   }
 
   if (query.document_id) {
@@ -127,7 +156,9 @@ function buildWhere(query, userId) {
       .trim()
       .toLowerCase() === "overdue"
   ) {
-    where.status = "BORROWED";
+    where.status = {
+      in: ["HANDED_OVER", "BORROWED"],
+    };
     where.requested_due_date = {
       lt: new Date(),
     };
@@ -174,7 +205,6 @@ function buildVisibilityWhere(scope, userId) {
 function canViewLoan(item, scope, userId) {
   if (!item) return false;
   if (scope?.canAccessRestricted) return true;
-  if (!item.document?.is_restricted) return true;
   if (!userId) return false;
 
   return (
@@ -183,7 +213,7 @@ function canViewLoan(item, scope, userId) {
     item.rejected_by === userId ||
     item.handed_over_by === userId ||
     item.returned_by === userId ||
-    item.document?.created_by === userId
+    canScopeAccessDocument(item.document, scope)
   );
 }
 
@@ -204,6 +234,14 @@ exports.getAll = async ({ req, query, userId }) => {
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
   };
+
+  if (String(query.limit || "").toLowerCase() === "all") {
+    const data = await repository.findMany({ where });
+    return {
+      data: data.map((item) => serializeDigitalDocumentLoan(req, item)),
+    };
+  }
+
   const page = parsePositiveInteger(query.page, 1);
   const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
   const skip = (page - 1) * limit;
@@ -316,6 +354,7 @@ exports.approve = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
+  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
@@ -360,6 +399,7 @@ exports.reject = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
+  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
@@ -404,6 +444,7 @@ exports.handover = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
+  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
@@ -429,7 +470,7 @@ exports.handover = async ({ req, id, payload, userId }) => {
     const result = await repository.update(
       id,
       {
-        status: "BORROWED",
+        status: "HANDED_OVER",
         handed_over_by: userId,
         handover_at: handoverAt,
         handover_note: normalizeText(payload.handover_note),
@@ -459,13 +500,14 @@ exports.returnLoan = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
+  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
 
-  if (item.status !== "BORROWED") {
+  if (!["HANDED_OVER", "BORROWED"].includes(item.status)) {
     throw new AppError(
       "Hanya dokumen yang sedang dipinjam yang dapat dikembalikan",
       409,

@@ -1,6 +1,10 @@
 const service = require("./incomingMail.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
 
+function resolveStatusCode(error, fallback = 400) {
+  return error.statusCode || fallback;
+}
+
 exports.getAll = async (req, res) => {
   try {
     const result = await service.getIncomingMails({
@@ -15,7 +19,57 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getInitialManager = async (req, res) => {
+  try {
+    const result = await service.getInitialManager({
+      divisionId: req.query.target_division_id ?? req.query.division_id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getInitialManagers = async (req, res) => {
+  try {
+    const result = await service.getInitialManagers({
+      divisionIds:
+        req.query.target_division_ids ??
+        req.query.target_division_id ??
+        req.query.division_ids ??
+        req.query.division_id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getDispositionRecipients = async (req, res) => {
+  try {
+    const result = await service.getDispositionRecipients({
+      query: req.query,
+      currentUserId: req.user.id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -30,7 +84,7 @@ exports.getById = async (req, res) => {
     });
     return successResponse(res, result);
   } catch (error) {
-    return res.status(404).json({
+    return res.status(resolveStatusCode(error, 404)).json({
       status: false,
       message: error.message,
     });
@@ -51,7 +105,7 @@ exports.createWithDispo = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -64,6 +118,7 @@ exports.update = async (req, res) => {
       req,
       id: req.params.id,
       payload: req.body,
+      userId: req.user.id,
     });
 
     return res.status(200).json({
@@ -72,7 +127,7 @@ exports.update = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -81,10 +136,10 @@ exports.update = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    await service.deleteIncomingMail(req.params.id);
+    await service.deleteIncomingMail(req.params.id, req.user.id);
     return successResponse(res, null, "Surat masuk berhasil dihapus");
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -105,7 +160,7 @@ exports.redispose = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -117,6 +172,7 @@ exports.complete = async (req, res) => {
     const result = await service.completeIncomingMail({
       req,
       id: req.params.id,
+      userId: req.user.id,
     });
     return res.status(200).json({
       status: true,
@@ -124,7 +180,7 @@ exports.complete = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -147,7 +203,7 @@ exports.updateDispositionStatus = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });

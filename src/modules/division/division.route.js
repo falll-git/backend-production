@@ -11,7 +11,7 @@ const {
 
 const DIVISION_MENU_URL = "/dashboard/parameter/divisi";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(DIVISION_MENU_URL, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -19,7 +19,7 @@ router.post(
   validate(createDivisionSchema),
   controller.create,
 );
-router.get("/:id", auth, controller.getById);
+router.get("/:id", auth, authorize(DIVISION_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

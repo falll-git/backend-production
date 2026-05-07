@@ -5,9 +5,24 @@ const USER_SUMMARY_SELECT = {
   name: true,
   username: true,
   email: true,
+  role_id: true,
+  division_id: true,
+  role: {
+    select: {
+      id: true,
+      name: true,
+      type: true,
+    },
+  },
+  division: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
 };
 
-const ACTIVE_LOAN_STATUSES = ["PENDING", "APPROVED", "BORROWED"];
+const ACTIVE_LOAN_STATUSES = ["PENDING", "APPROVED", "HANDED_OVER", "BORROWED"];
 
 function getDocumentInclude() {
   return {
@@ -24,6 +39,11 @@ function getDocumentInclude() {
     creator: {
       select: USER_SUMMARY_SELECT,
     },
+    owner: {
+      select: USER_SUMMARY_SELECT,
+    },
+    owner_division: true,
+    debtor: true,
     updater: {
       select: USER_SUMMARY_SELECT,
     },
@@ -37,6 +57,37 @@ function getDocumentInclude() {
       orderBy: [{ is_primary: "desc" }, { created_at: "desc" }],
       include: {
         uploader: {
+          select: USER_SUMMARY_SELECT,
+        },
+      },
+    },
+    access_requests: {
+      where: {
+        status: "APPROVED",
+        OR: [
+          {
+            expires_at: null,
+          },
+          {
+            expires_at: {
+              gte: new Date(),
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        requester_id: true,
+        status: true,
+        expires_at: true,
+      },
+    },
+    related_users: {
+      orderBy: {
+        created_at: "asc",
+      },
+      include: {
+        user: {
           select: USER_SUMMARY_SELECT,
         },
       },
@@ -130,6 +181,100 @@ function update(id, data, client = prisma) {
   return client.digital_documents.update({
     where: { id },
     data,
+  });
+}
+
+function findUserById(id, client = prisma) {
+  return client.users.findFirst({
+    where: {
+      id,
+      is_active: true,
+    },
+    include: {
+      role: true,
+      division: true,
+    },
+  });
+}
+
+function findUsersByIds(ids, client = prisma) {
+  return client.users.findMany({
+    where: {
+      id: {
+        in: ids,
+      },
+      is_active: true,
+    },
+    include: {
+      role: true,
+      division: true,
+    },
+  });
+}
+
+function findDivisionById(id, client = prisma) {
+  return client.divisions.findUnique({
+    where: {
+      id,
+    },
+  });
+}
+
+function findDebtorById(id, client = prisma) {
+  return client.digital_debtors.findUnique({
+    where: {
+      id,
+    },
+  });
+}
+
+function findDebtorByDebtorNumber(debtorNumber, client = prisma) {
+  return client.digital_debtors.findUnique({
+    where: {
+      debtor_number: debtorNumber,
+    },
+  });
+}
+
+function findDebtorByIdentityNumber(identityNumber, client = prisma) {
+  return client.digital_debtors.findUnique({
+    where: {
+      identity_number: identityNumber,
+    },
+  });
+}
+
+function createDebtor(data, client = prisma) {
+  return client.digital_debtors.create({ data });
+}
+
+function updateDebtor(id, data, client = prisma) {
+  return client.digital_debtors.update({
+    where: {
+      id,
+    },
+    data,
+  });
+}
+
+async function replaceRelatedUsers(documentId, userIds, client = prisma) {
+  await client.digital_document_related_users.deleteMany({
+    where: {
+      document_id: documentId,
+    },
+  });
+
+  if (!userIds.length) return;
+
+  const now = new Date();
+  await client.digital_document_related_users.createMany({
+    data: userIds.map((userId) => ({
+      document_id: documentId,
+      user_id: userId,
+      created_at: now,
+      updated_at: now,
+    })),
+    skipDuplicates: true,
   });
 }
 
@@ -279,6 +424,7 @@ module.exports = {
   ACTIVE_LOAN_STATUSES,
   create,
   createActivityLog,
+  createDebtor,
   createDocumentFile,
   clearPrimaryDocumentFiles,
   count,
@@ -290,11 +436,19 @@ module.exports = {
   findActiveLoanConflict,
   findByDocumentNumber,
   findById,
+  findDebtorByDebtorNumber,
+  findDebtorById,
+  findDebtorByIdentityNumber,
+  findDivisionById,
   findDocumentTypeById,
   findMany,
   findPendingAccessConflict,
   findStorageById,
+  findUserById,
+  findUsersByIds,
   getDocumentInclude,
+  replaceRelatedUsers,
   update,
+  updateDebtor,
   withTransaction,
 };

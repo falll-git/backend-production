@@ -10,8 +10,9 @@ exports.getAll = async (req, res) => {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const search = req.query.search || "";
+    const type = req.query.type || "";
 
-    const result = await service.getRoles({ page, limit, search });
+    const result = await service.getRoles({ page, limit, search, type });
     paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
@@ -39,7 +40,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Role created successfully",
+      message: "Role berhasil dibuat.",
     });
   } catch (err) {
     return res.status(resolveStatusCode(err, 400)).json({
@@ -54,7 +55,7 @@ exports.update = async (req, res) => {
     const result = await service.updateRole(req.params.id, req.body);
     return res.status(200).json({
       status: true,
-      message: "Role updated successfully",
+      message: "Role berhasil diperbarui.",
       data: result,
     });
   } catch (err) {
@@ -68,7 +69,7 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     await service.deleteRole(req.params.id);
-    successResponse(res, null, "Role deleted successfully");
+    successResponse(res, null, "Role berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
       status: false,

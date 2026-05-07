@@ -59,7 +59,7 @@ function findActiveByDocumentId(documentId, client = prisma) {
     where: {
       document_id: documentId,
       status: {
-        in: ["PENDING", "APPROVED", "BORROWED"],
+        in: ["PENDING", "APPROVED", "HANDED_OVER", "BORROWED"],
       },
     },
   });

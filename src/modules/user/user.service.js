@@ -14,6 +14,7 @@ const {
 } = require("../../utils/auth-onboarding");
 const { isMailerConfigured, sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
+const { serializeRole } = require("../../utils/role-types");
 
 function normalizeText(value) {
   return value.trim().replace(/\s+/g, " ");
@@ -56,6 +57,7 @@ function serializeUser(user) {
 
   return {
     ...safeUser,
+    role: serializeRole(user.role),
     invitation_pending: !user.password_set_at,
     onboarding_status: buildOnboardingStatus(user),
   };
@@ -95,11 +97,11 @@ async function assertRoleAndDivisionExist(roleId, divisionId) {
   const division = await divisionRepository.findById(divisionId);
 
   if (!role) {
-    throw new AppError("Role not found", 404);
+    throw new AppError("Role tidak ditemukan.", 404);
   }
 
   if (!division) {
-    throw new AppError("Division not found", 404);
+    throw new AppError("Divisi tidak ditemukan.", 404);
   }
 }
 
@@ -214,7 +216,7 @@ exports.getUserById = async (id) => {
   const user = await repository.findById(id);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   return serializeUser(user);
@@ -240,23 +242,23 @@ exports.createUser = async (payload) => {
 
   const existingByEmail = await repository.findByEmail(normalizedPayload.email);
   if (existingByEmail) {
-    throw new AppError("Email already exists", 409);
+    throw new AppError("Email sudah digunakan.", 409);
   }
 
   const existingByUsername = await repository.findByUsername(
     normalizedPayload.username,
   );
   if (existingByUsername) {
-    throw new AppError("Username already exists", 409);
+    throw new AppError("Username sudah digunakan.", 409);
   }
 
   if (payload.send_invite === false) {
-    throw new AppError("New users must use invitation activation flow", 422);
+    throw new AppError("Pengguna baru harus menggunakan alur aktivasi undangan.", 422);
   }
 
   if (payload.password) {
     throw new AppError(
-      "Manual password setup is no longer available for new users",
+      "Password pengguna baru harus dibuat melalui tautan aktivasi.",
       422,
     );
   }
@@ -287,7 +289,7 @@ exports.updateUser = async (id, payload) => {
   const user = await repository.findById(id);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   const nextData = {};
@@ -302,7 +304,7 @@ exports.updateUser = async (id, payload) => {
       nextData.username,
     );
     if (existingByUsername && existingByUsername.id !== id) {
-      throw new AppError("Username already exists", 409);
+      throw new AppError("Username sudah digunakan.", 409);
     }
   }
 
@@ -310,7 +312,7 @@ exports.updateUser = async (id, payload) => {
     nextData.email = normalizeEmail(payload.email);
     const existingByEmail = await repository.findByEmail(nextData.email);
     if (existingByEmail && existingByEmail.id !== id) {
-      throw new AppError("Email already exists", 409);
+      throw new AppError("Email sudah digunakan.", 409);
     }
   }
 
@@ -330,7 +332,7 @@ exports.updateUser = async (id, payload) => {
   if (payload.role_id) {
     const role = await roleRepository.findById(payload.role_id);
     if (!role) {
-      throw new AppError("Role not found", 404);
+      throw new AppError("Role tidak ditemukan.", 404);
     }
     nextData.role_id = payload.role_id;
   }
@@ -338,7 +340,7 @@ exports.updateUser = async (id, payload) => {
   if (payload.division_id) {
     const division = await divisionRepository.findById(payload.division_id);
     if (!division) {
-      throw new AppError("Division not found", 404);
+      throw new AppError("Divisi tidak ditemukan.", 404);
     }
     nextData.division_id = payload.division_id;
   }
@@ -362,11 +364,11 @@ exports.sendInvite = async (id) => {
   const user = await repository.findAuthRecordById(id);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   if (user.password_set_at) {
-    throw new AppError("User has already completed account activation", 400);
+    throw new AppError("Pengguna sudah menyelesaikan aktivasi akun.", 400);
   }
 
   const invitation = await deliverInvitation(
@@ -388,7 +390,7 @@ exports.deleteUser = async (id) => {
   const user = await repository.findById(id);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
@@ -398,7 +400,7 @@ exports.deleteUser = async (id) => {
 
   if (totalDependencies > 0) {
     throw new AppError(
-      "User cannot be deleted because it is already referenced by operational data",
+      "Pengguna tidak dapat dihapus karena sudah digunakan oleh data operasional.",
       409,
     );
   }
@@ -409,7 +411,7 @@ exports.deleteUser = async (id) => {
 exports.getProfile = async (userId) => {
   const user = await repository.findById(userId);
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   return serializeUser(user);

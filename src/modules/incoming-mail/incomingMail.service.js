@@ -1,5 +1,7 @@
 const repository = require("./incomingMail.repository");
+const userRepository = require("../user/user.repository");
 const {
+  deleteReplacedStoredFile,
   deleteStoredFile,
   persistPersuratanFile,
 } = require("../../utils/persuratan-files");
@@ -7,12 +9,15 @@ const {
   serializeIncomingDisposition,
   serializeIncomingMail,
 } = require("../../utils/persuratan-serializer");
+const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
 const {
   resolveActiveDivisionManager,
+  resolveActiveDivisionManagers,
 } = require("../../utils/manager-assignment");
 const {
   normalizeMailWorkflowStatus,
 } = require("../../utils/persuratan-status");
+const { serializeRole } = require("../../utils/role-types");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 
@@ -23,12 +28,28 @@ function normalizeText(value) {
   return trimmed ? trimmed : null;
 }
 
+function serializeAssignableUser(user) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    phone: user.phone,
+    role_id: user.role_id,
+    division_id: user.division_id,
+    role: serializeRole(user.role),
+    division: user.division || null,
+  };
+}
+
 function normalizeDate(value) {
   if (!value) return null;
 
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error("Tanggal tidak valid");
+    throw new Error("Format tanggal tidak valid.");
   }
 
   return date;
@@ -37,6 +58,62 @@ function normalizeDate(value) {
 function normalizeOptionalDate(value) {
   if (!value) return null;
   return normalizeDate(value);
+}
+
+function normalizeDivisionIdsInput(value) {
+  const source = Array.isArray(value) ? value : [value];
+  const normalized = [];
+
+  for (const item of source) {
+    if (Array.isArray(item)) {
+      normalized.push(...normalizeDivisionIdsInput(item));
+      continue;
+    }
+
+    if (typeof item !== "string") {
+      if (item !== undefined && item !== null) {
+        normalized.push(String(item).trim());
+      }
+      continue;
+    }
+
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        normalized.push(...normalizeDivisionIdsInput(parsed));
+        continue;
+      }
+    } catch {
+    }
+
+    normalized.push(
+      ...trimmed
+        .split(",")
+        .map((divisionId) => divisionId.trim())
+        .filter(Boolean),
+    );
+  }
+
+  return [...new Set(normalized.filter(Boolean))];
+}
+
+function resolveTargetDivisionIds(payload) {
+  return normalizeDivisionIdsInput([
+    ...(payload.target_division_ids !== undefined
+      ? [payload.target_division_ids]
+      : []),
+    ...(payload.target_division_id !== undefined
+      ? [payload.target_division_id]
+      : []),
+  ]);
+}
+
+function appendAndFilter(where, condition) {
+  where.AND = Array.isArray(where.AND) ? where.AND : [];
+  where.AND.push(condition);
 }
 
 function isActiveDispositionStatus(status) {
@@ -107,7 +184,9 @@ function buildWhere({
   divisionId,
   receiverId,
 }) {
-  const where = {};
+  const where = {
+    deleted_at: null,
+  };
 
   if (search) {
     where.OR = [
@@ -124,7 +203,13 @@ function buildWhere({
   }
 
   if (divisionId) {
-    where.division_id = divisionId;
+    appendAndFilter(where, {
+      target_divisions: {
+        some: {
+          division_id: divisionId,
+        },
+      },
+    });
   }
 
   const receiveDateFilter = {};
@@ -156,8 +241,6 @@ async function serializeList(req, records) {
     const item = await serializeIncomingMail({
       req,
       record,
-      updateStoredPath: (storedPath) =>
-        repository.updateStoredFile(record.id, storedPath),
     });
 
     serialized.push(item);
@@ -194,7 +277,6 @@ function filterByStatus(records, status) {
 function buildIncomingMailData(payload, filePath, status) {
   return {
     letter_prioritie_id: payload.letter_prioritie_id,
-    division_id: payload.division_id,
     regarding: normalizeText(payload.regarding),
     description: normalizeText(payload.description),
     name: normalizeText(payload.name),
@@ -203,6 +285,7 @@ function buildIncomingMailData(payload, filePath, status) {
     mail_number: normalizeText(payload.mail_number),
     file: filePath,
     status,
+    created_by: payload.created_by ?? null,
   };
 }
 
@@ -215,7 +298,7 @@ exports.getIncomingMails = async ({ req, query, userId }) => {
     dateFrom: query.date_from,
     dateTo: query.date_to,
     letterPrioritieId: normalizeText(query.letter_prioritie_id),
-    divisionId: normalizeText(query.division_id),
+    divisionId: normalizeText(query.target_division_id ?? query.division_id),
     receiverId,
   });
 
@@ -234,19 +317,55 @@ exports.getIncomingMailsById = async ({ req, id }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
   return serializeIncomingMail({
     req,
     record: incomingMail,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
+exports.getInitialManager = async ({ divisionId }) => {
+  const { division, manager } = await resolveActiveDivisionManager(divisionId);
+
+  return {
+    division,
+    manager: serializeAssignableUser(manager),
+  };
+};
+
+exports.getInitialManagers = async ({ divisionIds }) => {
+  const assignments = await resolveActiveDivisionManagers(
+    normalizeDivisionIdsInput(divisionIds),
+  );
+
+  return {
+    targets: assignments.map(({ division, manager }) => ({
+      division,
+      manager: serializeAssignableUser(manager),
+    })),
+  };
+};
+
+exports.getDispositionRecipients = async ({ query, currentUserId }) => {
+  const recipients = await userRepository.findAssignableDispositionRecipients({
+    search: normalizeText(query.search),
+    divisionId: normalizeText(query.target_division_id ?? query.division_id),
+    excludeUserId:
+      String(query.exclude_self ?? "true").toLowerCase() === "false"
+        ? null
+        : currentUserId,
+    limit: query.limit,
+  });
+
+  return recipients.map(serializeAssignableUser);
+};
+
 exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
-  const { manager } = await resolveActiveDivisionManager(payload.division_id);
+  const assignments = await resolveActiveDivisionManagers(
+    resolveTargetDivisionIds(payload),
+  );
   const storedFile = persistPersuratanFile({
     entity: "incoming-mails",
     input: payload.file,
@@ -254,36 +373,52 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
     fallbackBaseName:
       payload.mail_number || payload.regarding || payload.name || "surat-masuk",
   });
+  if (!storedFile.storedPath) {
+    throw new Error("Dokumen surat masuk wajib diunggah.");
+  }
 
   const mailData = buildIncomingMailData(
-    payload,
+    {
+      ...payload,
+      created_by: senderId,
+    },
     storedFile.storedPath,
     "IN_PROGRESS",
   );
-  const dispositionsData = [
-    {
-      receiver_id: manager.id,
-      sender_id: senderId,
-      note: null,
-      parent_disposition_id: null,
-      start_date: null,
-      due_date: null,
-      status: "NEW",
-      is_complete: false,
-      completed_at: null,
-    },
-  ];
+  const dispositionsData = assignments.map(({ manager }) => ({
+    receiver_id: manager.id,
+    sender_id: senderId,
+    note: null,
+    parent_disposition_id: null,
+    start_date: null,
+    due_date: null,
+    status: "NEW",
+    is_complete: false,
+    completed_at: null,
+  }));
+  const targetDivisionsData = assignments.map(({ division, manager }) => ({
+    division_id: division.id,
+    manager_id: manager.id,
+  }));
 
-  const created = await repository.createWithDisposition(
-    mailData,
-    dispositionsData,
-  );
+  let created;
+
+  try {
+    created = await repository.createWithDisposition(
+      mailData,
+      dispositionsData,
+      targetDivisionsData,
+    );
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "incoming-mail");
+  }
 
   return serializeIncomingMail({
     req,
     record: created,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(created.id, storedPath),
   });
 };
 
@@ -291,11 +426,11 @@ exports.redispose = async ({ id, payload, senderId }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
-    throw new Error("Surat masuk yang sudah selesai tidak bisa redisposisi");
+    throw new Error("Surat masuk yang sudah selesai tidak dapat didisposisikan kembali.");
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -307,7 +442,21 @@ exports.redispose = async ({ id, payload, senderId }) => {
 
   if (!currentDisposition) {
     throw new Error(
-      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi",
+      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi.",
+    );
+  }
+
+  if (payload.receiver_id === senderId) {
+    throw new Error("Penerima redisposisi tidak boleh diri sendiri.");
+  }
+
+  const receiver = await userRepository.findAssignableUserById(
+    payload.receiver_id,
+  );
+
+  if (!receiver) {
+    throw new Error(
+      "Penerima redisposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
     );
   }
 
@@ -327,25 +476,26 @@ exports.redispose = async ({ id, payload, senderId }) => {
     status: payload.start_date ? "IN_PROGRESS" : "NEW",
   });
 
-  await repository.update(id, { status: "IN_PROGRESS" });
+  await repository.update(id, { status: "IN_PROGRESS", updated_by: senderId });
 
   return serializeIncomingDisposition(disposition, 1);
 };
 
-exports.completeIncomingMail = async ({ req, id }) => {
+exports.completeIncomingMail = async ({ req, id, userId }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
   await repository.completeDispositions(id);
-  const updated = await repository.update(id, { status: "COMPLETED" });
+  const updated = await repository.update(id, {
+    status: "COMPLETED",
+    updated_by: userId,
+  });
   return serializeIncomingMail({
     req,
     record: updated,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
@@ -359,7 +509,7 @@ exports.updateDispositionStatus = async ({
   const incomingMail = await repository.findById(incomingMailId);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
   const disposition = await repository.findDispositionById({
@@ -368,11 +518,11 @@ exports.updateDispositionStatus = async ({
   });
 
   if (!disposition) {
-    throw new Error("Disposisi surat masuk tidak ditemukan");
+    throw new Error("Disposisi surat masuk tidak ditemukan.");
   }
 
   if (disposition.receiver_id !== userId) {
-    throw new Error("Hanya penerima disposisi yang dapat memperbarui status");
+    throw new Error("Hanya penerima disposisi yang dapat memperbarui status.");
   }
 
   const normalizedStatus = String(status || "")
@@ -383,26 +533,26 @@ exports.updateDispositionStatus = async ({
     .toUpperCase();
 
   if (!["IN_PROGRESS", "COMPLETED"].includes(normalizedStatus)) {
-    throw new Error("Status disposisi tidak valid");
+    throw new Error("Status disposisi tidak valid.");
   }
 
   if (currentStatus === "FORWARDED") {
-    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui");
+    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui.");
   }
 
   if (currentStatus === "COMPLETED") {
-    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui");
+    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui.");
   }
 
   if (normalizedStatus === "IN_PROGRESS" && currentStatus !== "NEW") {
-    throw new Error("Hanya disposisi baru yang dapat diproses");
+    throw new Error("Hanya disposisi baru yang dapat diproses.");
   }
 
   if (
     normalizedStatus === "COMPLETED" &&
     !["NEW", "IN_PROGRESS"].includes(currentStatus)
   ) {
-    throw new Error("Disposisi tidak dapat ditandai selesai");
+    throw new Error("Disposisi tidak dapat ditandai selesai.");
   }
 
   const updateData = {
@@ -428,26 +578,25 @@ exports.updateDispositionStatus = async ({
     status: resolveDocumentStatusFromDispositions(
       refreshedMail?.disposition_mails || [],
     ),
+    updated_by: userId,
   });
 
   const updatedMail = await repository.findById(incomingMailId);
   return serializeIncomingMail({
     req,
     record: updatedMail,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(incomingMailId, storedPath),
   });
 };
 
-exports.updateIncomingMail = async ({ req, id, payload }) => {
+exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
-    throw new Error("Surat masuk yang sudah selesai tidak bisa diubah");
+    throw new Error("Surat masuk yang sudah selesai tidak dapat diubah.");
   }
 
   const storedFile = persistPersuratanFile({
@@ -464,16 +613,18 @@ exports.updateIncomingMail = async ({ req, id, payload }) => {
       "surat-masuk",
   });
 
-  const updateData = {};
+  const updateData = {
+    updated_by: userId,
+  };
 
   if (payload.letter_prioritie_id !== undefined) {
     updateData.letter_prioritie_id = payload.letter_prioritie_id;
   }
-  if (
-    payload.division_id !== undefined &&
-    payload.division_id !== incomingMail.division_id
-  ) {
-    throw new Error("Divisi tujuan surat masuk tidak dapat diubah");
+  if (payload.target_division_id !== undefined) {
+    throw new Error("Divisi tujuan surat masuk tidak dapat diubah.");
+  }
+  if (payload.target_division_ids !== undefined) {
+    throw new Error("Divisi tujuan surat masuk tidak dapat diubah.");
   }
   if (payload.regarding !== undefined) {
     updateData.regarding = normalizeText(payload.regarding);
@@ -500,29 +651,36 @@ exports.updateIncomingMail = async ({ req, id, payload }) => {
     updateData.status = normalizeMailWorkflowStatus(payload.status);
   }
 
-  const updated = await repository.update(id, updateData);
+  let updated;
+
+  try {
+    updated = await repository.update(id, updateData);
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "incoming-mail");
+  }
+
+  if (payload.file !== undefined) {
+    deleteReplacedStoredFile(incomingMail.file, updated.file);
+  }
 
   return serializeIncomingMail({
     req,
     record: updated,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
-exports.deleteIncomingMail = async (id) => {
+exports.deleteIncomingMail = async (id, userId) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan");
+    throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  if (
-    incomingMail.file &&
-    incomingMail.file.startsWith("/api/persuratan-files/")
-  ) {
-    deleteStoredFile(incomingMail.file);
-  }
+  const deleted = await repository.delete(id, userId);
+  deleteStoredFile(incomingMail.file);
 
-  return repository.delete(id);
+  return deleted;
 };

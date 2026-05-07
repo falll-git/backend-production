@@ -34,7 +34,7 @@ exports.getDivisionById = async (id) => {
   const division = await repository.findById(id);
 
   if (!division) {
-    throw new AppError("Division not found", 404);
+    throw new AppError("Divisi tidak ditemukan.", 404);
   }
 
   return division;
@@ -45,7 +45,7 @@ exports.createDivision = async (payload) => {
   const existing = await repository.findByName(normalizedName);
 
   if (existing) {
-    throw new AppError("Division name already exists", 409);
+    throw new AppError("Nama divisi sudah digunakan.", 409);
   }
 
   return repository.create({
@@ -58,7 +58,7 @@ exports.updateDivision = async (id, payload) => {
   const division = await repository.findById(id);
 
   if (!division) {
-    throw new AppError("Division not found", 404);
+    throw new AppError("Divisi tidak ditemukan.", 404);
   }
 
   const nextData = { ...payload };
@@ -67,7 +67,7 @@ exports.updateDivision = async (id, payload) => {
     nextData.name = normalizeDivisionName(payload.name);
     const existing = await repository.findByName(nextData.name);
     if (existing && existing.id !== id) {
-      throw new AppError("Division name already exists", 409);
+      throw new AppError("Nama divisi sudah digunakan.", 409);
     }
   }
 
@@ -78,7 +78,7 @@ exports.deleteDivision = async (id) => {
   const division = await repository.findById(id);
 
   if (!division) {
-    throw new AppError("Division not found", 404);
+    throw new AppError("Divisi tidak ditemukan.", 404);
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
@@ -88,7 +88,7 @@ exports.deleteDivision = async (id) => {
 
   if (totalDependencies > 0) {
     throw new AppError(
-      "Division cannot be deleted because it is already used by users, incoming mails, or memorandums",
+      "Divisi tidak dapat dihapus karena masih digunakan oleh pengguna, surat masuk, atau memorandum.",
       409,
     );
   }

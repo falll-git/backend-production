@@ -11,7 +11,6 @@ const documentTypeRoutes = require("./modules/document-type/documentType.route")
 const storageRoutes = require("./modules/storage/storage.route");
 const userRoutes = require("./modules/user/user.route");
 const incomingMails = require("./modules/incoming-mail/incomingMail.route");
-const dispositionRoutes = require("./modules/disposition/disposition.route");
 const menuRoutes = require("./modules/menus/menus.route");
 const roleMenuRoutes = require("./modules/role-menus/roleMenus.route");
 const digitalDocumentRoutes = require("./modules/digital-documents/digitalDocuments.route");
@@ -90,7 +89,6 @@ app.use("/api/document-types", documentTypeRoutes);
 app.use("/api/storages", storageRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/incoming-mails", incomingMails);
-app.use("/api/dispositions", dispositionRoutes);
 app.use("/api/menus", menuRoutes);
 app.use("/api/role-menus", roleMenuRoutes);
 app.use("/api/digital-documents", digitalDocumentRoutes);

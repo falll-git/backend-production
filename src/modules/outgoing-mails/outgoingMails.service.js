@@ -1,5 +1,6 @@
 const repository = require("./outgoingMails.repository");
 const {
+  deleteReplacedStoredFile,
   deleteStoredFile,
   persistPersuratanFile,
 } = require("../../utils/persuratan-files");
@@ -8,6 +9,7 @@ const {
   normalizeDeliveryMedia,
   normalizeOutgoingStatus,
 } = require("../../utils/persuratan-status");
+const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
 
 function normalizeText(value) {
   if (typeof value !== "string") return value ?? null;
@@ -21,7 +23,7 @@ function normalizeDate(value) {
 
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error("Tanggal tidak valid");
+    throw new Error("Format tanggal tidak valid.");
   }
 
   return date;
@@ -112,8 +114,6 @@ async function serializeList(req, records) {
     const item = await serializeOutgoingMail({
       req,
       record,
-      updateStoredPath: (storedPath) =>
-        repository.updateStoredFile(record.id, storedPath),
     });
 
     serialized.push(item);
@@ -165,14 +165,12 @@ exports.getById = async ({ req, id }) => {
   const outgoingMail = await repository.findById(id);
 
   if (!outgoingMail) {
-    throw new Error("Surat keluar tidak ditemukan");
+    throw new Error("Surat keluar tidak ditemukan.");
   }
 
   return serializeOutgoingMail({
     req,
     record: outgoingMail,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
@@ -183,24 +181,34 @@ exports.create = async ({ req, payload, userId }) => {
     previousPath: null,
     fallbackBaseName: payload.mail_number || payload.name || "surat-keluar",
   });
+  if (!storedFile.storedPath) {
+    throw new Error("Dokumen surat keluar wajib diunggah.");
+  }
 
-  const created = await repository.create({
-    letter_prioritie_id: payload.letter_prioritie_id,
-    delivery_media: normalizeDeliveryMedia(payload.delivery_media),
-    name: normalizeText(payload.name),
-    send_date: normalizeDate(payload.send_date),
-    address: normalizeText(payload.address),
-    mail_number: normalizeText(payload.mail_number),
-    file: storedFile.storedPath,
-    status: "ACTIVE",
-    created_by: userId,
-  });
+  let created;
+
+  try {
+    created = await repository.create({
+      letter_prioritie_id: payload.letter_prioritie_id,
+      delivery_media: normalizeDeliveryMedia(payload.delivery_media),
+      name: normalizeText(payload.name),
+      send_date: normalizeDate(payload.send_date),
+      address: normalizeText(payload.address),
+      mail_number: normalizeText(payload.mail_number),
+      file: storedFile.storedPath,
+      status: "ACTIVE",
+      created_by: userId,
+    });
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "outgoing-mail");
+  }
 
   return serializeOutgoingMail({
     req,
     record: created,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(created.id, storedPath),
   });
 };
 
@@ -208,7 +216,7 @@ exports.update = async ({ req, id, payload, userId }) => {
   const outgoingMail = await repository.findById(id);
 
   if (!outgoingMail) {
-    throw new Error("Surat keluar tidak ditemukan");
+    throw new Error("Surat keluar tidak ditemukan.");
   }
 
   const storedFile = persistPersuratanFile({
@@ -252,13 +260,24 @@ exports.update = async ({ req, id, payload, userId }) => {
     updateData.status = normalizeOutgoingStatus(payload.status);
   }
 
-  const updated = await repository.update(id, updateData);
+  let updated;
+
+  try {
+    updated = await repository.update(id, updateData);
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "outgoing-mail");
+  }
+
+  if (payload.file !== undefined) {
+    deleteReplacedStoredFile(outgoingMail.file, updated.file);
+  }
 
   return serializeOutgoingMail({
     req,
     record: updated,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
@@ -266,15 +285,11 @@ exports.delete = async (id, userId) => {
   const outgoingMail = await repository.findById(id);
 
   if (!outgoingMail) {
-    throw new Error("Surat keluar tidak ditemukan");
+    throw new Error("Surat keluar tidak ditemukan.");
   }
 
-  if (
-    outgoingMail.file &&
-    outgoingMail.file.startsWith("/api/persuratan-files/")
-  ) {
-    deleteStoredFile(outgoingMail.file);
-  }
+  const deleted = await repository.delete(id, userId);
+  deleteStoredFile(outgoingMail.file);
 
-  return repository.delete(id, userId);
+  return deleted;
 };

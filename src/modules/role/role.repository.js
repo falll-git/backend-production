@@ -5,7 +5,7 @@ exports.findMany = ({ where, skip, take }) => {
     where,
     skip,
     take,
-    orderBy: { id: "desc" },
+    orderBy: [{ type: "asc" }, { name: "asc" }],
   });
 };
 

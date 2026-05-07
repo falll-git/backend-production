@@ -15,6 +15,7 @@ const ACCESS_HISTORY_URL = "/dashboard/arsip-digital/disposisi/historis";
 const LOAN_HISTORY_URL = "/dashboard/arsip-digital/historis/peminjaman";
 const LOAN_REPORT_URL = "/dashboard/arsip-digital/peminjaman/laporan";
 const OVERDUE_URL = "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo";
+const DIGITAL_ARCHIVE_REPORT_URL = "/dashboard/arsip-digital/laporan";
 
 router.get(
   "/storage/offices",
@@ -59,9 +60,39 @@ router.get(
   controller.getLoanHistories,
 );
 router.get(
+  "/reports/summary",
+  auth,
+  authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  controller.getReportSummary,
+);
+router.get(
+  "/reports/documents",
+  auth,
+  authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  controller.getDocumentReport,
+);
+router.get(
+  "/reports/storage",
+  auth,
+  authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  controller.getStorageReport,
+);
+router.get(
+  "/reports/due-dates",
+  auth,
+  authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  controller.getDueDateReport,
+);
+router.get(
+  "/reports/access-requests",
+  auth,
+  authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  controller.getAccessRequestReport,
+);
+router.get(
   "/reports/loans",
   auth,
-  authorize(LOAN_REPORT_URL, "read"),
+  authorize([LOAN_REPORT_URL, DIGITAL_ARCHIVE_REPORT_URL], "read"),
   controller.getLoanReport,
 );
 router.get(

@@ -2,7 +2,7 @@ const service = require("./auth.service");
 const { successResponse } = require("../../utils/response");
 
 const FORGOT_PASSWORD_MESSAGE =
-  "If the account is eligible, password reset instructions will be sent.";
+  "Jika akun terdaftar dan aktif, instruksi reset password akan dikirim.";
 
 function resolveStatusCode(error, fallback = 400) {
   return error.statusCode || fallback;
@@ -104,7 +104,7 @@ exports.verifyResetPasswordToken = async (req, res) => {
 exports.setPassword = async (req, res) => {
   try {
     const result = await service.setPassword(req.body);
-    successResponse(res, result, "Password has been set successfully");
+    successResponse(res, result, "Password berhasil dibuat.");
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
       status: false,
@@ -116,7 +116,7 @@ exports.setPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const result = await service.resetPassword(req.body);
-    successResponse(res, result, "Password has been reset successfully");
+    successResponse(res, result, "Password berhasil direset.");
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
       status: false,

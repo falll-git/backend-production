@@ -20,6 +20,7 @@ const {
 } = require("../../utils/mail-templates");
 const { sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
+const { getRoleTypeLabel } = require("../../utils/role-types");
 
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
@@ -56,6 +57,8 @@ function buildAuthUserPayload(user) {
     role: {
       id: user.role?.id,
       name: user.role?.name,
+      type: user.role?.type,
+      type_label: user.role?.type ? getRoleTypeLabel(user.role.type) : null,
       role_name: user.role?.name,
     },
     division: {
@@ -75,6 +78,7 @@ function buildJwtPayload(user) {
     division_id: user.division_id,
     role: {
       role_name: user.role?.name,
+      role_type: user.role?.type,
     },
     division: {
       division_name: user.division?.name,
@@ -84,16 +88,16 @@ function buildJwtPayload(user) {
 
 function ensureUserCanAuthenticate(user) {
   if (!user) {
-    throw new AppError("Invalid username or password", 401);
+    throw new AppError("Username atau password tidak sesuai.", 401);
   }
 
   if (!user.is_active) {
-    throw new AppError("User is inactive", 403);
+    throw new AppError("Akun pengguna tidak aktif.", 403);
   }
 
   if (!user.password_set_at) {
     throw new AppError(
-      "User activation is pending. Please set your password from the invitation link.",
+      "Aktivasi akun belum selesai. Silakan atur password melalui tautan undangan.",
       403,
     );
   }
@@ -190,7 +194,7 @@ exports.login = async (payload) => {
   ensureUserCanAuthenticate(user);
 
   const match = await comparePassword(payload.password, user.password);
-  if (!match) throw new AppError("Invalid username or password", 401);
+  if (!match) throw new AppError("Username atau password tidak sesuai.", 401);
 
   const token = generateAccessToken(buildJwtPayload(user));
   const refresh = await issueRefreshToken(user);
@@ -204,14 +208,14 @@ exports.login = async (payload) => {
 
 exports.refreshToken = async (token) => {
   if (!token) {
-    throw new AppError("Refresh token required", 422);
+    throw new AppError("Sesi login wajib disertakan.", 422);
   }
 
   let decoded;
   try {
     decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
   } catch (error) {
-    throw new AppError("Invalid refresh token", 401);
+    throw new AppError("Sesi login tidak valid.", 401);
   }
 
   const tokenRecord = await repository.findActiveRefreshTokenByHash(
@@ -223,7 +227,7 @@ exports.refreshToken = async (token) => {
   if (!user) {
     const legacyUser = await repository.findById(decoded.id);
     if (!legacyUser || legacyUser.refresh_token !== token) {
-      throw new AppError("Refresh token is invalid", 401);
+      throw new AppError("Sesi login tidak valid.", 401);
     }
 
     user = legacyUser;
@@ -231,7 +235,7 @@ exports.refreshToken = async (token) => {
   }
 
   if (user.id !== decoded.id) {
-    throw new AppError("Refresh token is invalid", 401);
+    throw new AppError("Sesi login tidak valid.", 401);
   }
 
   ensureUserCanAuthenticate(user);
@@ -251,13 +255,13 @@ exports.changePassword = async (userId, payload) => {
 
   const user = await repository.findById(userId);
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
   const match = await comparePassword(oldPassword, user.password);
 
   if (!match) {
-    throw new AppError("Current password is incorrect", 400);
+    throw new AppError("Password saat ini tidak sesuai.", 400);
   }
 
   const hashed = await hashPassword(newPassword);
@@ -299,11 +303,11 @@ exports.verifySetPasswordToken = async (token) => {
   const actionToken = await repository.findInviteActionToken(tokenHash);
 
   if (!actionToken) {
-    throw new AppError("Invitation token is invalid or has expired", 400);
+    throw new AppError("Tautan aktivasi tidak valid atau sudah kedaluwarsa.", 400);
   }
 
   if (actionToken.user.password_set_at) {
-    throw new AppError("Invitation has already been completed", 400);
+    throw new AppError("Aktivasi akun sudah selesai.", 400);
   }
 
   return {
@@ -324,7 +328,7 @@ exports.verifyResetPasswordToken = async (token) => {
   const actionToken = await repository.findResetPasswordActionToken(tokenHash);
 
   if (!actionToken || !canRequestPasswordReset(actionToken.user)) {
-    throw new AppError("Reset password token is invalid or has expired", 400);
+    throw new AppError("Tautan reset password tidak valid atau sudah kedaluwarsa.", 400);
   }
 
   return {
@@ -345,11 +349,11 @@ exports.setPassword = async ({ token, password }) => {
   const actionToken = await repository.findInviteActionToken(tokenHash);
 
   if (!actionToken) {
-    throw new AppError("Invitation token is invalid or has expired", 400);
+    throw new AppError("Tautan aktivasi tidak valid atau sudah kedaluwarsa.", 400);
   }
 
   if (actionToken.user.password_set_at) {
-    throw new AppError("Invitation has already been completed", 400);
+    throw new AppError("Aktivasi akun sudah selesai.", 400);
   }
 
   const now = new Date();
@@ -372,7 +376,7 @@ exports.resetPassword = async ({ token, password }) => {
   const actionToken = await repository.findResetPasswordActionToken(tokenHash);
 
   if (!actionToken || !canRequestPasswordReset(actionToken.user)) {
-    throw new AppError("Reset password token is invalid or has expired", 400);
+    throw new AppError("Tautan reset password tidak valid atau sudah kedaluwarsa.", 400);
   }
 
   const now = new Date();

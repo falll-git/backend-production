@@ -1,52 +1,17 @@
+const { asArray, capabilityField, resolveRequestUser } = require("../utils/rbac");
 const prisma = require("../config/prisma");
 
-function asArray(value) {
-  return Array.isArray(value) ? value : [value];
-}
-
-function capabilityField(capability) {
-  switch (capability) {
-    case "create":
-      return "can_create";
-    case "update":
-      return "can_update";
-    case "delete":
-      return "can_delete";
-    case "read":
-    default:
-      return "can_read";
-  }
-}
-
-async function resolveUserRole(req) {
-  if (!req.user?.id && !req.user?.role_id) return null;
-
-  const user = await prisma.users.findFirst({
-    where: {
-      ...(req.user.id ? { id: req.user.id } : {}),
-      is_active: true,
-    },
-    select: {
-      id: true,
-      role_id: true,
-      role: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  });
-
-  return user;
-}
-
-function authorize(menuUrls, capability = "read") {
+function authorize(menuUrls, capability = "read", options = {}) {
   const urls = asArray(menuUrls).filter(Boolean);
   const field = capabilityField(capability);
+  const requiredFeature =
+    typeof options === "string"
+      ? options.trim()
+      : String(options.feature || "").trim();
 
   return async (req, res, next) => {
     try {
-      const user = await resolveUserRole(req);
+      const user = await resolveRequestUser(req.user);
       if (!user) {
         return res.status(401).json({
           status: false,
@@ -58,6 +23,14 @@ function authorize(menuUrls, capability = "read") {
         where: {
           role_id: user.role_id,
           [field]: true,
+          ...(requiredFeature
+            ? {
+                can_read: true,
+                features: {
+                  has: requiredFeature,
+                },
+              }
+            : {}),
           menu: {
             url: {
               in: urls,
@@ -69,7 +42,9 @@ function authorize(menuUrls, capability = "read") {
       if (!permission) {
         return res.status(403).json({
           status: false,
-          message: "Anda tidak memiliki izin untuk aksi ini",
+          message: requiredFeature
+            ? "Anda tidak memiliki izin untuk fitur ini"
+            : "Anda tidak memiliki izin untuk aksi ini",
         });
       }
 

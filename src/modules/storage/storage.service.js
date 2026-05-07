@@ -28,7 +28,7 @@ function parseCapacity(value) {
 
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new AppError("Storage capacity must be a non-negative integer", 422);
+    throw new AppError("Kapasitas rak harus berupa angka nol atau lebih.", 422);
   }
 
   return parsed;
@@ -66,7 +66,7 @@ exports.getStorage = async ({ page = 1, limit = 10, search = "" }) => {
 
 exports.getStorageById = async (id) => {
   const storage = await repository.findById(id);
-  if (!storage) throw new AppError("Storage not found", 404);
+  if (!storage) throw new AppError("Lokasi arsip tidak ditemukan.", 404);
   return serializeStorage(storage);
 };
 
@@ -100,7 +100,7 @@ exports.createStorage = async (data) => {
     }, tx);
 
     if (existingRack) {
-      throw new AppError("Storage location with this composite code already exists", 400);
+      throw new AppError("Lokasi arsip dengan kantor, lemari, dan rak tersebut sudah ada.", 400);
     }
 
     const created = await repository.createRack({
@@ -116,7 +116,7 @@ exports.createStorage = async (data) => {
 
 exports.updateStorage = async (id, data) => {
   const existingStorage = await repository.findById(id);
-  if (!existingStorage) throw new AppError("Storage not found", 404);
+  if (!existingStorage) throw new AppError("Lokasi arsip tidak ditemukan.", 404);
 
   return repository.withTransaction(async (tx) => {
     let cabinetId = existingStorage.cabinet_id;
@@ -159,7 +159,7 @@ exports.updateStorage = async (id, data) => {
       }, tx);
 
       if (duplicateRack && duplicateRack.id !== id) {
-        throw new AppError("Another storage location with this composite code already exists", 400);
+        throw new AppError("Lokasi arsip dengan kantor, lemari, dan rak tersebut sudah digunakan.", 400);
       }
     }
 
@@ -177,10 +177,10 @@ exports.updateStorage = async (id, data) => {
 
 exports.deleteStorage = async (id) => {
   const summary = await repository.findDependencySummary(id);
-  if (!summary) throw new AppError("Storage not found", 404);
+  if (!summary) throw new AppError("Lokasi arsip tidak ditemukan.", 404);
 
   if (summary._count.digital_documents > 0) {
-    throw new AppError("Cannot delete storage because it is used by one or more digital documents", 400);
+    throw new AppError("Lokasi arsip tidak dapat dihapus karena masih digunakan oleh dokumen digital.", 400);
   }
 
   return repository.withTransaction(async (tx) => {

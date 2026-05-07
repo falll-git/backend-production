@@ -36,8 +36,9 @@ exports.findDependencySummary = (id) => {
       _count: {
         select: {
           users: true,
-          incoming_mails: true,
+          incoming_mail_targets: true,
           memorandums: true,
+          memorandum_targets: true,
         },
       },
     },

@@ -9,6 +9,12 @@ const { createMenuSchema, updateMenuSchema } = require("./menus.validation");
 const ROLE_MENU_URL = "/dashboard/parameter/role-menu";
 
 router.get("/", auth, controller.getAll);
+router.get(
+  "/all",
+  auth,
+  authorize(ROLE_MENU_URL, "read"),
+  controller.getAllForManagement,
+);
 router.post(
   "/",
   auth,

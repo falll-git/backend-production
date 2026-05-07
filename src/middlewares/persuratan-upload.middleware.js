@@ -48,7 +48,7 @@ const upload = multer({
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
-          "Format file harus PDF, DOC, DOCX, XLS, XLSX, JPG, JPEG, atau PNG.",
+          "Format dokumen harus PDF, DOC, DOCX, XLS, XLSX, JPG, JPEG, atau PNG.",
         ),
       );
     }
@@ -65,20 +65,22 @@ function uploadPersuratanFile(fieldName = "file") {
           if (error.code === "LIMIT_FILE_SIZE") {
             return res.status(413).json({
               status: false,
-              message: "Ukuran file maksimal 10MB",
+              message: "Ukuran dokumen maksimal 10 MB.",
             });
           }
 
           return res.status(400).json({
             status: false,
             message:
-              error.field || error.message || "File persuratan tidak valid",
+              error.field ||
+              error.message ||
+              "Dokumen yang diunggah tidak valid.",
           });
         }
 
         return res.status(400).json({
           status: false,
-          message: error.message || "Gagal memproses upload file",
+          message: error.message || "Dokumen tidak dapat diproses.",
         });
       }
 

@@ -1,5 +1,7 @@
 const repository = require("./memorandum.repository");
+const userRepository = require("../user/user.repository");
 const {
+  deleteReplacedStoredFile,
   deleteStoredFile,
   persistPersuratanFile,
 } = require("../../utils/persuratan-files");
@@ -7,12 +9,15 @@ const {
   serializeMemorandum,
   serializeMemorandumDisposition,
 } = require("../../utils/persuratan-serializer");
+const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
 const {
   resolveActiveDivisionManager,
+  resolveActiveDivisionManagers,
 } = require("../../utils/manager-assignment");
 const {
   normalizeMailWorkflowStatus,
 } = require("../../utils/persuratan-status");
+const { serializeRole } = require("../../utils/role-types");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 
@@ -23,12 +28,28 @@ function normalizeText(value) {
   return trimmed ? trimmed : null;
 }
 
+function serializeAssignableUser(user) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    phone: user.phone,
+    role_id: user.role_id,
+    division_id: user.division_id,
+    role: serializeRole(user.role),
+    division: user.division || null,
+  };
+}
+
 function normalizeDate(value) {
   if (!value) return null;
 
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error("Tanggal tidak valid");
+    throw new Error("Format tanggal tidak valid.");
   }
 
   return date;
@@ -37,6 +58,62 @@ function normalizeDate(value) {
 function normalizeOptionalDate(value) {
   if (!value) return null;
   return normalizeDate(value);
+}
+
+function normalizeDivisionIdsInput(value) {
+  const source = Array.isArray(value) ? value : [value];
+  const normalized = [];
+
+  for (const item of source) {
+    if (Array.isArray(item)) {
+      normalized.push(...normalizeDivisionIdsInput(item));
+      continue;
+    }
+
+    if (typeof item !== "string") {
+      if (item !== undefined && item !== null) {
+        normalized.push(String(item).trim());
+      }
+      continue;
+    }
+
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        normalized.push(...normalizeDivisionIdsInput(parsed));
+        continue;
+      }
+    } catch {
+    }
+
+    normalized.push(
+      ...trimmed
+        .split(",")
+        .map((divisionId) => divisionId.trim())
+        .filter(Boolean),
+    );
+  }
+
+  return [...new Set(normalized.filter(Boolean))];
+}
+
+function resolveTargetDivisionIds(payload) {
+  return normalizeDivisionIdsInput([
+    ...(payload.target_division_ids !== undefined
+      ? [payload.target_division_ids]
+      : []),
+    ...(payload.target_division_id !== undefined
+      ? [payload.target_division_id]
+      : []),
+  ]);
+}
+
+function appendAndFilter(where, condition) {
+  where.AND = Array.isArray(where.AND) ? where.AND : [];
+  where.AND.push(condition);
 }
 
 function isActiveDispositionStatus(status) {
@@ -92,7 +169,15 @@ function paginateData(data, pagination) {
   };
 }
 
-function buildWhere({ search, dateFrom, dateTo, divisionId, receiverId }) {
+function buildWhere({
+  search,
+  dateFrom,
+  dateTo,
+  divisionId,
+  originDivisionId,
+  targetDivisionId,
+  receiverId,
+}) {
   const where = {
     deleted_at: null,
   };
@@ -102,12 +187,46 @@ function buildWhere({ search, dateFrom, dateTo, divisionId, receiverId }) {
       { memo_number: { contains: search, mode: "insensitive" } },
       { regarding: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
-      { division: { name: { contains: search, mode: "insensitive" } } },
+      { origin_division: { name: { contains: search, mode: "insensitive" } } },
+      {
+        target_divisions: {
+          some: {
+            division: { name: { contains: search, mode: "insensitive" } },
+          },
+        },
+      },
     ];
   }
 
   if (divisionId) {
-    where.division_id = divisionId;
+    appendAndFilter(where, {
+      OR: [
+        { origin_division_id: divisionId },
+        {
+          target_divisions: {
+            some: {
+              division_id: divisionId,
+            },
+          },
+        },
+      ],
+    });
+  }
+
+  if (originDivisionId) {
+    appendAndFilter(where, {
+      origin_division_id: originDivisionId,
+    });
+  }
+
+  if (targetDivisionId) {
+    appendAndFilter(where, {
+      target_divisions: {
+        some: {
+          division_id: targetDivisionId,
+        },
+      },
+    });
   }
 
   const memoDateFilter = {};
@@ -139,8 +258,6 @@ async function serializeList(req, records) {
     const item = await serializeMemorandum({
       req,
       record,
-      updateStoredPath: (storedPath) =>
-        repository.updateStoredFile(record.id, storedPath),
     });
 
     serialized.push(item);
@@ -183,6 +300,8 @@ exports.getMemorandums = async ({ req, query, userId }) => {
     dateFrom: query.date_from,
     dateTo: query.date_to,
     divisionId: normalizeText(query.division_id),
+    originDivisionId: normalizeText(query.origin_division_id),
+    targetDivisionId: normalizeText(query.target_division_id),
     receiverId,
   });
 
@@ -200,28 +319,67 @@ exports.getMemorandumById = async ({ req, id }) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
   return serializeMemorandum({
     req,
     record: memorandum,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
+exports.getInitialManager = async ({ divisionId }) => {
+  const { division, manager } = await resolveActiveDivisionManager(divisionId);
+
+  return {
+    division,
+    manager: serializeAssignableUser(manager),
+  };
+};
+
+exports.getInitialManagers = async ({ divisionIds }) => {
+  const assignments = await resolveActiveDivisionManagers(
+    normalizeDivisionIdsInput(divisionIds),
+  );
+
+  return {
+    targets: assignments.map(({ division, manager }) => ({
+      division,
+      manager: serializeAssignableUser(manager),
+    })),
+  };
+};
+
+exports.getDispositionRecipients = async ({ query, currentUserId }) => {
+  const recipients = await userRepository.findAssignableDispositionRecipients({
+    search: normalizeText(query.search),
+    divisionId: normalizeText(query.division_id),
+    excludeUserId:
+      String(query.exclude_self ?? "true").toLowerCase() === "false"
+        ? null
+        : currentUserId,
+    limit: query.limit,
+  });
+
+  return recipients.map(serializeAssignableUser);
+};
+
 exports.createMemorandum = async ({ req, payload, userId }) => {
-  const { manager } = await resolveActiveDivisionManager(payload.division_id);
+  const assignments = await resolveActiveDivisionManagers(
+    resolveTargetDivisionIds(payload),
+  );
   const storedFile = persistPersuratanFile({
     entity: "memorandums",
     input: payload.file,
     previousPath: null,
     fallbackBaseName: payload.memo_number || payload.regarding || "memorandum",
   });
+  if (!storedFile.storedPath) {
+    throw new Error("Dokumen memorandum wajib diunggah.");
+  }
 
   const memorandumData = {
-    division_id: payload.division_id,
+    origin_division_id: normalizeText(payload.origin_division_id),
     memo_number: normalizeText(payload.memo_number),
     memo_date: normalizeDate(payload.memo_date),
     received_date: normalizeDate(payload.received_date),
@@ -233,28 +391,38 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     created_by: userId,
   };
 
-  const receiversData = [
-    {
-      receiver_id: manager.id,
-      sender_id: userId,
-      parent_disposition_id: null,
-      start_date: null,
-      due_date: normalizeOptionalDate(payload.due_date),
-      note: null,
-      status: "NEW",
-    },
-  ];
+  const receiversData = assignments.map(({ manager }) => ({
+    receiver_id: manager.id,
+    sender_id: userId,
+    parent_disposition_id: null,
+    start_date: null,
+    due_date: normalizeOptionalDate(payload.due_date),
+    note: null,
+    status: "NEW",
+  }));
+  const targetDivisionsData = assignments.map(({ division, manager }) => ({
+    division_id: division.id,
+    manager_id: manager.id,
+  }));
 
-  const created = await repository.createWithInitialReceivers(
-    memorandumData,
-    receiversData,
-  );
+  let created;
+
+  try {
+    created = await repository.createWithInitialReceivers(
+      memorandumData,
+      receiversData,
+      targetDivisionsData,
+    );
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "memorandum");
+  }
 
   return serializeMemorandum({
     req,
     record: created,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(created.id, storedPath),
   });
 };
 
@@ -262,11 +430,11 @@ exports.redispose = async ({ id, payload, senderId }) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
-    throw new Error("Memorandum yang sudah selesai tidak bisa redisposisi");
+    throw new Error("Memorandum yang sudah selesai tidak dapat didisposisikan kembali.");
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -278,7 +446,21 @@ exports.redispose = async ({ id, payload, senderId }) => {
 
   if (!currentDisposition) {
     throw new Error(
-      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi",
+      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi.",
+    );
+  }
+
+  if (payload.receiver_id === senderId) {
+    throw new Error("Penerima redisposisi tidak boleh diri sendiri.");
+  }
+
+  const receiver = await userRepository.findAssignableUserById(
+    payload.receiver_id,
+  );
+
+  if (!receiver) {
+    throw new Error(
+      "Penerima redisposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
     );
   }
 
@@ -298,7 +480,7 @@ exports.redispose = async ({ id, payload, senderId }) => {
     status: payload.start_date ? "IN_PROGRESS" : "NEW",
   });
 
-  await repository.update(id, { status: "IN_PROGRESS" });
+  await repository.update(id, { status: "IN_PROGRESS", updated_by: senderId });
 
   return serializeMemorandumDisposition(disposition, 1);
 };
@@ -307,7 +489,7 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
   const memorandum = await repository.findById(memoId);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
   await repository.completeDispositions(memoId);
@@ -319,8 +501,6 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
   return serializeMemorandum({
     req,
     record: updated,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(memoId, storedPath),
   });
 };
 
@@ -334,7 +514,7 @@ exports.updateDispositionStatus = async ({
   const memorandum = await repository.findById(memorandumId);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
   const disposition = await repository.findDispositionById({
@@ -343,11 +523,11 @@ exports.updateDispositionStatus = async ({
   });
 
   if (!disposition) {
-    throw new Error("Disposisi memorandum tidak ditemukan");
+    throw new Error("Disposisi memorandum tidak ditemukan.");
   }
 
   if (disposition.receiver_id !== userId) {
-    throw new Error("Hanya penerima disposisi yang dapat memperbarui status");
+    throw new Error("Hanya penerima disposisi yang dapat memperbarui status.");
   }
 
   const normalizedStatus = String(status || "")
@@ -358,26 +538,26 @@ exports.updateDispositionStatus = async ({
     .toUpperCase();
 
   if (!["IN_PROGRESS", "COMPLETED"].includes(normalizedStatus)) {
-    throw new Error("Status disposisi tidak valid");
+    throw new Error("Status disposisi tidak valid.");
   }
 
   if (currentStatus === "FORWARDED") {
-    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui");
+    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui.");
   }
 
   if (currentStatus === "COMPLETED") {
-    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui");
+    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui.");
   }
 
   if (normalizedStatus === "IN_PROGRESS" && currentStatus !== "NEW") {
-    throw new Error("Hanya disposisi baru yang dapat diproses");
+    throw new Error("Hanya disposisi baru yang dapat diproses.");
   }
 
   if (
     normalizedStatus === "COMPLETED" &&
     !["NEW", "IN_PROGRESS"].includes(currentStatus)
   ) {
-    throw new Error("Disposisi tidak dapat ditandai selesai");
+    throw new Error("Disposisi tidak dapat ditandai selesai.");
   }
 
   const updateData = {
@@ -410,8 +590,6 @@ exports.updateDispositionStatus = async ({
   return serializeMemorandum({
     req,
     record: updatedMemorandum,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(memorandumId, storedPath),
   });
 };
 
@@ -419,11 +597,11 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
-    throw new Error("Memorandum yang sudah selesai tidak bisa diubah");
+    throw new Error("Memorandum yang sudah selesai tidak dapat diubah.");
   }
 
   const storedFile = persistPersuratanFile({
@@ -442,11 +620,14 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
     updated_by: userId,
   };
 
-  if (
-    payload.division_id !== undefined &&
-    payload.division_id !== memorandum.division_id
-  ) {
-    throw new Error("Divisi tujuan memorandum tidak dapat diubah");
+  if (payload.target_division_id !== undefined) {
+    throw new Error("Divisi tujuan memorandum tidak dapat diubah.");
+  }
+  if (payload.target_division_ids !== undefined) {
+    throw new Error("Divisi tujuan memorandum tidak dapat diubah.");
+  }
+  if (payload.origin_division_id !== undefined) {
+    updateData.origin_division_id = normalizeText(payload.origin_division_id);
   }
   if (payload.memo_number !== undefined) {
     updateData.memo_number = normalizeText(payload.memo_number);
@@ -473,13 +654,24 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
     updateData.status = normalizeMailWorkflowStatus(payload.status);
   }
 
-  const updated = await repository.update(id, updateData);
+  let updated;
+
+  try {
+    updated = await repository.update(id, updateData);
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw mapPersuratanPrismaError(error, "memorandum");
+  }
+
+  if (payload.file !== undefined) {
+    deleteReplacedStoredFile(memorandum.file, updated.file);
+  }
 
   return serializeMemorandum({
     req,
     record: updated,
-    updateStoredPath: (storedPath) =>
-      repository.updateStoredFile(id, storedPath),
   });
 };
 
@@ -487,12 +679,11 @@ exports.deleteMemorandum = async (id, userId) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan");
+    throw new Error("Memorandum tidak ditemukan.");
   }
 
-  if (memorandum.file && memorandum.file.startsWith("/api/persuratan-files/")) {
-    deleteStoredFile(memorandum.file);
-  }
+  const deleted = await repository.delete(id, userId);
+  deleteStoredFile(memorandum.file);
 
-  return repository.delete(id, userId);
+  return deleted;
 };

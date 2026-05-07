@@ -4,14 +4,15 @@ const {
 } = require("./digital-archive-files");
 
 const ACCESS_STATUS_LABELS = {
-  PENDING: "Pending",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
+  PENDING: "Menunggu Persetujuan",
+  APPROVED: "Disetujui",
+  REJECTED: "Ditolak",
 };
 
 const LOAN_STATUS_LABELS = {
-  PENDING: "Pending",
+  PENDING: "Menunggu Persetujuan",
   APPROVED: "Disetujui",
+  HANDED_OVER: "Sudah Diserahkan",
   REJECTED: "Ditolak",
   BORROWED: "Dipinjam",
   RETURNED: "Dikembalikan",
@@ -40,6 +41,43 @@ function serializeUserSummary(user) {
     name: user.name,
     username: user.username,
     email: user.email,
+    role_id: user.role_id,
+    division_id: user.division_id,
+    role: user.role
+      ? {
+          id: user.role.id,
+          name: user.role.name,
+          type: user.role.type,
+        }
+      : null,
+    division: user.division
+      ? {
+          id: user.division.id,
+          name: user.division.name,
+        }
+      : null,
+  };
+}
+
+function serializeDivisionSummary(division) {
+  if (!division) return null;
+
+  return {
+    id: division.id,
+    name: division.name,
+  };
+}
+
+function serializeDebtorSummary(debtor) {
+  if (!debtor) return null;
+
+  return {
+    id: debtor.id,
+    debtor_number: debtor.debtor_number,
+    name: debtor.name,
+    identity_number: debtor.identity_number,
+    financing_number: debtor.financing_number,
+    description: debtor.description,
   };
 }
 
@@ -67,11 +105,30 @@ function serializeStorageSummary(storage) {
 }
 
 function isLoanOverdue(loan) {
-  if (!loan || loan.status !== "BORROWED" || !loan.requested_due_date) {
+  if (
+    !loan ||
+    !["BORROWED", "HANDED_OVER"].includes(loan.status) ||
+    !loan.requested_due_date
+  ) {
     return false;
   }
 
   return new Date(loan.requested_due_date) < new Date();
+}
+
+function getLoanStatusLabel(loanOrStatus) {
+  const status =
+    typeof loanOrStatus === "string" ? loanOrStatus : loanOrStatus?.status;
+
+  if (
+    typeof loanOrStatus === "object" &&
+    loanOrStatus &&
+    isLoanOverdue(loanOrStatus)
+  ) {
+    return "Terlambat";
+  }
+
+  return LOAN_STATUS_LABELS[status] || status;
 }
 
 function getDocumentAvailability(document) {
@@ -115,13 +172,21 @@ function getDocumentAvailability(document) {
 function serializeLoanSummary(loan) {
   if (!loan) return null;
 
+  const statusLabel = getLoanStatusLabel(loan);
+
   return {
     id: loan.id,
     status_key: loan.status,
-    status_label: LOAN_STATUS_LABELS[loan.status] || loan.status,
+    status_label: statusLabel,
+    status_pinjam_key: isLoanOverdue(loan) ? "OVERDUE" : loan.status,
+    status_pinjam_label: statusLabel,
     request_reason: loan.request_reason,
     requested_start_date: loan.requested_start_date,
     requested_due_date: loan.requested_due_date,
+    tanggal_pinjam: loan.requested_start_date,
+    tanggal_penyerahan: loan.handover_at,
+    tanggal_estimasi_pengembalian: loan.requested_due_date,
+    tanggal_pengembalian: loan.returned_at,
     approved_at: loan.approved_at,
     rejected_at: loan.rejected_at,
     handover_at: loan.handover_at,
@@ -174,6 +239,8 @@ function serializeDocumentBase(req, document) {
     availability_status_key: availability.key,
     availability_status_label: availability.label,
     is_overdue: availability.is_overdue,
+    document_date: document.document_date,
+    due_date: document.due_date,
     created_at: document.created_at,
     updated_at: document.updated_at,
     deleted_at: document.deleted_at,
@@ -204,6 +271,15 @@ function serializeDocumentBase(req, document) {
       : null,
     storage: serializeStorageSummary(document.storage),
     creator: serializeUserSummary(document.creator),
+    owner: serializeUserSummary(document.owner),
+    owner_user: serializeUserSummary(document.owner),
+    owner_division: serializeDivisionSummary(document.owner_division),
+    debtor: serializeDebtorSummary(document.debtor),
+    related_users: Array.isArray(document.related_users)
+      ? document.related_users
+          .map((item) => serializeUserSummary(item.user))
+          .filter(Boolean)
+      : [],
     updater: serializeUserSummary(document.updater),
     deleter: serializeUserSummary(document.deleter),
     current_loan: serializeLoanSummary(availability.current_loan),
@@ -264,13 +340,21 @@ function serializeDigitalDocumentAccessRequest(req, item) {
 }
 
 function serializeDigitalDocumentLoan(req, item) {
+  const statusLabel = getLoanStatusLabel(item);
+
   return {
     id: item.id,
     status_key: item.status,
-    status_label: LOAN_STATUS_LABELS[item.status] || item.status,
+    status_label: statusLabel,
+    status_pinjam_key: isLoanOverdue(item) ? "OVERDUE" : item.status,
+    status_pinjam_label: statusLabel,
     request_reason: item.request_reason,
     requested_start_date: item.requested_start_date,
     requested_due_date: item.requested_due_date,
+    tanggal_pinjam: item.requested_start_date,
+    tanggal_penyerahan: item.handover_at,
+    tanggal_estimasi_pengembalian: item.requested_due_date,
+    tanggal_pengembalian: item.returned_at,
     approved_at: item.approved_at,
     rejected_at: item.rejected_at,
     handover_at: item.handover_at,
@@ -318,7 +402,7 @@ module.exports = {
   getActivityActionLabel: (action) => ACTIVITY_ACTION_LABELS[action] || action,
   getAccessRequestStatusLabel: (status) =>
     ACCESS_STATUS_LABELS[status] || status,
-  getLoanStatusLabel: (status) => LOAN_STATUS_LABELS[status] || status,
+  getLoanStatusLabel,
   hasActiveAccess,
   isLoanOverdue,
   serializeDigitalDocumentAccessRequest,

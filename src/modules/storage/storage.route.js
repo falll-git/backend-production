@@ -9,31 +9,37 @@ const {
   updateStorageSchema,
 } = require("./storage.validation");
 
-const STORAGE_MENU_URLS = [
+const STORAGE_READ_MENU_URLS = [
   "/dashboard/parameter/tempat-penyimpanan",
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
 ];
+const STORAGE_WRITE_MENU_URL = "/dashboard/parameter/tempat-penyimpanan";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(STORAGE_READ_MENU_URLS, "read"), controller.getAll);
 router.post(
   "/",
   auth,
-  authorize(STORAGE_MENU_URLS, "create"),
+  authorize(STORAGE_WRITE_MENU_URL, "create"),
   validate(createStorageSchema),
   controller.create,
 );
-router.get("/:id", auth, controller.getById);
+router.get(
+  "/:id",
+  auth,
+  authorize(STORAGE_READ_MENU_URLS, "read"),
+  controller.getById,
+);
 router.put(
   "/:id",
   auth,
-  authorize(STORAGE_MENU_URLS, "update"),
+  authorize(STORAGE_WRITE_MENU_URL, "update"),
   validate(updateStorageSchema),
   controller.update,
 );
 router.delete(
   "/:id",
   auth,
-  authorize(STORAGE_MENU_URLS, "delete"),
+  authorize(STORAGE_WRITE_MENU_URL, "delete"),
   controller.delete,
 );
 

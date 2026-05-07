@@ -6,7 +6,7 @@ module.exports = (req, res, next) => {
   if (!header || !header.startsWith("Bearer ")) {
     return res.status(401).json({
       status: false,
-      message: "Token required",
+      message: "Token akses wajib disertakan.",
     });
   }
 
@@ -21,7 +21,7 @@ module.exports = (req, res, next) => {
   } catch (err) {
     return res.status(401).json({
       status: false,
-      message: "Invalid token",
+      message: "Token akses tidak valid.",
     });
   }
 };

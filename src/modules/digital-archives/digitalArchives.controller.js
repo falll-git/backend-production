@@ -81,6 +81,10 @@ exports.getStorageHistories = async (req, res) => {
       userId: req.user?.id,
     });
 
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
+
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(error.statusCode || 400).json({
@@ -98,6 +102,10 @@ exports.getAccessRequestHistories = async (req, res) => {
       query: req.query,
       userId: req.user?.id,
     });
+
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
 
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
@@ -117,6 +125,10 @@ exports.getLoanHistories = async (req, res) => {
       userId: req.user?.id,
     });
 
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
+
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(error.statusCode || 400).json({
@@ -135,6 +147,10 @@ exports.getLoanReport = async (req, res) => {
       userId: req.user?.id,
     });
 
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
+
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(error.statusCode || 400).json({
@@ -152,6 +168,108 @@ exports.getOverdueLoans = async (req, res) => {
       query: req.query,
       userId: req.user?.id,
     });
+
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
+
+    return paginatedResponse(res, result.data, result.meta);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getReportSummary = async (req, res) => {
+  try {
+    const result = await service.getReportSummary({
+      userId: req.user?.id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getDocumentReport = async (req, res) => {
+  try {
+    const result = await service.getDocumentReport({
+      req,
+      query: req.query,
+      userId: req.user?.id,
+    });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
+
+    return successResponse(res, result.data);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getStorageReport = async (req, res) => {
+  try {
+    const result = await service.getStorageReport({
+      userId: req.user?.id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getDueDateReport = async (req, res) => {
+  try {
+    const result = await service.getDueDateReport({
+      req,
+      query: req.query,
+      userId: req.user?.id,
+    });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
+
+    return successResponse(res, result.data);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getAccessRequestReport = async (req, res) => {
+  try {
+    const result = await service.getAccessRequestReport({
+      req,
+      query: req.query,
+      userId: req.user?.id,
+    });
+
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
 
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {

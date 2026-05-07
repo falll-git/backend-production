@@ -4,7 +4,7 @@ const prisma = require("../../src/config/prisma");
 async function seedDivisions() {
   console.log("Seeding division...");
 
-  const divisions = ["IT", "Admin", "Manajer", "Legal"];
+  const divisions = ["IT"];
 
   for (const name of divisions) {
     await prisma.divisions.upsert({

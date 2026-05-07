@@ -1,4 +1,3 @@
--- CreateTable
 CREATE TABLE "storage_offices" (
     "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
@@ -9,7 +8,6 @@ CREATE TABLE "storage_offices" (
     CONSTRAINT "storage_offices_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "storage_cabinets" (
     "id" TEXT NOT NULL,
     "office_id" TEXT NOT NULL,
@@ -20,10 +18,8 @@ CREATE TABLE "storage_cabinets" (
     CONSTRAINT "storage_cabinets_pkey" PRIMARY KEY ("id")
 );
 
--- AlterTable
 ALTER TABLE "storages" ADD COLUMN "cabinet_id" TEXT;
 
--- Migrate existing flat storage rows into office and cabinet hierarchy
 WITH normalized_storages AS (
     SELECT
         "id",
@@ -93,29 +89,21 @@ WHERE s."id" = ns."id";
 
 ALTER TABLE "storages" ALTER COLUMN "cabinet_id" SET NOT NULL;
 
--- Drop old flat hierarchy columns after data migration
 ALTER TABLE "storages"
     DROP COLUMN "code",
     DROP COLUMN "office_code",
     DROP COLUMN "office_label";
 
--- CreateIndex
 CREATE UNIQUE INDEX "storage_offices_code_key" ON "storage_offices"("code");
 
--- CreateIndex
 CREATE INDEX "storage_cabinets_office_id_idx" ON "storage_cabinets"("office_id");
 
--- CreateIndex
 CREATE UNIQUE INDEX "storage_cabinets_office_id_code_key" ON "storage_cabinets"("office_id", "code");
 
--- CreateIndex
 CREATE INDEX "storages_cabinet_id_idx" ON "storages"("cabinet_id");
 
--- CreateIndex
 CREATE UNIQUE INDEX "storages_cabinet_id_name_key" ON "storages"("cabinet_id", "name");
 
--- AddForeignKey
 ALTER TABLE "storage_cabinets" ADD CONSTRAINT "storage_cabinets_office_id_fkey" FOREIGN KEY ("office_id") REFERENCES "storage_offices"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
 ALTER TABLE "storages" ADD CONSTRAINT "storages_cabinet_id_fkey" FOREIGN KEY ("cabinet_id") REFERENCES "storage_cabinets"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

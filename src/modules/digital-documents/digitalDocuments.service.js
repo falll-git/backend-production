@@ -34,6 +34,74 @@ function normalizeDocumentName(value) {
   return normalized;
 }
 
+function hasField(source, field) {
+  return Object.prototype.hasOwnProperty.call(source || {}, field);
+}
+
+function isNonEmptyObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length > 0,
+  );
+}
+
+function normalizeOptionalId(value) {
+  return normalizeText(value);
+}
+
+function normalizeUniqueIdArray(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return [];
+
+  const rawItems = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(",")
+        .map((item) => item.trim());
+
+  return [...new Set(rawItems.map(normalizeOptionalId).filter(Boolean))];
+}
+
+function parseOptionalDate(value, fieldLabel) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new AppError(`${fieldLabel} tidak valid`, 422);
+  }
+
+  return parsed;
+}
+
+function buildDateRangeWhere(field, start, end) {
+  const range = {};
+
+  if (start) {
+    const parsedStart = new Date(start);
+    if (!Number.isNaN(parsedStart.getTime())) {
+      range.gte = parsedStart;
+    }
+  }
+
+  if (end) {
+    const parsedEnd = new Date(end);
+    if (!Number.isNaN(parsedEnd.getTime())) {
+      range.lte = parsedEnd;
+    }
+  }
+
+  return Object.keys(range).length > 0 ? { [field]: range } : {};
+}
+
+function normalizeDateTime(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
 function buildDocumentFilePayload({
   documentId,
   storedFile,
@@ -142,6 +210,46 @@ function buildSearchWhere(search) {
           },
         },
       },
+      {
+        owner: {
+          name: {
+            contains: normalized,
+            mode: "insensitive",
+          },
+        },
+      },
+      {
+        owner_division: {
+          name: {
+            contains: normalized,
+            mode: "insensitive",
+          },
+        },
+      },
+      {
+        debtor: {
+          name: {
+            contains: normalized,
+            mode: "insensitive",
+          },
+        },
+      },
+      {
+        debtor: {
+          debtor_number: {
+            contains: normalized,
+            mode: "insensitive",
+          },
+        },
+      },
+      {
+        debtor: {
+          financing_number: {
+            contains: normalized,
+            mode: "insensitive",
+          },
+        },
+      },
     ],
   };
 }
@@ -182,7 +290,22 @@ function buildAvailabilityWhere(availability) {
       return {
         loans: {
           some: {
-            status: "BORROWED",
+            status: {
+              in: ["HANDED_OVER", "BORROWED"],
+            },
+          },
+        },
+      };
+    case "OVERDUE":
+      return {
+        loans: {
+          some: {
+            status: {
+              in: ["HANDED_OVER", "BORROWED"],
+            },
+            requested_due_date: {
+              lt: new Date(),
+            },
           },
         },
       };
@@ -196,46 +319,196 @@ function buildDocumentWhere(query, scope) {
   const searchWhere = buildSearchWhere(query.search);
   const availabilityWhere = buildAvailabilityWhere(query.availability);
 
-  const where = {
-    deleted_at: null,
-    ...visibilityWhere,
-    ...searchWhere,
-    ...availabilityWhere,
-  };
+  const clauses = [
+    {
+      deleted_at: null,
+    },
+    visibilityWhere,
+    searchWhere,
+    availabilityWhere,
+  ];
 
   if (query.document_type_id) {
-    where.document_type_id = query.document_type_id;
+    clauses.push({
+      document_type_id: query.document_type_id,
+    });
   }
 
   if (query.storage_id) {
-    where.storage_id = query.storage_id;
+    clauses.push({
+      storage_id: query.storage_id,
+    });
   }
 
   if (query.office_id) {
-    where.storage = {
-      ...(where.storage || {}),
-      cabinet: {
-        ...((where.storage && where.storage.cabinet) || {}),
-        office_id: query.office_id,
+    clauses.push({
+      storage: {
+        cabinet: {
+          office_id: query.office_id,
+        },
       },
-    };
+    });
   }
 
   if (query.cabinet_id) {
-    where.storage = {
-      ...(where.storage || {}),
-      cabinet_id: query.cabinet_id,
-    };
+    clauses.push({
+      storage: {
+        cabinet_id: query.cabinet_id,
+      },
+    });
+  }
+
+  if (query.owner_user_id) {
+    clauses.push({
+      owner_user_id: query.owner_user_id,
+    });
+  }
+
+  if (query.owner_division_id) {
+    clauses.push({
+      owner_division_id: query.owner_division_id,
+    });
+  }
+
+  if (query.debtor_id) {
+    clauses.push({
+      debtor_id: query.debtor_id,
+    });
+  }
+
+  const documentDateRange = buildDateRangeWhere(
+    "document_date",
+    query.document_date_from,
+    query.document_date_to,
+  );
+  if (isNonEmptyObject(documentDateRange)) {
+    clauses.push(documentDateRange);
+  }
+
+  const dueDateRange = buildDateRangeWhere(
+    "due_date",
+    query.due_date_from,
+    query.due_date_to,
+  );
+  if (isNonEmptyObject(dueDateRange)) {
+    clauses.push(dueDateRange);
+  }
+
+  if (query.has_due_date !== undefined) {
+    const normalized = String(query.has_due_date).trim().toLowerCase();
+    if (normalized === "true") {
+      clauses.push({
+        due_date: {
+          not: null,
+        },
+      });
+    } else if (normalized === "false") {
+      clauses.push({
+        due_date: null,
+      });
+    }
+  }
+
+  switch (
+    String(query.due_status || "")
+      .trim()
+      .toUpperCase()
+  ) {
+    case "OVERDUE":
+      clauses.push({
+        due_date: {
+          lt: new Date(),
+        },
+      });
+      break;
+    case "UPCOMING": {
+      const nextThirtyDays = new Date();
+      nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
+      clauses.push({
+        due_date: {
+          gte: new Date(),
+          lte: nextThirtyDays,
+        },
+      });
+      break;
+    }
+    default:
+      break;
   }
 
   if (query.is_restricted !== undefined) {
     const normalized = String(query.is_restricted).trim().toLowerCase();
     if (normalized === "true" || normalized === "false") {
-      where.is_restricted = normalized === "true";
+      clauses.push({
+        is_restricted: normalized === "true",
+      });
     }
   }
 
-  return where;
+  return {
+    AND: clauses.filter(isNonEmptyObject),
+  };
+}
+
+function buildRequestableDocumentWhere(query, scope) {
+  if (!scope?.userId || scope.canAccessRestricted) {
+    return {
+      id: "__no_requestable_digital_documents__",
+    };
+  }
+
+  const clauses = [
+    {
+      deleted_at: null,
+    },
+    {
+      NOT: buildDocumentVisibilityWhere(scope),
+    },
+    buildSearchWhere(query.search),
+  ];
+
+  if (query.document_type_id) {
+    clauses.push({
+      document_type_id: query.document_type_id,
+    });
+  }
+
+  if (query.owner_division_id) {
+    clauses.push({
+      owner_division_id: query.owner_division_id,
+    });
+  }
+
+  if (query.storage_id) {
+    clauses.push({
+      storage_id: query.storage_id,
+    });
+  }
+
+  return {
+    AND: clauses.filter(isNonEmptyObject),
+  };
+}
+
+function serializeRequestableDocument(req, document) {
+  const summary = serializeDigitalDocumentSummary(req, document);
+
+  return {
+    id: summary.id,
+    document_number: summary.document_number,
+    document_name: summary.document_name,
+    description: summary.description,
+    document_type: summary.document_type,
+    storage: summary.storage,
+    owner: summary.owner,
+    owner_user: summary.owner_user,
+    owner_division: summary.owner_division,
+    debtor: summary.debtor,
+    availability_status_key: summary.availability_status_key,
+    availability_status_label: summary.availability_status_label,
+    created_at: summary.created_at,
+    updated_at: summary.updated_at,
+  };
 }
 
 function buildDocumentNumberPrefix(documentType) {
@@ -256,15 +529,187 @@ function isPrismaUniqueError(error) {
   return error && error.code === "P2002";
 }
 
+function getDebtorPayload(payload) {
+  const nested =
+    payload.debtor && typeof payload.debtor === "object" ? payload.debtor : {};
+
+  function readField(flatField, nestedField = flatField) {
+    if (hasField(payload, flatField)) return normalizeText(payload[flatField]);
+    if (hasField(nested, nestedField)) return normalizeText(nested[nestedField]);
+    return undefined;
+  }
+
+  return {
+    debtor_number: readField("debtor_number"),
+    name: readField("debtor_name", "name"),
+    identity_number: readField("identity_number"),
+    financing_number: readField("financing_number"),
+    description: readField("debtor_description", "description"),
+  };
+}
+
+function compactDefinedFields(data) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  );
+}
+
+async function resolveDebtorId({ payload, current, client }) {
+  const debtorIdProvided = hasField(payload, "debtor_id");
+  const rawDebtorId = debtorIdProvided
+    ? normalizeOptionalId(payload.debtor_id)
+    : undefined;
+
+  if (debtorIdProvided) {
+    if (!rawDebtorId) return null;
+
+    const existing = await repository.findDebtorById(rawDebtorId, client);
+    if (!existing) {
+      throw new AppError("Data debitur tidak ditemukan", 404);
+    }
+
+    return existing.id;
+  }
+
+  const debtorPayload = getDebtorPayload(payload);
+  const hasDebtorData = Object.values(debtorPayload).some(
+    (value) => value !== undefined && value !== null,
+  );
+
+  if (!hasDebtorData) {
+    return current ? current.debtor_id : null;
+  }
+
+  let existing = null;
+  if (debtorPayload.debtor_number) {
+    existing = await repository.findDebtorByDebtorNumber(
+      debtorPayload.debtor_number,
+      client,
+    );
+  }
+
+  if (!existing && debtorPayload.identity_number) {
+    existing = await repository.findDebtorByIdentityNumber(
+      debtorPayload.identity_number,
+      client,
+    );
+  }
+
+  if (!existing && !debtorPayload.name) {
+    throw new AppError("Nama debitur wajib diisi", 422);
+  }
+
+  const debtorData = compactDefinedFields({
+    debtor_number: debtorPayload.debtor_number,
+    name: debtorPayload.name,
+    identity_number: debtorPayload.identity_number,
+    financing_number: debtorPayload.financing_number,
+    description: debtorPayload.description,
+  });
+
+  if (existing) {
+    const updated = await repository.updateDebtor(existing.id, debtorData, client);
+    return updated.id;
+  }
+
+  const created = await repository.createDebtor(debtorData, client);
+  return created.id;
+}
+
+async function resolveOwnershipData({ payload, current, userId, client }) {
+  const ownerUserProvided = hasField(payload, "owner_user_id");
+  const ownerDivisionProvided = hasField(payload, "owner_division_id");
+  const relatedUsersProvided = hasField(payload, "related_user_ids");
+
+  let ownerUserId = ownerUserProvided
+    ? normalizeOptionalId(payload.owner_user_id)
+    : current?.owner_user_id || userId;
+  let ownerDivisionId = ownerDivisionProvided
+    ? normalizeOptionalId(payload.owner_division_id)
+    : current?.owner_division_id || null;
+
+  let ownerUser = null;
+  if (ownerUserId) {
+    ownerUser = await repository.findUserById(ownerUserId, client);
+    if (!ownerUser) {
+      throw new AppError("PIC dokumen tidak ditemukan atau tidak aktif", 404);
+    }
+
+    if (!ownerDivisionProvided || !ownerDivisionId) {
+      ownerDivisionId = ownerUser.division_id;
+    }
+  }
+
+  if (ownerDivisionId) {
+    const division = await repository.findDivisionById(ownerDivisionId, client);
+    if (!division) {
+      throw new AppError("Divisi pemilik dokumen tidak ditemukan", 404);
+    }
+  }
+
+  if (
+    ownerUser &&
+    ownerDivisionId &&
+    ownerUser.division_id !== ownerDivisionId
+  ) {
+    throw new AppError(
+      "PIC dokumen harus berada di divisi pemilik dokumen",
+      422,
+    );
+  }
+
+  if (!ownerUserId && !ownerDivisionId) {
+    const creator = await repository.findUserById(userId, client);
+    ownerUserId = creator?.id || userId;
+    ownerDivisionId = creator?.division_id || null;
+  }
+
+  let relatedUserIds;
+  if (relatedUsersProvided) {
+    relatedUserIds = (normalizeUniqueIdArray(payload.related_user_ids) || []).filter(
+      (id) => id !== ownerUserId,
+    );
+
+    if (relatedUserIds.length) {
+      const users = await repository.findUsersByIds(relatedUserIds, client);
+      if (users.length !== relatedUserIds.length) {
+        throw new AppError(
+          "Sebagian user terkait tidak ditemukan atau tidak aktif",
+          404,
+        );
+      }
+    }
+  }
+
+  return {
+    owner_user_id: ownerUserId,
+    owner_division_id: ownerDivisionId,
+    related_user_ids: relatedUserIds,
+  };
+}
+
+function canManageDocument(document, scope, userId) {
+  if (!document || !userId) return false;
+  if (scope?.canAccessRestricted) return true;
+
+  return document.created_by === userId || document.owner_user_id === userId;
+}
+
 async function createDocumentWithGeneratedNumber({
   client,
   payload,
   storage,
   documentType,
+  ownership,
+  debtorId,
   userId,
 }) {
   const normalizedName = normalizeDocumentName(payload.document_name);
   const description = normalizeText(payload.description);
+  const documentDate =
+    parseOptionalDate(payload.document_date, "Tanggal dokumen") || null;
+  const dueDate =
+    parseOptionalDate(payload.due_date, "Tanggal jatuh tempo") || null;
   const storedFile = persistDigitalArchiveFile({
     entity: "documents",
     input: payload.file,
@@ -287,6 +732,11 @@ async function createDocumentWithGeneratedNumber({
           document_name: normalizedName,
           description,
           file: storedFile.storedPath,
+          owner_user_id: ownership.owner_user_id,
+          owner_division_id: ownership.owner_division_id,
+          debtor_id: debtorId,
+          document_date: documentDate,
+          due_date: dueDate,
           is_restricted: Boolean(payload.is_restricted),
           access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
           created_by: userId,
@@ -304,6 +754,12 @@ async function createDocumentWithGeneratedNumber({
       if (documentFilePayload) {
         await repository.createDocumentFile(documentFilePayload, client);
       }
+
+      await repository.replaceRelatedUsers(
+        created.id,
+        ownership.related_user_ids || [],
+        client,
+      );
 
       return created;
     } catch (error) {
@@ -410,13 +866,49 @@ exports.getAll = async ({ req, query, userId }) => {
   };
 };
 
+exports.getRequestable = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveAccessScope(userId);
+  const where = buildRequestableDocumentWhere(query, scope);
+
+  if (String(query.limit || "").toLowerCase() === "all") {
+    const data = await repository.findMany({ where });
+    return {
+      data: data.map((item) => serializeRequestableDocument(req, item)),
+    };
+  }
+
+  const page = parsePositiveInteger(query.page, 1);
+  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
+  const skip = (page - 1) * limit;
+
+  const data = await repository.findMany({
+    where,
+    skip,
+    take: limit,
+  });
+  const total = await repository.count(where);
+
+  return {
+    data: data.map((item) => serializeRequestableDocument(req, item)),
+    meta: {
+      total,
+      page,
+      lastPage: Math.ceil(total / limit),
+    },
+  };
+};
+
 exports.getById = async ({ req, id, userId }) => {
   const scope = await getDigitalArchiveAccessScope(userId);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
 
   const document = await repository.findById(id, {
-    deleted_at: null,
-    ...visibilityWhere,
+    AND: [
+      {
+        deleted_at: null,
+      },
+      visibilityWhere,
+    ].filter(isNonEmptyObject),
   });
 
   if (!document) {
@@ -433,8 +925,12 @@ exports.getActivityLogs = async ({ id, query, userId }) => {
   const scope = await getDigitalArchiveAccessScope(userId);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const document = await repository.findById(id, {
-    deleted_at: null,
-    ...visibilityWhere,
+    AND: [
+      {
+        deleted_at: null,
+      },
+      visibilityWhere,
+    ].filter(isNonEmptyObject),
   });
 
   if (!document) {
@@ -474,12 +970,25 @@ exports.create = async ({ req, payload, userId }) => {
       },
       client,
     );
+    const ownership = await resolveOwnershipData({
+      payload,
+      current: null,
+      userId,
+      client,
+    });
+    const debtorId = await resolveDebtorId({
+      payload,
+      current: null,
+      client,
+    });
 
     const document = await createDocumentWithGeneratedNumber({
       client,
       payload,
       storage,
       documentType,
+      ownership,
+      debtorId,
       userId,
     });
 
@@ -520,13 +1029,31 @@ exports.update = async ({ req, id, payload, userId }) => {
     throw new AppError("Dokumen tidak ditemukan", 404);
   }
 
-  if (current.created_by !== userId) {
-    throw new AppError("Hanya pembuat dokumen yang dapat mengubah data", 403);
+  const scope = await getDigitalArchiveAccessScope(userId);
+  if (!canManageDocument(current, scope, userId)) {
+    throw new AppError("Anda tidak memiliki akses untuk mengubah dokumen ini", 403);
   }
 
   const updated = await repository.withTransaction(async (client) => {
     let nextStorage = current.storage;
     let nextDocumentType = current.document_type;
+    const ownership = await resolveOwnershipData({
+      payload,
+      current,
+      userId,
+      client,
+    });
+    const debtorId = await resolveDebtorId({
+      payload,
+      current,
+      client,
+    });
+    const documentDate = hasField(payload, "document_date")
+      ? parseOptionalDate(payload.document_date, "Tanggal dokumen")
+      : current.document_date;
+    const dueDate = hasField(payload, "due_date")
+      ? parseOptionalDate(payload.due_date, "Tanggal jatuh tempo")
+      : current.due_date;
 
     if (payload.storage_id && payload.storage_id !== current.storage_id) {
       nextStorage = await repository.findStorageById(
@@ -572,6 +1099,11 @@ exports.update = async ({ req, id, payload, userId }) => {
         payload.description !== undefined
           ? normalizeText(payload.description)
           : current.description,
+      owner_user_id: ownership.owner_user_id,
+      owner_division_id: ownership.owner_division_id,
+      debtor_id: debtorId,
+      document_date: documentDate,
+      due_date: dueDate,
       is_restricted:
         payload.is_restricted !== undefined
           ? Boolean(payload.is_restricted)
@@ -594,9 +1126,24 @@ exports.update = async ({ req, id, payload, userId }) => {
       current.document_type_id !== updatePayload.document_type_id ||
       current.document_name !== updatePayload.document_name ||
       (current.description || null) !== (updatePayload.description || null) ||
+      current.owner_user_id !== updatePayload.owner_user_id ||
+      current.owner_division_id !== updatePayload.owner_division_id ||
+      current.debtor_id !== updatePayload.debtor_id ||
+      normalizeDateTime(current.document_date) !==
+        normalizeDateTime(updatePayload.document_date) ||
+      normalizeDateTime(current.due_date) !==
+        normalizeDateTime(updatePayload.due_date) ||
       current.is_restricted !== updatePayload.is_restricted;
 
     const result = await repository.update(id, updatePayload, client);
+
+    if (ownership.related_user_ids !== undefined) {
+      await repository.replaceRelatedUsers(
+        id,
+        ownership.related_user_ids,
+        client,
+      );
+    }
 
     if (fileChanged) {
       await repository.clearPrimaryDocumentFiles(id, client);
@@ -657,8 +1204,9 @@ exports.delete = async ({ id, userId }) => {
     throw new AppError("Dokumen tidak ditemukan", 404);
   }
 
-  if (current.created_by !== userId) {
-    throw new AppError("Hanya pembuat dokumen yang dapat menghapus data", 403);
+  const scope = await getDigitalArchiveAccessScope(userId);
+  if (!canManageDocument(current, scope, userId)) {
+    throw new AppError("Anda tidak memiliki akses untuk menghapus dokumen ini", 403);
   }
 
   const activeLoan = await repository.findActiveLoanConflict(id);

@@ -11,7 +11,7 @@ const {
 
 const DOCUMENT_TYPE_MENU_URL = "/dashboard/parameter/jenis-dokumen";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(DOCUMENT_TYPE_MENU_URL, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -19,7 +19,7 @@ router.post(
   validate(createDocumentTypeSchema),
   controller.create,
 );
-router.get("/:id", auth, controller.getById);
+router.get("/:id", auth, authorize(DOCUMENT_TYPE_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

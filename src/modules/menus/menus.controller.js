@@ -1,24 +1,47 @@
 const service = require("./menus.service");
 
+function resolveStatusCode(error, fallback = 400) {
+  return error.statusCode || fallback;
+}
+
 exports.getAll = async (req, res) => {
   try {
-    const result = await service.getAllMenus();
+    const result = await service.getAllMenus(req.user);
     return res.status(200).json({
       status: true,
       data: result,
-      message: "Success",
+      message: "Menu berhasil dimuat",
     });
   } catch (error) {
-    return res.status(400).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
+  }
+};
+
+exports.getAllForManagement = async (req, res) => {
+  try {
+    const result = await service.getAllMenusForManagement();
+    return res.status(200).json({
+      status: true,
+      data: result,
+      message: "Menu berhasil dimuat",
+    });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
 exports.getById = async (req, res) => {
   try {
-    const result = await service.getMenuById(req.params.id);
+    const result = await service.getMenuById(req.params.id, req.user);
     return res.status(200).json({ status: true, data: result });
   } catch (error) {
-    return res.status(400).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -28,10 +51,12 @@ exports.create = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Menu created successfully",
+      message: "Menu berhasil dibuat",
     });
-  } catch (err) {
-    return res.status(400).json({ status: false, message: err.message });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -40,11 +65,13 @@ exports.update = async (req, res) => {
     const result = await service.updateMenu(req.params.id, req.body);
     return res.status(200).json({
       status: true,
-      message: "Menu updated successfully",
+      message: "Menu berhasil diperbarui",
       data: result,
     });
-  } catch (err) {
-    return res.status(400).json({ status: false, message: err.message });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -53,8 +80,10 @@ exports.delete = async (req, res) => {
     await service.deleteMenu(req.params.id);
     return res
       .status(200)
-      .json({ status: true, message: "Menu deleted successfully", data: null });
+      .json({ status: true, message: "Menu berhasil dihapus", data: null });
   } catch (error) {
-    return res.status(500).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };

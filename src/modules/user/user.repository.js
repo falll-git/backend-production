@@ -22,6 +22,7 @@ function getUserSelect() {
       select: {
         id: true,
         name: true,
+        type: true,
       },
     },
     division: {
@@ -46,6 +47,44 @@ function getUserSelect() {
         expires_at: "desc",
       },
       take: 1,
+    },
+  };
+}
+
+function getAssignableUserSelect() {
+  return {
+    id: true,
+    role_id: true,
+    division_id: true,
+    name: true,
+    username: true,
+    email: true,
+    phone: true,
+    is_active: true,
+    onboarding_status: true,
+    password_set_at: true,
+    role: {
+      select: {
+        id: true,
+        name: true,
+        type: true,
+      },
+    },
+    division: {
+      select: {
+        id: true,
+        name: true,
+      },
+    },
+  };
+}
+
+function assignableUserWhere() {
+  return {
+    is_active: true,
+    onboarding_status: "ACTIVE",
+    password_set_at: {
+      not: null,
     },
   };
 }
@@ -93,12 +132,13 @@ exports.findByUsername = (username) => {
   });
 };
 
-exports.findActiveManagersByDivisionId = (divisionId, roleName = "Manajer") => {
+exports.findActiveManagersByDivisionId = (divisionId, roleName = "Manager") => {
   return prisma.users.findMany({
     where: {
+      ...assignableUserWhere(),
       division_id: divisionId,
-      is_active: true,
       role: {
+        type: "MAIN",
         name: {
           equals: roleName,
           mode: "insensitive",
@@ -112,8 +152,67 @@ exports.findActiveManagersByDivisionId = (divisionId, roleName = "Manajer") => {
       email: true,
       role_id: true,
       division_id: true,
+      role: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+        },
+      },
+      division: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
     orderBy: { name: "asc" },
+  });
+};
+
+exports.findAssignableUserById = (id) => {
+  return prisma.users.findFirst({
+    where: {
+      id,
+      ...assignableUserWhere(),
+    },
+    select: getAssignableUserSelect(),
+  });
+};
+
+exports.findAssignableDispositionRecipients = ({
+  search,
+  divisionId,
+  excludeUserId,
+  limit = 50,
+}) => {
+  const where = {
+    ...assignableUserWhere(),
+  };
+
+  if (divisionId) {
+    where.division_id = divisionId;
+  }
+
+  if (excludeUserId) {
+    where.id = {
+      not: excludeUserId,
+    };
+  }
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { username: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  return prisma.users.findMany({
+    where,
+    take: Math.max(Number(limit) || 50, 1),
+    orderBy: { name: "asc" },
+    select: getAssignableUserSelect(),
   });
 };
 

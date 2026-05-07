@@ -1,4 +1,3 @@
--- Auth/onboarding contract
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_onboarding_statuses') THEN
@@ -59,7 +58,6 @@ BEGIN
   END IF;
 END $$;
 
--- Masterdata business keys
 CREATE UNIQUE INDEX IF NOT EXISTS "roles_name_key" ON "roles"("name");
 CREATE UNIQUE INDEX IF NOT EXISTS "roles_name_lower_key" ON "roles"(LOWER(BTRIM("name")));
 
@@ -74,7 +72,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "document_types_code_lower_key" ON "document_t
 CREATE UNIQUE INDEX IF NOT EXISTS "document_types_name_key" ON "document_types"("name");
 CREATE UNIQUE INDEX IF NOT EXISTS "document_types_name_lower_key" ON "document_types"(LOWER(BTRIM("name")));
 
--- Relational menu tree and role menu lifecycle
 UPDATE "menus"
 SET "url" = ''
 WHERE "url" IS NULL;
@@ -123,7 +120,6 @@ SET "updated_at" = COALESCE("updated_at", "created_at", CURRENT_TIMESTAMP);
 ALTER TABLE "role_menus"
   ALTER COLUMN "updated_at" SET NOT NULL;
 
--- Storage hardening
 ALTER TABLE "storages"
   ALTER COLUMN "capacity" TYPE INTEGER
   USING CASE
@@ -141,7 +137,6 @@ BEGIN
   END IF;
 END $$;
 
--- Correspondence status/media enums
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'mail_workflow_statuses') THEN
@@ -245,7 +240,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "memorandums_memo_number_key" ON "memorandums"
 CREATE INDEX IF NOT EXISTS "memorandums_division_id_idx" ON "memorandums"("division_id");
 CREATE INDEX IF NOT EXISTS "memorandums_status_idx" ON "memorandums"("status");
 
--- Disposition lifecycle fields
 ALTER TABLE "incoming_mail_dispositions"
   ADD COLUMN IF NOT EXISTS "acted_at" TIMESTAMP(3),
   ADD COLUMN IF NOT EXISTS "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -268,7 +262,6 @@ SET "updated_at" = COALESCE("updated_at", "created_at", "disposed_at", CURRENT_T
 ALTER TABLE "memorandum_dispositions"
   ALTER COLUMN "updated_at" SET NOT NULL;
 
--- Digital archive access level, files, and active-process constraints
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'digital_document_access_levels') THEN
@@ -382,7 +375,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "digital_document_loans_active_document_key"
   ON "digital_document_loans"("document_id")
   WHERE "status" IN ('PENDING', 'APPROVED', 'BORROWED');
 
--- Storage activity logs: preserve the Prisma model name for backend compatibility, map DB table to storage_activity_logs.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'digital_document_activity_actions')

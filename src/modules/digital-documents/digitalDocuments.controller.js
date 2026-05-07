@@ -41,6 +41,28 @@ exports.getById = async (req, res) => {
   }
 };
 
+exports.getRequestable = async (req, res) => {
+  try {
+    const result = await service.getRequestable({
+      req,
+      query: req.query,
+      userId: req.user?.id,
+    });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
+
+    return successResponse(res, result.data);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 exports.getActivityLogs = async (req, res) => {
   try {
     const result = await service.getActivityLogs({

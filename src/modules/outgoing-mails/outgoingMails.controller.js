@@ -1,6 +1,10 @@
 const service = require("./outgoingMails.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
 
+function resolveStatusCode(error, fallback = 400) {
+  return error.statusCode || fallback;
+}
+
 exports.getAll = async (req, res) => {
   try {
     const result = await service.getAll({ req, query: req.query });
@@ -11,7 +15,9 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(400).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -20,7 +26,9 @@ exports.getById = async (req, res) => {
     const result = await service.getById({ req, id: req.params.id });
     return successResponse(res, result);
   } catch (error) {
-    return res.status(404).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 404))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -33,8 +41,10 @@ exports.create = async (req, res) => {
       data: result,
       message: "Surat keluar berhasil dibuat",
     });
-  } catch (err) {
-    return res.status(400).json({ status: false, message: err.message });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -52,8 +62,10 @@ exports.update = async (req, res) => {
       message: "Surat keluar berhasil diperbarui",
       data: result,
     });
-  } catch (err) {
-    return res.status(400).json({ status: false, message: err.message });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };
 
@@ -67,6 +79,8 @@ exports.delete = async (req, res) => {
       data: null,
     });
   } catch (error) {
-    return res.status(400).json({ status: false, message: error.message });
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
   }
 };

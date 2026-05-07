@@ -38,7 +38,7 @@ exports.create = async (req, res) => {
     const result = await service.createStorage(req.body);
     return res.status(201).json({
       status: true,
-      message: "Storage created successfully",
+      message: "Lokasi arsip berhasil dibuat.",
       data: result,
     });
   } catch (err) {
@@ -54,7 +54,7 @@ exports.update = async (req, res) => {
     const result = await service.updateStorage(req.params.id, req.body);
     return res.status(200).json({
       status: true,
-      message: "Storage updated successfully",
+      message: "Lokasi arsip berhasil diperbarui.",
       data: result,
     });
   } catch (err) {
@@ -68,7 +68,7 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     await service.deleteStorage(req.params.id);
-    successResponse(res, null, "Storage deleted successfully");
+    successResponse(res, null, "Lokasi arsip berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
       status: false,

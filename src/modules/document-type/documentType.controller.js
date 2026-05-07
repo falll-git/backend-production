@@ -39,7 +39,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Document type created successfully",
+      message: "Jenis dokumen berhasil dibuat.",
     });
   } catch (err) {
     return res.status(resolveStatusCode(err, 400)).json({
@@ -54,7 +54,7 @@ exports.update = async (req, res) => {
     const result = await service.updateDocumentType(req.params.id, req.body);
     return res.status(200).json({
       status: true,
-      message: "Document type updated successfully",
+      message: "Jenis dokumen berhasil diperbarui.",
       data: result,
     });
   } catch (err) {
@@ -68,7 +68,7 @@ exports.update = async (req, res) => {
 exports.delete = async (req, res) => {
   try {
     await service.deleteDocumentType(req.params.id);
-    successResponse(res, null, "Document type deleted successfully");
+    successResponse(res, null, "Jenis dokumen berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
       status: false,

@@ -11,7 +11,7 @@ const {
 
 const LETTER_PRIORITY_MENU_URL = "/dashboard/parameter/prioritas-surat";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(LETTER_PRIORITY_MENU_URL, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -19,7 +19,7 @@ router.post(
   validate(createLetterPrioritySchema),
   controller.create,
 );
-router.get("/:id", auth, controller.getById);
+router.get("/:id", auth, authorize(LETTER_PRIORITY_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

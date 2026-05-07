@@ -8,7 +8,7 @@ const { createUserSchema, updateUserSchema } = require("./user.validation");
 
 const USER_MENU_URL = "/dashboard/users";
 
-router.get("/", auth, controller.getAll);
+router.get("/", auth, authorize(USER_MENU_URL, "read"), controller.getAll);
 router.get("/me", auth, controller.getMe);
 router.post(
   "/",
@@ -23,7 +23,7 @@ router.post(
   authorize(USER_MENU_URL, "update"),
   controller.sendInvite,
 );
-router.get("/:id", auth, controller.getById);
+router.get("/:id", auth, authorize(USER_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

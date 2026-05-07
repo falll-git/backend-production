@@ -9,6 +9,10 @@ exports.getAll = async (req, res) => {
       userId: req.user?.id,
     });
 
+    if (!result.meta) {
+      return successResponse(res, result.data);
+    }
+
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(error.statusCode || 400).json({

@@ -8,7 +8,7 @@ module.exports = (schema, options = {}) => (req, res, next) => {
   if (error) {
     return res.status(422).json({
       success: false,
-      message: "Validation error",
+      message: "Data yang dikirim belum sesuai.",
       errors: error.details.map((err) => err.message),
     });
   }

@@ -6,6 +6,19 @@ const userSummarySelect = {
   email: true,
   role_id: true,
   division_id: true,
+  role: {
+    select: {
+      id: true,
+      name: true,
+      type: true,
+    },
+  },
+  division: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
 };
 
 const baseInclude = {
@@ -17,11 +30,17 @@ const baseInclude = {
     },
   },
   letter_prioritie: true,
-  division: true,
+  target_divisions: {
+    orderBy: { created_at: "asc" },
+    include: {
+      division: true,
+      manager: { select: userSummarySelect },
+    },
+  },
 };
 
-function loadById(id) {
-  return prisma.incoming_mails.findUnique({
+function loadById(id, client = prisma) {
+  return client.incoming_mails.findUnique({
     where: { id },
     include: baseInclude,
   });
@@ -45,25 +64,41 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.incoming_mails.findMany(query);
 };
 
-exports.count = (where) => prisma.incoming_mails.count({ where });
-
 exports.findById = (id) => {
-  return loadById(id);
+  return prisma.incoming_mails.findFirst({
+    where: { id, deleted_at: null },
+    include: baseInclude,
+  });
 };
 
-exports.createWithDisposition = async (data, dispositionsData) => {
-  const incomingMail = await prisma.incoming_mails.create({
-    data,
-  });
+exports.createWithDisposition = async (
+  data,
+  dispositionsData,
+  targetDivisionsData = [],
+) => {
+  return prisma.$transaction(async (tx) => {
+    const incomingMail = await tx.incoming_mails.create({
+      data,
+    });
 
-  await prisma.incoming_mail_dispositions.createMany({
-    data: dispositionsData.map((disposition) => ({
-      ...disposition,
-      incoming_mails_id: incomingMail.id,
-    })),
-  });
+    if (targetDivisionsData.length > 0) {
+      await tx.incoming_mail_target_divisions.createMany({
+        data: targetDivisionsData.map((target) => ({
+          ...target,
+          incoming_mails_id: incomingMail.id,
+        })),
+      });
+    }
 
-  return loadById(incomingMail.id);
+    await tx.incoming_mail_dispositions.createMany({
+      data: dispositionsData.map((disposition) => ({
+        ...disposition,
+        incoming_mails_id: incomingMail.id,
+      })),
+    });
+
+    return loadById(incomingMail.id, tx);
+  });
 };
 
 exports.update = async (id, data) => {
@@ -75,16 +110,14 @@ exports.update = async (id, data) => {
   return loadById(id);
 };
 
-exports.updateStoredFile = (id, file) => {
+exports.delete = (id, deleted_by) => {
   return prisma.incoming_mails.update({
     where: { id },
-    data: { file },
-  });
-};
-
-exports.delete = (id) => {
-  return prisma.incoming_mails.delete({
-    where: { id },
+    data: {
+      deleted_by,
+      deleted_at: new Date(),
+    },
+    include: baseInclude,
   });
 };
 

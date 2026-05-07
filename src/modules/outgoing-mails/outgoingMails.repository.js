@@ -32,8 +32,6 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.outgoing_mails.findMany(query);
 };
 
-exports.count = (where) => prisma.outgoing_mails.count({ where });
-
 exports.findById = (id) => {
   return prisma.outgoing_mails.findFirst({
     where: { id, deleted_at: null },
@@ -56,13 +54,6 @@ exports.update = async (id, data) => {
   });
 
   return loadById(id);
-};
-
-exports.updateStoredFile = (id, file) => {
-  return prisma.outgoing_mails.update({
-    where: { id },
-    data: { file },
-  });
 };
 
 exports.delete = async (id, deleted_by) => {

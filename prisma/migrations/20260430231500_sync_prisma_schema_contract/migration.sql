@@ -1,6 +1,3 @@
--- Keep the deployed database contract aligned with prisma/schema.prisma.
--- This is a forward-only fix for columns/constraint names that were present in
--- the Prisma schema but missing from the migration history on a fresh database.
 
 ALTER TABLE "dispositions"
   ADD COLUMN IF NOT EXISTS "due_date" INTEGER;

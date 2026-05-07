@@ -1,4 +1,3 @@
--- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -13,7 +12,6 @@ CREATE TABLE "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "roles" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -23,7 +21,6 @@ CREATE TABLE "roles" (
     CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "divisions" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -33,7 +30,6 @@ CREATE TABLE "divisions" (
     CONSTRAINT "divisions_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "menus" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -47,7 +43,6 @@ CREATE TABLE "menus" (
     CONSTRAINT "menus_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "role_menus" (
     "id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
@@ -56,7 +51,6 @@ CREATE TABLE "role_menus" (
     CONSTRAINT "role_menus_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "storages" (
     "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
@@ -70,7 +64,6 @@ CREATE TABLE "storages" (
     CONSTRAINT "storages_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "document_types" (
     "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
@@ -83,7 +76,6 @@ CREATE TABLE "document_types" (
     CONSTRAINT "document_types_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
 CREATE TABLE "letter_priorities" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -93,20 +85,14 @@ CREATE TABLE "letter_priorities" (
     CONSTRAINT "letter_priorities_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
--- CreateIndex
 CREATE UNIQUE INDEX "role_menus_role_id_menu_id_key" ON "role_menus"("role_id", "menu_id");
 
--- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_division_id_fkey" FOREIGN KEY ("division_id") REFERENCES "divisions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
 ALTER TABLE "role_menus" ADD CONSTRAINT "role_menus_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
 ALTER TABLE "role_menus" ADD CONSTRAINT "role_menus_menu_id_fkey" FOREIGN KEY ("menu_id") REFERENCES "menus"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -36,13 +36,16 @@ model users {
   sent_memo_dispositions     memorandum_dispositions[] @relation("SenderMemoDisposition")
   received_memo_dispositions memorandum_dispositions[] @relation("ReceiverMemoDisposition")
 
-  created_incoming_mails incoming_mails[] @relation("IncomingMailsCreator")
-  updated_incoming_mails incoming_mails[] @relation("IncomingMailsUpdater")
-  deleted_incoming_mails incoming_mails[] @relation("IncomingMailsDeleter")
+  created_incoming_mails        incoming_mails[]                 @relation("IncomingMailsCreator")
+  updated_incoming_mails        incoming_mails[]                 @relation("IncomingMailsUpdater")
+  deleted_incoming_mails        incoming_mails[]                 @relation("IncomingMailsDeleter")
+  managed_incoming_mail_targets incoming_mail_target_divisions[] @relation("IncomingMailTargetManager")
 
   created_digital_documents           digital_documents[]                @relation("DigitalDocumentsCreator")
+  owned_digital_documents             digital_documents[]                @relation("DigitalDocumentsOwner")
   updated_digital_documents           digital_documents[]                @relation("DigitalDocumentsUpdater")
   deleted_digital_documents           digital_documents[]                @relation("DigitalDocumentsDeleter")
+  related_digital_documents           digital_document_related_users[]
   uploaded_document_files             document_files[]                   @relation("DocumentFileUploader")
   requested_digital_document_accesses digital_document_access_requests[] @relation("DigitalDocumentAccessRequester")
   owned_digital_document_accesses     digital_document_access_requests[] @relation("DigitalDocumentAccessOwner")
@@ -58,9 +61,10 @@ model users {
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
   deleted_outgoing_mails outgoing_mails[] @relation("OutgoingMailsDeleter")
 
-  created_memorandums memorandums[] @relation("MemorandumCreator")
-  updated_memorandums memorandums[] @relation("MemorandumUpdater")
-  deleted_memorandums memorandums[] @relation("MemorandumDeleter")
+  created_memorandums        memorandums[]                 @relation("MemorandumCreator")
+  updated_memorandums        memorandums[]                 @relation("MemorandumUpdater")
+  deleted_memorandums        memorandums[]                 @relation("MemorandumDeleter")
+  managed_memorandum_targets memorandum_target_divisions[] @relation("MemorandumTargetManager")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -119,6 +123,7 @@ enum digital_document_access_request_statuses {
 enum digital_document_loan_statuses {
   PENDING
   APPROVED
+  HANDED_OVER
   REJECTED
   BORROWED
   RETURNED
@@ -137,6 +142,11 @@ enum storage_activity_actions {
   LOAN_REJECTED
   LOAN_HANDED_OVER
   LOAN_RETURNED
+}
+
+enum role_types {
+  MAIN
+  ADDITIONAL
 }
 
 model auth_action_tokens {
@@ -172,20 +182,25 @@ model refresh_tokens {
 model roles {
   id          String       @id @default(uuid())
   name        String       @unique
+  type        role_types   @default(ADDITIONAL)
   users       users[]
   roles_menus role_menus[]
   created_at  DateTime     @default(now())
   updated_at  DateTime     @updatedAt
+
+  @@index([type])
 }
 
 model divisions {
-  id             String           @id @default(uuid())
-  name           String           @unique
-  users          users[]
-  incoming_mails incoming_mails[]
-  memorandums    memorandums[]
-  created_at     DateTime         @default(now())
-  updated_at     DateTime         @updatedAt
+  id                      String                           @id @default(uuid())
+  name                    String                           @unique
+  users                   users[]
+  incoming_mail_targets   incoming_mail_target_divisions[]
+  memorandums             memorandums[]
+  memorandum_targets      memorandum_target_divisions[]
+  owned_digital_documents digital_documents[]              @relation("DigitalDocumentsOwnerDivision")
+  created_at              DateTime                         @default(now())
+  updated_at              DateTime                         @updatedAt
 }
 
 model menus {
@@ -212,10 +227,11 @@ model role_menus {
   role_id String
   menu_id String
 
-  can_create Boolean @default(false)
-  can_read   Boolean @default(false)
-  can_update Boolean @default(false)
-  can_delete Boolean @default(false)
+  can_create Boolean  @default(false)
+  can_read   Boolean  @default(false)
+  can_update Boolean  @default(false)
+  can_delete Boolean  @default(false)
+  features   String[] @default([])
 
   role roles @relation(fields: [role_id], references: [id])
   menu menus @relation(fields: [menu_id], references: [id])
@@ -291,7 +307,6 @@ model letter_priorities {
 model incoming_mails {
   id                  String                 @id @default(uuid())
   letter_prioritie_id String
-  division_id         String
   name                String
   receive_date        DateTime
   address             String
@@ -307,23 +322,32 @@ model incoming_mails {
   updated_at          DateTime               @updatedAt
   deleted_at          DateTime?
   letter_prioritie    letter_priorities      @relation(fields: [letter_prioritie_id], references: [id])
-  division            divisions              @relation(fields: [division_id], references: [id])
   creator             users?                 @relation("IncomingMailsCreator", fields: [created_by], references: [id])
   updater             users?                 @relation("IncomingMailsUpdater", fields: [updated_by], references: [id])
   deleter             users?                 @relation("IncomingMailsDeleter", fields: [deleted_by], references: [id])
 
   disposition_mails incoming_mail_dispositions[]
+  target_divisions  incoming_mail_target_divisions[]
 
   @@index([letter_prioritie_id])
-  @@index([division_id])
   @@index([status])
 }
 
-model dispositions {
-  id         String   @id @default(uuid())
-  name       String
-  due_date   Int?
-  created_at DateTime @default(now())
+model incoming_mail_target_divisions {
+  id                String   @id @default(uuid())
+  incoming_mails_id String
+  division_id       String
+  manager_id        String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  incoming_mail incoming_mails @relation(fields: [incoming_mails_id], references: [id], onDelete: Cascade)
+  division      divisions      @relation(fields: [division_id], references: [id])
+  manager       users?         @relation("IncomingMailTargetManager", fields: [manager_id], references: [id], onDelete: SetNull)
+
+  @@unique([incoming_mails_id, division_id])
+  @@index([division_id])
+  @@index([manager_id])
 }
 
 model incoming_mail_dispositions {
@@ -354,38 +378,80 @@ model incoming_mail_dispositions {
 }
 
 model digital_documents {
-  id               String                         @id @default(uuid())
-  storage_id       String
-  is_restricted    Boolean                        @default(false)
-  access_level     digital_document_access_levels @default(NON_RESTRICT)
-  document_type_id String
-  document_number  String                         @unique
-  document_name    String
-  description      String?
-  file             String?
-  created_by       String
-  updated_by       String?
-  deleted_by       String?
-  created_at       DateTime                       @default(now())
-  updated_at       DateTime                       @updatedAt
-  deleted_at       DateTime?
+  id                String                         @id @default(uuid())
+  storage_id        String
+  owner_user_id     String?
+  owner_division_id String?
+  debtor_id         String?
+  is_restricted     Boolean                        @default(false)
+  access_level      digital_document_access_levels @default(NON_RESTRICT)
+  document_type_id  String
+  document_number   String                         @unique
+  document_name     String
+  description       String?
+  file              String?
+  document_date     DateTime?
+  due_date          DateTime?
+  created_by        String
+  updated_by        String?
+  deleted_by        String?
+  created_at        DateTime                       @default(now())
+  updated_at        DateTime                       @updatedAt
+  deleted_at        DateTime?
 
   storage       storages       @relation(fields: [storage_id], references: [id])
   document_type document_types @relation(fields: [document_type_id], references: [id])
 
-  creator users  @relation("DigitalDocumentsCreator", fields: [created_by], references: [id])
-  updater users? @relation("DigitalDocumentsUpdater", fields: [updated_by], references: [id])
-  deleter users? @relation("DigitalDocumentsDeleter", fields: [deleted_by], references: [id])
+  creator        users            @relation("DigitalDocumentsCreator", fields: [created_by], references: [id])
+  owner          users?           @relation("DigitalDocumentsOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  owner_division divisions?       @relation("DigitalDocumentsOwnerDivision", fields: [owner_division_id], references: [id], onDelete: SetNull)
+  debtor         digital_debtors? @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  updater        users?           @relation("DigitalDocumentsUpdater", fields: [updated_by], references: [id])
+  deleter        users?           @relation("DigitalDocumentsDeleter", fields: [deleted_by], references: [id])
 
   access_requests digital_document_access_requests[]
   loans           digital_document_loans[]
   document_files  document_files[]
+  related_users   digital_document_related_users[]
   activity_logs   digital_document_activity_logs[]
 
   @@index([storage_id])
+  @@index([owner_user_id])
+  @@index([owner_division_id])
+  @@index([debtor_id])
   @@index([document_type_id])
   @@index([created_by])
   @@index([access_level])
+  @@index([due_date])
+}
+
+model digital_debtors {
+  id               String              @id @default(uuid())
+  debtor_number    String?             @unique
+  name             String
+  identity_number  String?             @unique
+  financing_number String?
+  description      String?
+  documents        digital_documents[]
+  created_at       DateTime            @default(now())
+  updated_at       DateTime            @updatedAt
+
+  @@index([name])
+  @@index([financing_number])
+}
+
+model digital_document_related_users {
+  id          String   @id @default(uuid())
+  document_id String
+  user_id     String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  document digital_documents @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  user     users             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([document_id, user_id])
+  @@index([user_id])
 }
 
 model document_files {
@@ -525,16 +591,16 @@ model outgoing_mails {
 }
 
 model memorandums {
-  id            String                 @id @default(uuid())
-  division_id   String
-  memo_number   String                 @unique
-  memo_date     DateTime
-  received_date DateTime
-  due_date      DateTime?
-  regarding     String
-  description   String?
-  file          String?
-  status        mail_workflow_statuses @default(NEW)
+  id                 String                 @id @default(uuid())
+  origin_division_id String
+  memo_number        String                 @unique
+  memo_date          DateTime
+  received_date      DateTime
+  due_date           DateTime?
+  regarding          String
+  description        String?
+  file               String?
+  status             mail_workflow_statuses @default(NEW)
 
   created_by String?
   updated_by String?
@@ -543,16 +609,34 @@ model memorandums {
   updated_at DateTime  @updatedAt
   deleted_at DateTime?
 
-  division divisions @relation(fields: [division_id], references: [id])
+  origin_division divisions @relation(fields: [origin_division_id], references: [id])
 
   creator users? @relation("MemorandumCreator", fields: [created_by], references: [id])
   updater users? @relation("MemorandumUpdater", fields: [updated_by], references: [id])
   deleter users? @relation("MemorandumDeleter", fields: [deleted_by], references: [id])
 
-  dispositions memorandum_dispositions[]
+  dispositions     memorandum_dispositions[]
+  target_divisions memorandum_target_divisions[]
 
-  @@index([division_id])
+  @@index([origin_division_id])
   @@index([status])
+}
+
+model memorandum_target_divisions {
+  id             String   @id @default(uuid())
+  memorandums_id String
+  division_id    String
+  manager_id     String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  memorandum memorandums @relation(fields: [memorandums_id], references: [id], onDelete: Cascade)
+  division   divisions   @relation(fields: [division_id], references: [id])
+  manager    users?      @relation("MemorandumTargetManager", fields: [manager_id], references: [id], onDelete: SetNull)
+
+  @@unique([memorandums_id, division_id])
+  @@index([division_id])
+  @@index([manager_id])
 }
 
 model memorandum_dispositions {

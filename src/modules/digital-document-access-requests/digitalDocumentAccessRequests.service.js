@@ -7,6 +7,7 @@ const {
 const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
+  canScopeAccessDocument,
 } = require("../../utils/digital-archive-access");
 
 function normalizeText(value) {
@@ -184,14 +185,13 @@ function buildVisibilityWhere(scope, userId) {
 function canViewAccessRequest(item, scope, userId) {
   if (!item) return false;
   if (scope?.canAccessRestricted) return true;
-  if (!item.document?.is_restricted) return true;
   if (!userId) return false;
 
   return (
     item.requester_id === userId ||
     item.owner_id === userId ||
     item.acted_by === userId ||
-    item.document?.created_by === userId
+    canScopeAccessDocument(item.document, scope)
   );
 }
 
@@ -200,6 +200,14 @@ exports.getAll = async ({ req, query, userId }) => {
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
   };
+
+  if (String(query.limit || "").toLowerCase() === "all") {
+    const data = await repository.findMany({ where });
+    return {
+      data: data.map((item) => serializeDigitalDocumentAccessRequest(req, item)),
+    };
+  }
+
   const page = parsePositiveInteger(query.page, 1);
   const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
   const skip = (page - 1) * limit;
@@ -238,6 +246,7 @@ exports.create = async ({ req, payload, userId }) => {
 
   const documentIds = Array.from(new Set(payload.document_ids));
   const createdIds = [];
+  const requesterScope = await getDigitalArchiveAccessScope(userId);
 
   await repository.withTransaction(async (client) => {
     for (const documentId of documentIds) {
@@ -249,9 +258,9 @@ exports.create = async ({ req, payload, userId }) => {
         throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
       }
 
-      if (document.created_by === userId) {
+      if (canScopeAccessDocument(document, requesterScope)) {
         throw new AppError(
-          "Anda tidak dapat mengajukan akses untuk dokumen milik sendiri",
+          "Anda sudah memiliki akses ke dokumen yang diajukan",
           409,
         );
       }
@@ -288,7 +297,7 @@ exports.create = async ({ req, payload, userId }) => {
         {
           document_id: document.id,
           requester_id: userId,
-          owner_id: document.created_by,
+          owner_id: document.owner_user_id || document.created_by,
           request_reason: normalizeText(payload.request_reason),
         },
         client,

@@ -1,12 +1,17 @@
 const incomingMailService = require("../incoming-mail/incomingMail.service");
 const outgoingMailService = require("../outgoing-mails/outgoingMails.service");
 const memorandumService = require("../memorandum/memorandum.service");
+const { AppError } = require("../../utils/errors");
 const {
   buildReportSummary,
   toPrintableDocumentItems,
 } = require("../../utils/persuratan-serializer");
+const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
+const { resolveRequestUser, roleHasFeature } = require("../../utils/rbac");
 
 const ACTIVE_MY_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
+const REPORT_MENU_URL = "/dashboard/manajemen-surat/laporan";
+const PRINT_DOCUMENTS_MENU_URL = "/dashboard/manajemen-surat/cetak-dokumen";
 
 function normalizeKind(value) {
   const normalized = String(value || "all")
@@ -38,8 +43,12 @@ function normalizeKind(value) {
   return "all";
 }
 
-function normalizeScope(value) {
-  const normalized = String(value || "all")
+function hasScopeInput(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function normalizeScope(value, fallback = "my") {
+  const normalized = String(value || "")
     .trim()
     .toLowerCase();
 
@@ -48,12 +57,22 @@ function normalizeScope(value) {
     normalized === "mine" ||
     normalized === "me" ||
     normalized === "saya" ||
-    normalized === "laporan-saya"
+    normalized === "laporan-saya" ||
+    normalized === "cetak-saya"
   ) {
     return "my";
   }
 
-  return "all";
+  if (
+    normalized === "all" ||
+    normalized === "semua" ||
+    normalized === "laporan-semua" ||
+    normalized === "cetak-semua"
+  ) {
+    return "all";
+  }
+
+  return fallback;
 }
 
 function normalizeMyFilter(value, scope) {
@@ -61,7 +80,7 @@ function normalizeMyFilter(value, scope) {
     return "all";
   }
 
-  const normalized = String(value || "active")
+  const normalized = String(value || "all")
     .trim()
     .toLowerCase();
 
@@ -91,6 +110,26 @@ function normalizeMyFilter(value, scope) {
   }
 
   return "all";
+}
+
+function parseBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "ya"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "tidak"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
 }
 
 function stripPagination(query) {
@@ -161,12 +200,54 @@ function filterMemorandumRecordsForScope(records, { scope, myFilter, userId }) {
   );
 }
 
-function filterOutgoingRecordsForScope(records, { scope }) {
-  if (scope !== "my") {
+function filterPrintableRecords(records, onlyWithFile) {
+  if (!onlyWithFile) {
     return records;
   }
 
-  return [];
+  return records.filter((item) => Boolean(item.file_url || item.file));
+}
+
+function getDispositionBasedScopes(canReportAll) {
+  return canReportAll ? ["my", "all"] : ["my"];
+}
+
+function buildDocumentScopeMetadata({ kind, canReportAll }) {
+  const dispositionScopes = getDispositionBasedScopes(canReportAll);
+  const allDocumentScopes = {
+    incoming_mails: {
+      kind: "incoming-mail",
+      available_scopes: dispositionScopes,
+      scope_applies: true,
+      scope_basis: "disposition_receiver",
+    },
+    outgoing_mails: {
+      kind: "outgoing-mail",
+      available_scopes: ["all"],
+      scope_applies: false,
+      scope_basis: "document_collection",
+    },
+    memorandums: {
+      kind: "memorandum",
+      available_scopes: dispositionScopes,
+      scope_applies: true,
+      scope_basis: "disposition_receiver",
+    },
+  };
+
+  if (kind === "incoming-mail") {
+    return { incoming_mails: allDocumentScopes.incoming_mails };
+  }
+
+  if (kind === "outgoing-mail") {
+    return { outgoing_mails: allDocumentScopes.outgoing_mails };
+  }
+
+  if (kind === "memorandum") {
+    return { memorandums: allDocumentScopes.memorandums };
+  }
+
+  return allDocumentScopes;
 }
 
 function buildScopedQuery(query, scope, userId) {
@@ -181,9 +262,69 @@ function buildScopedQuery(query, scope, userId) {
   };
 }
 
-exports.getReport = async ({ req, query, userId }) => {
+async function resolveReportScope({
+  requestUser,
+  query,
+  kind,
+  scopeMenuUrl = REPORT_MENU_URL,
+}) {
+  const user = await resolveRequestUser(requestUser);
+  if (!user) {
+    throw new AppError("Sesi pengguna tidak valid.", 401);
+  }
+
+  if (kind === "outgoing-mail") {
+    return {
+      user,
+      scope: "all",
+      requested_scope: hasScopeInput(query.scope)
+        ? normalizeScope(query.scope, "all")
+        : null,
+      available_scopes: ["all"],
+      can_report_all: false,
+    };
+  }
+
+  const canReportAll = await roleHasFeature(
+    user.role_id,
+    scopeMenuUrl,
+    REPORT_ALL_FEATURE,
+  );
+  const requestedScope = hasScopeInput(query.scope)
+    ? normalizeScope(query.scope, "my")
+    : null;
+
+  if (requestedScope === "all" && !canReportAll) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk melihat laporan semua.",
+      403,
+    );
+  }
+
+  return {
+    user,
+    scope: requestedScope || "my",
+    requested_scope: requestedScope,
+    available_scopes: canReportAll ? ["my", "all"] : ["my"],
+    can_report_all: canReportAll,
+  };
+}
+
+exports.getReport = async ({
+  req,
+  query,
+  userId,
+  requestUser,
+  scopeMenuUrl = REPORT_MENU_URL,
+}) => {
   const kind = normalizeKind(query.kind);
-  const scope = normalizeScope(query.scope);
+  const scopeAccess = await resolveReportScope({
+    requestUser,
+    query,
+    kind,
+    scopeMenuUrl,
+  });
+  const scope = scopeAccess.scope;
   const myFilter = normalizeMyFilter(query.my_filter, scope);
   const listQuery = stripPagination(query);
   const scopedIncomingQuery = buildScopedQuery(listQuery, scope, userId);
@@ -214,9 +355,7 @@ exports.getReport = async ({ req, query, userId }) => {
     myFilter,
     userId,
   });
-  const filteredOutgoing = filterOutgoingRecordsForScope(outgoing.data, {
-    scope,
-  });
+  const filteredOutgoing = outgoing.data;
   const filteredMemorandums = filterMemorandumRecordsForScope(
     memorandums.data,
     {
@@ -229,7 +368,16 @@ exports.getReport = async ({ req, query, userId }) => {
   return {
     filters: {
       scope,
+      requested_scope: scopeAccess.requested_scope,
+      available_scopes: scopeAccess.available_scopes,
+      can_report_all: scopeAccess.can_report_all,
       my_filter: scope === "my" ? myFilter : null,
+      scope_applies_to:
+        kind === "outgoing-mail" ? [] : ["incoming_mails", "memorandums"],
+      document_scopes: buildDocumentScopeMetadata({
+        kind,
+        canReportAll: scopeAccess.can_report_all,
+      }),
     },
     summary: buildReportSummary({
       incoming: filteredIncoming,
@@ -244,18 +392,44 @@ exports.getReport = async ({ req, query, userId }) => {
   };
 };
 
-exports.getPrintableDocuments = async ({ req, query, userId }) => {
-  const report = await exports.getReport({ req, query, userId });
-  const onlyWithFile = String(query.only_with_file).toLowerCase() === "true";
+exports.getPrintableDocuments = async ({ req, query, userId, requestUser }) => {
+  const report = await exports.getReport({
+    req,
+    query,
+    userId,
+    requestUser,
+    scopeMenuUrl: PRINT_DOCUMENTS_MENU_URL,
+  });
+  const onlyWithFile = parseBoolean(query.only_with_file, true);
+  const printableIncoming = filterPrintableRecords(
+    report.records.incoming_mails,
+    onlyWithFile,
+  );
+  const printableOutgoing = filterPrintableRecords(
+    report.records.outgoing_mails,
+    onlyWithFile,
+  );
+  const printableMemorandums = filterPrintableRecords(
+    report.records.memorandums,
+    onlyWithFile,
+  );
 
   const items = toPrintableDocumentItems({
-    incoming: report.records.incoming_mails,
-    outgoing: report.records.outgoing_mails,
-    memorandums: report.records.memorandums,
-  }).filter((item) => (onlyWithFile ? Boolean(item.file_url) : true));
+    incoming: printableIncoming,
+    outgoing: printableOutgoing,
+    memorandums: printableMemorandums,
+  });
 
   return {
-    summary: report.summary,
+    filters: {
+      ...report.filters,
+      only_with_file: onlyWithFile,
+    },
+    summary: buildReportSummary({
+      incoming: printableIncoming,
+      outgoing: printableOutgoing,
+      memorandums: printableMemorandums,
+    }),
     total: items.length,
     items,
   };

@@ -120,6 +120,13 @@ function resolveStoredFilePath(storedPath) {
   return resolvedPath;
 }
 
+function isManagedStoredPath(storedPath) {
+  return (
+    typeof storedPath === "string" &&
+    storedPath.startsWith(`${PUBLIC_PREFIX}/`)
+  );
+}
+
 function deleteStoredFile(storedPath) {
   const resolvedPath = resolveStoredFilePath(storedPath);
   if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
@@ -127,6 +134,16 @@ function deleteStoredFile(storedPath) {
   try {
     fs.unlinkSync(resolvedPath);
   } catch {}
+}
+
+function deleteReplacedStoredFile(previousPath, nextPath) {
+  if (
+    previousPath &&
+    previousPath !== nextPath &&
+    isManagedStoredPath(previousPath)
+  ) {
+    deleteStoredFile(previousPath);
+  }
 }
 
 function deriveDocumentFileName(storedPath, fallbackBaseName = "dokumen") {
@@ -184,6 +201,7 @@ function parseRequestFileInput(input) {
       buffer: null,
       fileName: null,
       mimeType: inferMimeTypeFromFileName(storedPath),
+      isNewUpload: false,
     };
   }
 
@@ -205,6 +223,7 @@ function parseRequestFileInput(input) {
           input.type ||
           input.mimetype ||
           null,
+        isNewUpload: true,
       };
     }
 
@@ -218,6 +237,7 @@ function parseRequestFileInput(input) {
         buffer: null,
         fileName: null,
         mimeType: inferMimeTypeFromFileName(storedPath),
+        isNewUpload: false,
       };
     }
   }
@@ -267,6 +287,7 @@ function persistPersuratanFile({
         ? deriveDocumentFileName(previousPath, fallbackBaseName)
         : null,
       mimeType: null,
+      isNewUpload: false,
     };
   }
 
@@ -275,26 +296,20 @@ function persistPersuratanFile({
       storedPath: parsed.storedPath,
       fileName: deriveDocumentFileName(parsed.storedPath, fallbackBaseName),
       mimeType: parsed.mimeType,
+      isNewUpload: false,
     };
   }
 
-  const stored = persistFile({
-    entity,
-    buffer: parsed.buffer,
-    fileName: parsed.fileName,
-    mimeType: parsed.mimeType,
-    fallbackBaseName,
-  });
-
-  if (
-    previousPath &&
-    previousPath !== stored.storedPath &&
-    previousPath.startsWith(PUBLIC_PREFIX)
-  ) {
-    deleteStoredFile(previousPath);
-  }
-
-  return stored;
+  return {
+    ...persistFile({
+      entity,
+      buffer: parsed.buffer,
+      fileName: parsed.fileName,
+      mimeType: parsed.mimeType,
+      fallbackBaseName,
+    }),
+    isNewUpload: true,
+  };
 }
 
 module.exports = {
@@ -302,6 +317,7 @@ module.exports = {
   STORAGE_ROOT,
   PUBLIC_PREFIX,
   buildFileUrl,
+  deleteReplacedStoredFile,
   deleteStoredFile,
   deriveDocumentFileName,
   normalizeStoredPath,

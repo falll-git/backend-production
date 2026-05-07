@@ -11,7 +11,12 @@ exports.getAll = async (req, res) => {
     const limit = Number(req.query.limit) || 10;
     const role_id = req.query.role_id || null;
 
-    const result = await service.getRoleMenus({ page, limit, role_id });
+    const result = await service.getRoleMenus({
+      page,
+      limit,
+      role_id,
+      requestUser: req.user,
+    });
     paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
@@ -23,7 +28,7 @@ exports.getAll = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    const result = await service.getRoleMenuById(req.params.id);
+    const result = await service.getRoleMenuById(req.params.id, req.user);
     successResponse(res, result);
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({

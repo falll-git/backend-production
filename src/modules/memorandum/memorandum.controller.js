@@ -1,6 +1,10 @@
 const service = require("./memorandum.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
 
+function resolveStatusCode(error, fallback = 400) {
+  return error.statusCode || fallback;
+}
+
 exports.getAll = async (req, res) => {
   try {
     const result = await service.getMemorandums({
@@ -15,8 +19,58 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(400).json({
-      success: false,
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getInitialManager = async (req, res) => {
+  try {
+    const result = await service.getInitialManager({
+      divisionId: req.query.target_division_id ?? req.query.division_id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getInitialManagers = async (req, res) => {
+  try {
+    const result = await service.getInitialManagers({
+      divisionIds:
+        req.query.target_division_ids ??
+        req.query.target_division_id ??
+        req.query.division_ids ??
+        req.query.division_id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getDispositionRecipients = async (req, res) => {
+  try {
+    const result = await service.getDispositionRecipients({
+      query: req.query,
+      currentUserId: req.user.id,
+    });
+
+    return successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
       message: error.message,
     });
   }
@@ -27,7 +81,7 @@ exports.getById = async (req, res) => {
     const result = await service.getMemorandumById({ req, id: req.params.id });
     return successResponse(res, result);
   } catch (error) {
-    return res.status(404).json({
+    return res.status(resolveStatusCode(error, 404)).json({
       status: false,
       message: error.message,
     });
@@ -47,10 +101,10 @@ exports.createWithDisposition = async (req, res) => {
       data: result,
       message: "Memorandum beserta disposisi awal ke manajer berhasil dibuat",
     });
-  } catch (err) {
-    return res.status(400).json({
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
-      message: err.message,
+      message: error.message,
     });
   }
 };
@@ -69,10 +123,10 @@ exports.update = async (req, res) => {
       message: "Memorandum berhasil diperbarui",
       data: result,
     });
-  } catch (err) {
-    return res.status(400).json({
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
-      message: err.message,
+      message: error.message,
     });
   }
 };
@@ -83,7 +137,7 @@ exports.delete = async (req, res) => {
     await service.deleteMemorandum(req.params.id, userId);
     return successResponse(res, null, "Memorandum berhasil dihapus");
   } catch (error) {
-    return res.status(400).json({
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });
@@ -103,10 +157,10 @@ exports.redispose = async (req, res) => {
       data: result,
       message: "Redisposisi memorandum berhasil ditambahkan",
     });
-  } catch (err) {
-    return res.status(400).json({
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
-      message: err.message,
+      message: error.message,
     });
   }
 };
@@ -124,10 +178,10 @@ exports.complete = async (req, res) => {
       data: result,
       message: "Memorandum berhasil ditandai selesai",
     });
-  } catch (err) {
-    return res.status(400).json({
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
-      message: err.message,
+      message: error.message,
     });
   }
 };
@@ -147,10 +201,10 @@ exports.updateDispositionStatus = async (req, res) => {
       data: result,
       message: "Status disposisi memorandum berhasil diperbarui",
     });
-  } catch (err) {
-    return res.status(400).json({
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
       status: false,
-      message: err.message,
+      message: error.message,
     });
   }
 };

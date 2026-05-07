@@ -5,7 +5,6 @@ const {
 } = require("../../utils/digital-archive-access");
 const {
   serializeDigitalDocumentActivityLog,
-  serializeStorageSummary,
 } = require("../../utils/digital-archive-serializer");
 const digitalDocumentService = require("../digital-documents/digitalDocuments.service");
 const accessRequestService = require("../digital-document-access-requests/digitalDocumentAccessRequests.service");
@@ -14,6 +13,21 @@ const loanService = require("../digital-document-loans/digitalDocumentLoans.serv
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function isNonEmptyObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length > 0,
+  );
+}
+
+function andWhere(...clauses) {
+  return {
+    AND: clauses.filter(isNonEmptyObject),
+  };
 }
 
 function buildRackIdentityMaps(offices) {
@@ -72,10 +86,12 @@ async function loadStorageSummaryData(scope) {
 
   const offices = await loadStorageHierarchy();
   const documents = await prisma.digital_documents.findMany({
-    where: {
-      deleted_at: null,
-      ...visibilityWhere,
-    },
+    where: andWhere(
+      {
+        deleted_at: null,
+      },
+      visibilityWhere,
+    ),
     select: {
       id: true,
       storage_id: true,
@@ -86,10 +102,12 @@ async function loadStorageSummaryData(scope) {
     await prisma.digital_document_access_requests.findMany({
       where: {
         status: "PENDING",
-        document: {
-          deleted_at: null,
-          ...visibilityWhere,
-        },
+        document: andWhere(
+          {
+            deleted_at: null,
+          },
+          visibilityWhere,
+        ),
       },
       select: {
         document: {
@@ -102,11 +120,15 @@ async function loadStorageSummaryData(scope) {
 
   const borrowedLoans = await prisma.digital_document_loans.findMany({
     where: {
-      status: "BORROWED",
-      document: {
-        deleted_at: null,
-        ...visibilityWhere,
+      status: {
+        in: ["HANDED_OVER", "BORROWED"],
       },
+      document: andWhere(
+        {
+          deleted_at: null,
+        },
+        visibilityWhere,
+      ),
     },
     select: {
       requested_due_date: true,
@@ -242,10 +264,12 @@ function buildStorageSummaryResponse({
 
 function buildActivityWhere(query, visibilityWhere) {
   const where = {
-    document: {
-      deleted_at: null,
-      ...visibilityWhere,
-    },
+    document: andWhere(
+      {
+        deleted_at: null,
+      },
+      visibilityWhere,
+    ),
   };
 
   if (query.action) {
@@ -365,6 +389,176 @@ exports.getStorageSummary = async ({ userId }) => {
   return buildStorageSummaryResponse(data);
 };
 
+exports.getReportSummary = async ({ userId }) => {
+  const scope = await getDigitalArchiveAccessScope(userId);
+  const visibilityWhere = buildDocumentVisibilityWhere(scope);
+  const documentWhere = andWhere(
+    {
+      deleted_at: null,
+    },
+    visibilityWhere,
+  );
+  const now = new Date();
+  const nextThirtyDays = new Date();
+  nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
+
+  const documentCount = (extraWhere = {}) =>
+    prisma.digital_documents.count({
+      where: andWhere(
+        {
+          deleted_at: null,
+        },
+        visibilityWhere,
+        extraWhere,
+      ),
+    });
+  const accessCount = (status) =>
+    prisma.digital_document_access_requests.count({
+      where: {
+        status,
+        document: documentWhere,
+      },
+    });
+  const loanCount = (status) =>
+    prisma.digital_document_loans.count({
+      where: {
+        status,
+        document: documentWhere,
+      },
+    });
+
+  const [
+    totalDocuments,
+    restrictedDocuments,
+    debtorDocuments,
+    dueSoonDocuments,
+    overdueDocuments,
+    pendingAccessRequests,
+    approvedAccessRequests,
+    rejectedAccessRequests,
+    pendingLoans,
+    approvedLoans,
+    handedOverLoans,
+    borrowedLoans,
+    returnedLoans,
+    rejectedLoans,
+    overdueLoans,
+    storageSummary,
+  ] = await Promise.all([
+    documentCount(),
+    documentCount({ is_restricted: true }),
+    documentCount({
+      debtor_id: {
+        not: null,
+      },
+    }),
+    documentCount({
+      due_date: {
+        gte: now,
+        lte: nextThirtyDays,
+      },
+    }),
+    documentCount({
+      due_date: {
+        lt: now,
+      },
+    }),
+    accessCount("PENDING"),
+    accessCount("APPROVED"),
+    accessCount("REJECTED"),
+    loanCount("PENDING"),
+    loanCount("APPROVED"),
+    loanCount("HANDED_OVER"),
+    loanCount("BORROWED"),
+    loanCount("RETURNED"),
+    loanCount("REJECTED"),
+    prisma.digital_document_loans.count({
+      where: {
+        status: {
+          in: ["HANDED_OVER", "BORROWED"],
+        },
+        requested_due_date: {
+          lt: now,
+        },
+        document: documentWhere,
+      },
+    }),
+    exports.getStorageSummary({ userId }),
+  ]);
+
+  return {
+    scope: {
+      user_id: scope.userId,
+      role_name: scope.roleName,
+      division_id: scope.divisionId,
+      division_name: scope.divisionName,
+      can_view_division_documents: scope.canAccessDivisionDocuments,
+      can_view_all_documents: scope.canAccessRestricted,
+    },
+    documents: {
+      total: totalDocuments,
+      restricted: restrictedDocuments,
+      non_restricted: totalDocuments - restrictedDocuments,
+      linked_to_debtor: debtorDocuments,
+      due_soon: dueSoonDocuments,
+      overdue: overdueDocuments,
+    },
+    access_requests: {
+      pending: pendingAccessRequests,
+      approved: approvedAccessRequests,
+      rejected: rejectedAccessRequests,
+    },
+    loans: {
+      pending: pendingLoans,
+      approved: approvedLoans,
+      handed_over: handedOverLoans,
+      borrowed: borrowedLoans,
+      returned: returnedLoans,
+      rejected: rejectedLoans,
+      overdue: overdueLoans,
+    },
+    storage: {
+      offices: storageSummary.offices.length,
+      cabinets: storageSummary.cabinets.length,
+      racks: storageSummary.racks.length,
+      used_racks: storageSummary.racks.filter(
+        (item) => item.total_documents > 0,
+      ).length,
+    },
+  };
+};
+
+exports.getDocumentReport = async ({ req, query, userId }) => {
+  return digitalDocumentService.getAll({
+    req,
+    query,
+    userId,
+  });
+};
+
+exports.getStorageReport = async ({ userId }) => {
+  return exports.getStorageSummary({ userId });
+};
+
+exports.getDueDateReport = async ({ req, query, userId }) => {
+  return digitalDocumentService.getAll({
+    req,
+    query: {
+      ...query,
+      has_due_date: query.has_due_date || "true",
+    },
+    userId,
+  });
+};
+
+exports.getAccessRequestReport = async ({ req, query, userId }) => {
+  return accessRequestService.getAll({
+    req,
+    query,
+    userId,
+  });
+};
+
 exports.getOfficeCabinets = async ({ officeId, userId }) => {
   const summary = await exports.getStorageSummary({ userId });
   return summary.cabinets.filter((item) => item.office_id === officeId);
@@ -390,6 +584,55 @@ exports.getStorageHistories = async ({ query, userId }) => {
   const scope = await getDigitalArchiveAccessScope(userId);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const where = buildActivityWhere(query, visibilityWhere);
+
+  if (String(query.limit || "").toLowerCase() === "all") {
+    const data = await prisma.digital_document_activity_logs.findMany({
+      where,
+      orderBy: {
+        created_at: "desc",
+      },
+      include: {
+        actor: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            email: true,
+          },
+        },
+        document: {
+          select: {
+            id: true,
+            document_number: true,
+            document_name: true,
+          },
+        },
+        from_storage: {
+          include: {
+            cabinet: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        },
+        to_storage: {
+          include: {
+            cabinet: {
+              include: {
+                office: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      data: data.map(serializeDigitalDocumentActivityLog),
+    };
+  }
+
   const page = parsePositiveInteger(query.page, 1);
   const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
   const skip = (page - 1) * limit;

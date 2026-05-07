@@ -5,6 +5,10 @@ const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const controller = require("./digitalDocumentAccessRequests.controller");
 const {
+  APPROVE_FEATURE,
+  REJECT_FEATURE,
+} = require("../../utils/menu-access");
+const {
   approveAccessRequestSchema,
   createAccessRequestSchema,
   rejectAccessRequestSchema,
@@ -16,6 +20,7 @@ const ACCESS_REQUEST_READ_URLS = [
   "/dashboard/arsip-digital/disposisi/pengajuan",
   "/dashboard/arsip-digital/disposisi/permintaan",
   "/dashboard/arsip-digital/disposisi/historis",
+  "/dashboard/arsip-digital/laporan",
 ];
 const ACCESS_REQUEST_CREATE_URL = "/dashboard/arsip-digital/disposisi/pengajuan";
 const ACCESS_REQUEST_ACTION_URL = "/dashboard/arsip-digital/disposisi/permintaan";
@@ -32,14 +37,14 @@ router.get("/:id", auth, authorize(ACCESS_REQUEST_READ_URLS, "read"), controller
 router.patch(
   "/:id/approve",
   auth,
-  authorize(ACCESS_REQUEST_ACTION_URL, "update"),
+  authorize(ACCESS_REQUEST_ACTION_URL, "update", { feature: APPROVE_FEATURE }),
   validate(approveAccessRequestSchema),
   controller.approve,
 );
 router.patch(
   "/:id/reject",
   auth,
-  authorize(ACCESS_REQUEST_ACTION_URL, "update"),
+  authorize(ACCESS_REQUEST_ACTION_URL, "update", { feature: REJECT_FEATURE }),
   validate(rejectAccessRequestSchema),
   controller.reject,
 );
