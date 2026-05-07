@@ -3,7 +3,7 @@ ALTER TYPE "digital_document_loan_statuses" ADD VALUE IF NOT EXISTS 'HANDED_OVER
 DROP INDEX IF EXISTS "digital_document_loans_active_document_key";
 CREATE UNIQUE INDEX IF NOT EXISTS "digital_document_loans_active_document_key"
     ON "digital_document_loans"("document_id")
-    WHERE "status"::text IN ('PENDING', 'APPROVED', 'HANDED_OVER', 'BORROWED');
+    WHERE "status" IN ('PENDING', 'APPROVED', 'HANDED_OVER', 'BORROWED');
 
 CREATE TABLE IF NOT EXISTS "digital_debtors" (
     "id" TEXT NOT NULL,
