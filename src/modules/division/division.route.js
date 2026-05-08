@@ -10,8 +10,14 @@ const {
 } = require("./division.validation");
 
 const DIVISION_MENU_URL = "/dashboard/parameter/divisi";
+const DIGITAL_DOCUMENT_INPUT_MENU_URL =
+  "/dashboard/arsip-digital/input-dokumen";
+const DIVISION_READ_MENU_URLS = [
+  DIVISION_MENU_URL,
+  DIGITAL_DOCUMENT_INPUT_MENU_URL,
+];
 
-router.get("/", auth, authorize(DIVISION_MENU_URL, "read"), controller.getAll);
+router.get("/", auth, authorize(DIVISION_READ_MENU_URLS, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -19,7 +25,7 @@ router.post(
   validate(createDivisionSchema),
   controller.create,
 );
-router.get("/:id", auth, authorize(DIVISION_MENU_URL, "read"), controller.getById);
+router.get("/:id", auth, authorize(DIVISION_READ_MENU_URLS, "read"), controller.getById);
 router.put(
   "/:id",
   auth,
