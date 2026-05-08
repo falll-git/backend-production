@@ -12,9 +12,15 @@ const {
 const DIVISION_MENU_URL = "/dashboard/parameter/divisi";
 const DIGITAL_DOCUMENT_INPUT_MENU_URL =
   "/dashboard/arsip-digital/input-dokumen";
+const INCOMING_MAIL_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
+const MEMORANDUM_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 const DIVISION_READ_MENU_URLS = [
   DIVISION_MENU_URL,
   DIGITAL_DOCUMENT_INPUT_MENU_URL,
+  INCOMING_MAIL_MENU_URL,
+  MEMORANDUM_MENU_URL,
 ];
 
 router.get("/", auth, authorize(DIVISION_READ_MENU_URLS, "read"), controller.getAll);

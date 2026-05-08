@@ -10,8 +10,22 @@ const {
 } = require("./letterPriority.validation");
 
 const LETTER_PRIORITY_MENU_URL = "/dashboard/parameter/prioritas-surat";
+const INCOMING_MAIL_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
+const OUTGOING_MAIL_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar";
+const LETTER_PRIORITY_READ_MENU_URLS = [
+  LETTER_PRIORITY_MENU_URL,
+  INCOMING_MAIL_MENU_URL,
+  OUTGOING_MAIL_MENU_URL,
+];
 
-router.get("/", auth, authorize(LETTER_PRIORITY_MENU_URL, "read"), controller.getAll);
+router.get(
+  "/",
+  auth,
+  authorize(LETTER_PRIORITY_READ_MENU_URLS, "read"),
+  controller.getAll,
+);
 router.post(
   "/",
   auth,
@@ -19,7 +33,12 @@ router.post(
   validate(createLetterPrioritySchema),
   controller.create,
 );
-router.get("/:id", auth, authorize(LETTER_PRIORITY_MENU_URL, "read"), controller.getById);
+router.get(
+  "/:id",
+  auth,
+  authorize(LETTER_PRIORITY_READ_MENU_URLS, "read"),
+  controller.getById,
+);
 router.put(
   "/:id",
   auth,
