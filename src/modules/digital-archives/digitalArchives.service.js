@@ -3,12 +3,16 @@ const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
 } = require("../../utils/digital-archive-access");
+const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
+const { roleHasFeature } = require("../../utils/rbac");
 const {
   serializeDigitalDocumentActivityLog,
 } = require("../../utils/digital-archive-serializer");
 const digitalDocumentService = require("../digital-documents/digitalDocuments.service");
 const accessRequestService = require("../digital-document-access-requests/digitalDocumentAccessRequests.service");
 const loanService = require("../digital-document-loans/digitalDocumentLoans.service");
+
+const DIGITAL_ARCHIVE_REPORT_URL = "/dashboard/arsip-digital/laporan";
 
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -27,6 +31,21 @@ function isNonEmptyObject(value) {
 function andWhere(...clauses) {
   return {
     AND: clauses.filter(isNonEmptyObject),
+  };
+}
+
+async function getDigitalArchiveReportScope(userId) {
+  const scope = await getDigitalArchiveAccessScope(userId);
+  const canReportAll = await roleHasFeature(
+    scope.roleId,
+    DIGITAL_ARCHIVE_REPORT_URL,
+    REPORT_ALL_FEATURE,
+  );
+
+  return {
+    ...scope,
+    canReportAll,
+    canAccessRestricted: Boolean(scope.canAccessRestricted || canReportAll),
   };
 }
 
@@ -383,14 +402,14 @@ function buildActivityWhere(query, visibilityWhere) {
   return where;
 }
 
-exports.getStorageSummary = async ({ userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+exports.getStorageSummary = async ({ userId, scopeOverride = null }) => {
+  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const data = await loadStorageSummaryData(scope);
   return buildStorageSummaryResponse(data);
 };
 
 exports.getReportSummary = async ({ userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveReportScope(userId);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const documentWhere = andWhere(
     {
@@ -483,7 +502,7 @@ exports.getReportSummary = async ({ userId }) => {
         document: documentWhere,
       },
     }),
-    exports.getStorageSummary({ userId }),
+    exports.getStorageSummary({ userId, scopeOverride: scope }),
   ]);
 
   return {
@@ -494,6 +513,7 @@ exports.getReportSummary = async ({ userId }) => {
       division_name: scope.divisionName,
       can_view_division_documents: scope.canAccessDivisionDocuments,
       can_view_all_documents: scope.canAccessRestricted,
+      can_report_all: Boolean(scope.canReportAll),
     },
     documents: {
       total: totalDocuments,
@@ -529,18 +549,24 @@ exports.getReportSummary = async ({ userId }) => {
 };
 
 exports.getDocumentReport = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveReportScope(userId);
+
   return digitalDocumentService.getAll({
     req,
     query,
     userId,
+    scopeOverride: scope,
   });
 };
 
 exports.getStorageReport = async ({ userId }) => {
-  return exports.getStorageSummary({ userId });
+  const scope = await getDigitalArchiveReportScope(userId);
+  return exports.getStorageSummary({ userId, scopeOverride: scope });
 };
 
 exports.getDueDateReport = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveReportScope(userId);
+
   return digitalDocumentService.getAll({
     req,
     query: {
@@ -548,14 +574,18 @@ exports.getDueDateReport = async ({ req, query, userId }) => {
       has_due_date: query.has_due_date || "true",
     },
     userId,
+    scopeOverride: scope,
   });
 };
 
 exports.getAccessRequestReport = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveReportScope(userId);
+
   return accessRequestService.getAll({
     req,
     query,
     userId,
+    scopeOverride: scope,
   });
 };
 
@@ -715,10 +745,13 @@ exports.getLoanHistories = async ({ req, query, userId }) => {
 };
 
 exports.getLoanReport = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveReportScope(userId);
+
   return loanService.getAll({
     req,
     query,
     userId,
+    scopeOverride: scope,
   });
 };
 

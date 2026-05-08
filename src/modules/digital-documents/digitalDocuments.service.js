@@ -834,8 +834,8 @@ async function hydrateDocumentMetrics(document) {
   };
 }
 
-exports.getAll = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
+  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const where = buildDocumentWhere(query, scope);
 
   if (String(query.limit || "").toLowerCase() === "all") {
