@@ -229,8 +229,8 @@ function validateLoanRequestDates(payload) {
   }
 }
 
-exports.getAll = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
+  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
   };
