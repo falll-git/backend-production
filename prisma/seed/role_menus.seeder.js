@@ -193,6 +193,7 @@ const ROLE_MENU_POLICIES = {
   Supervisor: [
     { url: URLS.dashboard, permissions: ["read"] },
 
+    { url: URLS.archiveInput, permissions: ["create", "read"] },
     { url: URLS.archiveStorage, permissions: ["read"] },
     { url: URLS.archiveList, permissions: ["read"] },
     { url: URLS.archiveDueDate, permissions: ["read"] },
