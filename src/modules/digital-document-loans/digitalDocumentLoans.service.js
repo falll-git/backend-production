@@ -1,6 +1,5 @@
 const repository = require("./digitalDocumentLoans.repository");
 const digitalDocumentRepository = require("../digital-documents/digitalDocuments.repository");
-const prisma = require("../../config/prisma");
 const { AppError } = require("../../utils/errors");
 const {
   serializeDigitalDocumentLoan,
@@ -9,8 +8,16 @@ const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
   canScopeAccessDocument,
-  isLegalIdentity,
 } = require("../../utils/digital-archive-access");
+const {
+  APPROVE_FEATURE,
+  HANDOVER_FEATURE,
+  REJECT_FEATURE,
+  RETURN_FEATURE,
+} = require("../../utils/menu-access");
+const { roleHasFeature, roleHasPermission } = require("../../utils/rbac");
+
+const LOAN_ACTION_URL = "/dashboard/arsip-digital/peminjaman/accept";
 
 function normalizeText(value) {
   return String(value || "")
@@ -21,22 +28,6 @@ function normalizeText(value) {
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-async function assertLegalLoanActor(userId) {
-  const user = await prisma.users.findUnique({
-    where: {
-      id: userId,
-    },
-    include: {
-      role: true,
-      division: true,
-    },
-  });
-
-  if (!isLegalIdentity(user)) {
-    throw new AppError("Peminjaman fisik hanya dapat diproses oleh Legal", 403);
-  }
 }
 
 function buildSearchWhere(search) {
@@ -100,6 +91,10 @@ function buildWhere(query, userId) {
       };
       where.requested_due_date = {
         lt: new Date(),
+      };
+    } else if (status === "ACTIVE" || status === "AKTIF") {
+      where.status = {
+        in: ["HANDED_OVER", "BORROWED"],
       };
     } else {
       where.status = status;
@@ -229,6 +224,25 @@ function validateLoanRequestDates(payload) {
   }
 }
 
+async function assertLoanActionActor({ item, userId, feature }) {
+  const scope = await getDigitalArchiveAccessScope(userId);
+  const [canUpdate, hasFeature] = await Promise.all([
+    roleHasPermission(scope.roleId, LOAN_ACTION_URL, "update"),
+    roleHasFeature(scope.roleId, LOAN_ACTION_URL, feature),
+  ]);
+
+  if (!canUpdate || !hasFeature) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk memproses peminjaman fisik",
+      403,
+    );
+  }
+
+  if (!canScopeAccessDocument(item.document, scope)) {
+    throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
+  }
+}
+
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const where = {
@@ -354,12 +368,17 @@ exports.approve = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
-  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
+
+  await assertLoanActionActor({
+    item,
+    userId,
+    feature: APPROVE_FEATURE,
+  });
 
   if (item.status !== "PENDING") {
     throw new AppError("Peminjaman dokumen sudah diproses", 409);
@@ -399,12 +418,17 @@ exports.reject = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
-  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
+
+  await assertLoanActionActor({
+    item,
+    userId,
+    feature: REJECT_FEATURE,
+  });
 
   if (item.status !== "PENDING") {
     throw new AppError("Peminjaman dokumen sudah diproses", 409);
@@ -444,12 +468,17 @@ exports.handover = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
-  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
+
+  await assertLoanActionActor({
+    item,
+    userId,
+    feature: HANDOVER_FEATURE,
+  });
 
   if (item.status !== "APPROVED") {
     throw new AppError("Dokumen hanya bisa diserahkan setelah disetujui", 409);
@@ -500,12 +529,17 @@ exports.returnLoan = async ({ req, id, payload, userId }) => {
   if (!userId) {
     throw new AppError("User tidak dikenali", 401);
   }
-  await assertLegalLoanActor(userId);
 
   const item = await repository.findById(id);
   if (!item) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
+
+  await assertLoanActionActor({
+    item,
+    userId,
+    feature: RETURN_FEATURE,
+  });
 
   if (!["HANDED_OVER", "BORROWED"].includes(item.status)) {
     throw new AppError(
