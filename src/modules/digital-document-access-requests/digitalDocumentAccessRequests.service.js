@@ -9,6 +9,11 @@ const {
   buildDocumentVisibilityWhere,
   canScopeAccessDocument,
 } = require("../../utils/digital-archive-access");
+const { APPROVE_FEATURE, REJECT_FEATURE } = require("../../utils/menu-access");
+const { roleHasFeature, roleHasPermission } = require("../../utils/rbac");
+
+const ACCESS_REQUEST_ACTION_URL =
+  "/dashboard/arsip-digital/disposisi/permintaan";
 
 function normalizeText(value) {
   return String(value || "")
@@ -195,6 +200,25 @@ function canViewAccessRequest(item, scope, userId) {
   );
 }
 
+async function assertAccessRequestActionActor({ item, userId, feature }) {
+  const scope = await getDigitalArchiveAccessScope(userId);
+  const [canUpdate, hasFeature] = await Promise.all([
+    roleHasPermission(scope.roleId, ACCESS_REQUEST_ACTION_URL, "update"),
+    roleHasFeature(scope.roleId, ACCESS_REQUEST_ACTION_URL, feature),
+  ]);
+
+  if (!canUpdate || !hasFeature) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk memproses permintaan disposisi",
+      403,
+    );
+  }
+
+  if (!canScopeAccessDocument(item.document, scope)) {
+    throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
+  }
+}
+
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const where = {
@@ -350,12 +374,11 @@ exports.approve = async ({ req, id, payload, userId }) => {
     throw new AppError("Pengajuan akses sudah diproses", 409);
   }
 
-  if (item.owner_id !== userId) {
-    throw new AppError(
-      "Hanya pemilik dokumen yang dapat menyetujui akses",
-      403,
-    );
-  }
+  await assertAccessRequestActionActor({
+    item,
+    userId,
+    feature: APPROVE_FEATURE,
+  });
 
   const expiresAt = new Date(payload.expires_at);
   if (expiresAt.getTime() <= Date.now()) {
@@ -412,9 +435,11 @@ exports.reject = async ({ req, id, payload, userId }) => {
     throw new AppError("Pengajuan akses sudah diproses", 409);
   }
 
-  if (item.owner_id !== userId) {
-    throw new AppError("Hanya pemilik dokumen yang dapat menolak akses", 403);
-  }
+  await assertAccessRequestActionActor({
+    item,
+    userId,
+    feature: REJECT_FEATURE,
+  });
 
   await repository.withTransaction(async (client) => {
     const actedAt = new Date();

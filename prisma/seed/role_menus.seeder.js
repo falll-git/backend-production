@@ -251,13 +251,11 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.incomingMail,
       permissions: ["create", "read", "update"],
-      features: [REDISPOSE_FEATURE],
     },
     { url: URLS.outgoingMail, permissions: ["create", "read", "update"] },
     {
       url: URLS.memorandum,
       permissions: ["create", "read", "update"],
-      features: [REDISPOSE_FEATURE],
     },
     { url: URLS.correspondenceReport, permissions: ["read"] },
     { url: URLS.correspondencePrint, permissions: ["read"] },
