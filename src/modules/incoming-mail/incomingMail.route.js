@@ -45,7 +45,7 @@ router.get(
 router.get(
   "/disposition-recipients",
   auth,
-  authorize(INCOMING_MAIL_MENU_URL, "update"),
+  authorize(INCOMING_MAIL_MENU_URL, "update", { feature: REDISPOSE_FEATURE }),
   controller.getDispositionRecipients,
 );
 router.get("/:id", auth, authorize(INCOMING_MAIL_MENU_URL, "read"), controller.getById);
