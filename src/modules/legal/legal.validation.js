@@ -1,0 +1,125 @@
+const Joi = require("joi");
+
+const uuid = Joi.string().uuid();
+const optionalUuid = uuid.allow("", null);
+const amount = Joi.number().min(0).precision(2);
+const fileSchema = Joi.object({
+  buffer: Joi.any().required(),
+  name: Joi.string().trim().required(),
+  mime_type: Joi.string().trim().required(),
+  size_bytes: Joi.number().integer().optional(),
+}).unknown(true);
+
+exports.templateSchema = Joi.object({
+  template_type: Joi.string()
+    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "FORMULIR_ASURANSI", "SKL", "SAMSAT")
+    .required(),
+  version: Joi.number().integer().min(1).default(1),
+  title: Joi.string().trim().min(1).max(255).required(),
+  content_template: Joi.string().trim().allow("", null).optional(),
+  is_active: Joi.boolean().default(true),
+  file: fileSchema.optional(),
+});
+
+exports.printDocumentSchema = Joi.object({
+  template_id: optionalUuid.optional(),
+  numbering_template_id: optionalUuid.optional(),
+  contract_id: uuid.required(),
+  document_type: Joi.string()
+    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "FORMULIR_ASURANSI", "SKL", "SAMSAT")
+    .required(),
+  payload_snapshot: Joi.object().optional(),
+  generated_number: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
+});
+
+exports.idebSchema = Joi.object({
+  debtor_id: optionalUuid.optional(),
+  contract_id: optionalUuid.optional(),
+  month: Joi.number().integer().min(1).max(12).required(),
+  year: Joi.number().integer().min(2000).max(2100).required(),
+  status: Joi.string().trim().max(50).default("PENDING"),
+  result_summary: Joi.object().optional(),
+  file: fileSchema.required(),
+});
+
+exports.notaryProgressSchema = Joi.object({
+  contract_id: uuid.required(),
+  third_party_id: uuid.required(),
+  deed_type: Joi.string().trim().min(1).max(100).required(),
+  received_at: Joi.date().required(),
+  estimated_completed_at: Joi.date().allow(null).optional(),
+  completed_at: Joi.date().allow(null).optional(),
+  status: Joi.string().valid("PROSES", "SELESAI", "BERMASALAH").default("PROSES"),
+  deed_number: Joi.string().trim().allow("", null).optional(),
+  notes: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
+});
+
+exports.insuranceProgressSchema = Joi.object({
+  contract_id: uuid.required(),
+  third_party_id: uuid.required(),
+  insurance_type: Joi.string().trim().min(1).max(100).required(),
+  coverage_amount: amount.default(0),
+  period_start: Joi.date().required(),
+  period_end: Joi.date().allow(null).optional(),
+  policy_number: Joi.string().trim().allow("", null).optional(),
+  status: Joi.string().valid("PROSES", "AKTIF", "EXPIRED", "KLAIM").default("PROSES"),
+  notes: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
+});
+
+exports.claimSchema = Joi.object({
+  contract_id: uuid.required(),
+  insurance_progress_id: optionalUuid.optional(),
+  policy_number: Joi.string().trim().allow("", null).optional(),
+  claim_type: Joi.string().trim().min(1).max(100).required(),
+  claim_amount: amount.default(0),
+  submitted_at: Joi.date().required(),
+  status: Joi.string()
+    .valid("PENGAJUAN", "VERIFIKASI", "DISETUJUI", "DITOLAK", "CAIR")
+    .default("PENGAJUAN"),
+  approved_amount: amount.allow(null).optional(),
+  disbursed_amount: amount.allow(null).optional(),
+  disbursed_at: Joi.date().allow(null).optional(),
+  rejection_reason: Joi.string().trim().allow("", null).optional(),
+  notes: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
+});
+
+exports.depositSchema = Joi.object({
+  deposit_type_id: optionalUuid.optional(),
+  type: Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN").required(),
+  contract_id: uuid.required(),
+  third_party_id: optionalUuid.optional(),
+  nominal: amount.required(),
+  paid_amount: amount.default(0),
+  processed_amount: amount.default(0),
+  remaining_amount: amount.allow(null).optional(),
+  status: Joi.string().trim().max(50).default("PENDING"),
+  notes: Joi.string().trim().allow("", null).optional(),
+});
+
+exports.depositTransactionSchema = Joi.object({
+  deposit_id: uuid.required(),
+  transaction_date: Joi.date().required(),
+  action: Joi.string().trim().min(1).max(100).required(),
+  amount: amount.required(),
+  notes: Joi.string().trim().allow("", null).optional(),
+});
+
+function makeUpdate(schema) {
+  return schema
+    .fork(Object.keys(schema.describe().keys), (item) =>
+      item.optional(),
+    )
+    .prefs({ noDefaults: true })
+    .min(1)
+    .messages({ "object.min": "Tidak ada data yang diperbarui." });
+}
+
+exports.updateTemplateSchema = makeUpdate(exports.templateSchema);
+exports.updateNotaryProgressSchema = makeUpdate(exports.notaryProgressSchema);
+exports.updateInsuranceProgressSchema = makeUpdate(exports.insuranceProgressSchema);
+exports.updateClaimSchema = makeUpdate(exports.claimSchema);
+exports.updateDepositSchema = makeUpdate(exports.depositSchema);

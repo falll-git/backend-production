@@ -5,7 +5,7 @@ exports.findMany = ({ where, skip, take }) => {
     where,
     skip,
     take,
-    orderBy: [{ type: "asc" }, { name: "asc" }],
+    orderBy: [{ name: "asc" }],
   });
 };
 
@@ -58,4 +58,13 @@ exports.delete = (id) => {
   return prisma.roles.delete({
     where: { id },
   });
+};
+
+exports.deleteWithRoleMenus = async (id) => {
+  const [, role] = await prisma.$transaction([
+    prisma.role_menus.deleteMany({ where: { role_id: id } }),
+    prisma.roles.delete({ where: { id } }),
+  ]);
+
+  return role;
 };

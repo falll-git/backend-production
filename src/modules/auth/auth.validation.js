@@ -1,5 +1,15 @@
 const Joi = require("joi");
 
+const passwordSchema = Joi.string()
+  .min(8)
+  .max(128)
+  .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+  .messages({
+    "string.min": "Password minimal 8 karakter.",
+    "string.max": "Password maksimal 128 karakter.",
+    "string.pattern.base": "Password wajib mengandung huruf dan angka.",
+  });
+
 exports.authSchema = Joi.object({
   username: Joi.string().trim().required().messages({
     "any.required": "Username wajib diisi.",
@@ -9,13 +19,11 @@ exports.authSchema = Joi.object({
     "any.required": "Password wajib diisi.",
     "string.empty": "Password wajib diisi.",
   }),
+  remember: Joi.boolean().optional(),
 });
 
 exports.refreshTokenSchema = Joi.object({
-  refreshToken: Joi.string().trim().required().messages({
-    "any.required": "Sesi login wajib disertakan.",
-    "string.empty": "Sesi login wajib disertakan.",
-  }),
+  remember: Joi.boolean().optional(),
 });
 
 exports.changePasswordSchema = Joi.object({
@@ -23,10 +31,9 @@ exports.changePasswordSchema = Joi.object({
     "any.required": "Password saat ini wajib diisi.",
     "string.empty": "Password saat ini wajib diisi.",
   }),
-  newPassword: Joi.string().min(8).required().messages({
+  newPassword: passwordSchema.required().messages({
     "any.required": "Password baru wajib diisi.",
     "string.empty": "Password baru wajib diisi.",
-    "string.min": "Password baru minimal 8 karakter.",
   }),
   confirmPassword: Joi.string()
     .valid(Joi.ref("newPassword"))
@@ -58,10 +65,9 @@ exports.setPasswordSchema = Joi.object({
     "any.required": "Token aktivasi wajib disertakan.",
     "string.empty": "Token aktivasi wajib disertakan.",
   }),
-  password: Joi.string().min(8).required().messages({
+  password: passwordSchema.required().messages({
     "any.required": "Password wajib diisi.",
     "string.empty": "Password wajib diisi.",
-    "string.min": "Password minimal 8 karakter.",
   }),
   confirmPassword: Joi.string().valid(Joi.ref("password")).required().messages({
     "any.only": "Konfirmasi password tidak sesuai.",
@@ -82,10 +88,9 @@ exports.resetPasswordSchema = Joi.object({
     "any.required": "Token reset password wajib disertakan.",
     "string.empty": "Token reset password wajib disertakan.",
   }),
-  password: Joi.string().min(8).required().messages({
+  password: passwordSchema.required().messages({
     "any.required": "Password wajib diisi.",
     "string.empty": "Password wajib diisi.",
-    "string.min": "Password minimal 8 karakter.",
   }),
   confirmPassword: Joi.string().valid(Joi.ref("password")).required().messages({
     "any.only": "Konfirmasi password tidak sesuai.",

@@ -14,11 +14,15 @@ const createAccessRequestSchema = Joi.object({
     "string.empty": "Alasan pengajuan wajib diisi.",
     "string.min": "Alasan pengajuan minimal 5 karakter.",
   }),
+  expires_at: Joi.date().iso().required().messages({
+    "any.required": "Tanggal berakhir akses wajib diisi.",
+    "date.base": "Format tanggal berakhir akses tidak valid.",
+    "date.format": "Format tanggal berakhir akses tidak valid.",
+  }),
 });
 
 const approveAccessRequestSchema = Joi.object({
-  expires_at: Joi.date().iso().required().messages({
-    "any.required": "Tanggal berakhir akses wajib diisi.",
+  expires_at: Joi.date().iso().optional().messages({
     "date.base": "Format tanggal berakhir akses tidak valid.",
     "date.format": "Format tanggal berakhir akses tidak valid.",
   }),

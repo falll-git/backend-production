@@ -1,0 +1,4 @@
+ALTER TABLE "roles"
+  DROP COLUMN IF EXISTS "type";
+
+DROP TYPE IF EXISTS "role_types";

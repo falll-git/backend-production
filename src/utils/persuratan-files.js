@@ -146,6 +146,18 @@ function deleteReplacedStoredFile(previousPath, nextPath) {
   }
 }
 
+function getStoredFileSizeBytes(storedPath) {
+  const resolvedPath = resolveStoredFilePath(storedPath);
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return null;
+
+  try {
+    const stat = fs.statSync(resolvedPath);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
 function deriveDocumentFileName(storedPath, fallbackBaseName = "dokumen") {
   const safeFallback = sanitizeFileNameBase(fallbackBaseName) || "dokumen";
 
@@ -201,6 +213,7 @@ function parseRequestFileInput(input) {
       buffer: null,
       fileName: null,
       mimeType: inferMimeTypeFromFileName(storedPath),
+      sizeBytes: getStoredFileSizeBytes(storedPath),
       isNewUpload: false,
     };
   }
@@ -223,6 +236,7 @@ function parseRequestFileInput(input) {
           input.type ||
           input.mimetype ||
           null,
+        sizeBytes: input.size_bytes || input.sizeBytes || input.size || input.buffer.length,
         isNewUpload: true,
       };
     }
@@ -237,6 +251,7 @@ function parseRequestFileInput(input) {
         buffer: null,
         fileName: null,
         mimeType: inferMimeTypeFromFileName(storedPath),
+        sizeBytes: getStoredFileSizeBytes(storedPath),
         isNewUpload: false,
       };
     }
@@ -287,6 +302,7 @@ function persistPersuratanFile({
         ? deriveDocumentFileName(previousPath, fallbackBaseName)
         : null,
       mimeType: null,
+      sizeBytes: getStoredFileSizeBytes(previousPath),
       isNewUpload: false,
     };
   }
@@ -296,6 +312,7 @@ function persistPersuratanFile({
       storedPath: parsed.storedPath,
       fileName: deriveDocumentFileName(parsed.storedPath, fallbackBaseName),
       mimeType: parsed.mimeType,
+      sizeBytes: parsed.sizeBytes,
       isNewUpload: false,
     };
   }
@@ -308,6 +325,7 @@ function persistPersuratanFile({
       mimeType: parsed.mimeType,
       fallbackBaseName,
     }),
+    sizeBytes: parsed.sizeBytes,
     isNewUpload: true,
   };
 }
@@ -320,6 +338,7 @@ module.exports = {
   deleteReplacedStoredFile,
   deleteStoredFile,
   deriveDocumentFileName,
+  getStoredFileSizeBytes,
   normalizeStoredPath,
   parseRequestFileInput,
   persistPersuratanFile,

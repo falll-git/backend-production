@@ -15,6 +15,10 @@ const {
 const { isMailerConfigured, sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
 const { serializeRole } = require("../../utils/role-types");
+const { resolveRequestUser, roleHasPermission } = require("../../utils/rbac");
+const { buildPaginationMeta } = require("../../utils/pagination");
+
+const USER_MENU_URL = "/dashboard/users";
 
 function normalizeText(value) {
   return value.trim().replace(/\s+/g, " ");
@@ -58,13 +62,59 @@ function buildOnboardingStatus(user) {
 
 function serializeUser(user) {
   const { auth_action_tokens, ...safeUser } = user;
+  const canAccessRestrictedDocuments = Boolean(
+    user.can_access_restricted_documents,
+  );
 
   return {
     ...safeUser,
+    can_access_restricted_documents: canAccessRestrictedDocuments,
+    is_restrict: canAccessRestrictedDocuments,
     role: serializeRole(user.role),
     invitation_pending: !user.password_set_at,
     onboarding_status: buildOnboardingStatus(user),
   };
+}
+
+function serializeAssignableUserLite(user) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    role_id: user.role_id,
+    division_id: user.division_id,
+    role: serializeRole(user.role),
+    division: user.division || null,
+  };
+}
+
+function buildUserSearchWhere(search) {
+  return search
+    ? {
+        OR: [
+          {
+            name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          {
+            username: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          {
+            email: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+        ],
+      }
+    : {};
 }
 
 function buildInvitePayload(token, expiresAt) {
@@ -78,20 +128,28 @@ function buildInvitePayload(token, expiresAt) {
 }
 
 function buildPublicInvitationPayload(invitation, delivery = {}) {
-  const base = {
+  const safePayload = {
     type: invitation.type,
     expires_at: invitation.expires_at,
-    path: invitation.path,
-    url: invitation.url,
     delivery,
   };
 
+  if (process.env.NODE_ENV === "production") {
+    return safePayload;
+  }
+
+  const developerPayload = {
+    ...safePayload,
+    path: invitation.path,
+    url: invitation.url,
+  };
+
   if (delivery.status === "sent") {
-    return base;
+    return developerPayload;
   }
 
   return {
-    ...base,
+    ...developerPayload,
     token: invitation.token,
   };
 }
@@ -175,45 +233,54 @@ async function deliverInvitation(user, invitation) {
   }
 }
 
-exports.getUsers = async ({ page, limit, search }) => {
-  const skip = (page - 1) * limit;
+exports.getUsers = async ({ pagination, search }) => {
+  const where = buildUserSearchWhere(search);
 
-  const where = search
-    ? {
-        OR: [
-          {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-          {
-            username: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-          {
-            email: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-        ],
-      }
-    : {};
-
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data: data.map(serializeUser),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
+};
+
+exports.getAssignableUsers = async ({ pagination, search }) => {
+  const where = buildUserSearchWhere(search);
+  const data = await repository.findAssignableMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
+  const total = await repository.countAssignable(where);
+
+  return {
+    data: data.map(serializeAssignableUserLite),
+    meta: buildPaginationMeta(total, pagination),
+  };
+};
+
+exports.getUsersForRequest = async ({ pagination, search, requestUser }) => {
+  const user = await resolveRequestUser(requestUser);
+  if (!user) {
+    throw new AppError("Sesi pengguna tidak valid.", 401);
+  }
+
+  const canReadUserManagement = await roleHasPermission(
+    user.role_id,
+    USER_MENU_URL,
+    "read",
+  );
+
+  if (canReadUserManagement) {
+    return exports.getUsers({ pagination, search });
+  }
+
+  return exports.getAssignableUsers({ pagination, search });
 };
 
 exports.getUserById = async (id) => {
@@ -233,7 +300,8 @@ exports.createUser = async (payload) => {
     email: normalizeEmail(payload.email),
     phone: normalizePhone(payload.phone),
     is_active: payload.is_active ?? true,
-    is_restrict: payload.is_restrict ?? false,
+    can_access_restricted_documents:
+      payload.can_access_restricted_documents ?? payload.is_restrict ?? false,
     role_id: payload.role_id,
     division_id: payload.division_id,
   };
@@ -332,8 +400,14 @@ exports.updateUser = async (id, payload) => {
     );
   }
 
-  if (typeof payload.is_restrict === "boolean") {
-    nextData.is_restrict = payload.is_restrict;
+  if (
+    typeof payload.can_access_restricted_documents === "boolean" ||
+    typeof payload.is_restrict === "boolean"
+  ) {
+    nextData.can_access_restricted_documents =
+      typeof payload.can_access_restricted_documents === "boolean"
+        ? payload.can_access_restricted_documents
+        : payload.is_restrict;
   }
 
   if (payload.role_id) {
@@ -353,14 +427,10 @@ exports.updateUser = async (id, payload) => {
   }
 
   if (payload.password) {
-    const now = new Date();
-    nextData.password = await hashPassword(payload.password);
-    nextData.password_set_at = now;
-    nextData.email_verified_at = user.email_verified_at || now;
-    nextData.onboarding_status = "ACTIVE";
-    nextData.activated_at = user.activated_at || now;
-    nextData.refresh_token = null;
-    nextData.refresh_token_expires_at = null;
+    throw new AppError(
+      "Password hanya dapat diubah melalui alur reset password.",
+      422,
+    );
   }
 
   const updatedUser = await repository.update(id, nextData);
@@ -422,8 +492,6 @@ exports.closeAccess = async (id, actorId, payload) => {
       deactivated_at: now,
       deactivated_by: actorId,
       deactivation_reason: reason,
-      refresh_token: null,
-      refresh_token_expires_at: null,
     },
   });
 

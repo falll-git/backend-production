@@ -1,12 +1,33 @@
 const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
 
+const DASHBOARD_WIDGET_MENU = {
+  menu_type: "DASHBOARD_WIDGET",
+  placement: "DASHBOARD",
+  render_in_sidebar: false,
+};
+const MAIN_REPORT_DASHBOARD_WIDGET_MENU = {
+  menu_type: "DASHBOARD_WIDGET",
+  placement: "DASHBOARD",
+  render_in_sidebar: true,
+};
+
 const menuTree = [
   {
     name: "Dashboard",
     url: "/dashboard",
     icon: "lucide lucide-layout-dashboard",
     order: 1,
+    children: [
+      {
+        name: "Penggunaan Storage",
+        url: "/dashboard/storage-usage",
+        icon: "lucide lucide-hard-drive",
+        component_key: "dashboard.storage_usage",
+        ...DASHBOARD_WIDGET_MENU,
+        order: 1,
+      },
+    ],
   },
   {
     name: "Arsip Digital",
@@ -37,7 +58,7 @@ const menuTree = [
             order: 2,
           },
           {
-            name: "Jatuh Tempo",
+            name: "Jatuh Tempo Peminjaman",
             url: "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
             icon: "lucide lucide-clock",
             order: 3,
@@ -117,6 +138,8 @@ const menuTree = [
         name: "Laporan Arsip Digital",
         url: "/dashboard/arsip-digital/laporan",
         icon: "lucide lucide-bar-chart-3",
+        component_key: "dashboard.module_report.digital_archive",
+        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
         order: 6,
       },
     ],
@@ -155,6 +178,8 @@ const menuTree = [
         name: "Laporan Persuratan",
         url: "/dashboard/manajemen-surat/laporan",
         icon: "lucide lucide-bar-chart-2",
+        component_key: "dashboard.module_report.correspondence",
+        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
         order: 2,
       },
       {
@@ -249,18 +274,24 @@ const menuTree = [
         name: "Laporan Debitur",
         url: "/dashboard/informasi-debitur/laporan",
         icon: "lucide lucide-bar-chart-2",
+        component_key: "dashboard.module_report.debtor",
+        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
         order: 4,
       },
       {
         name: "Laporan NPF",
         url: "/dashboard/informasi-debitur/laporan/npf",
         icon: "lucide lucide-trending-down",
+        component_key: "dashboard.report.npf",
+        ...DASHBOARD_WIDGET_MENU,
         order: 5,
       },
       {
         name: "Laporan Aktivitas Marketing",
         url: "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
         icon: "lucide lucide-clipboard-check",
+        component_key: "dashboard.report.marketing_activity",
+        ...DASHBOARD_WIDGET_MENU,
         order: 6,
       },
     ],
@@ -376,21 +407,27 @@ const menuTree = [
         order: 5,
       },
       {
+        name: "Laporan Legal",
+        url: "/dashboard/legal/laporan",
+        icon: "lucide lucide-bar-chart-2",
+        component_key: "dashboard.module_report.legal",
+        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
+        order: 6,
+      },
+      {
         name: "Laporan Pihak 3 - Dokumen",
         url: "/dashboard/legal/laporan/pihak-ketiga/dokumen",
         icon: "lucide lucide-file-text",
-        order: 6,
+        component_key: "dashboard.report.third_party_documents",
+        ...DASHBOARD_WIDGET_MENU,
+        order: 7,
       },
       {
         name: "Laporan Pihak 3 - Dana Titipan",
         url: "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
         icon: "lucide lucide-wallet",
-        order: 7,
-      },
-      {
-        name: "Laporan Legal",
-        url: "/dashboard/legal/laporan",
-        icon: "lucide lucide-bar-chart-2",
+        component_key: "dashboard.report.third_party_deposit_funds",
+        ...DASHBOARD_WIDGET_MENU,
         order: 8,
       },
     ],
@@ -459,6 +496,12 @@ const menuTree = [
             icon: "lucide lucide-shield",
             order: 2,
           },
+          {
+            name: "Setup KJPP",
+            url: "/dashboard/parameter/pihak-ketiga/kjpp",
+            icon: "lucide lucide-building-2",
+            order: 3,
+          },
         ],
       },
       {
@@ -521,6 +564,12 @@ const menuTree = [
         icon: "lucide lucide-wallet",
         order: 18,
       },
+      {
+        name: "Setup Watermark Dokumen",
+        url: "/dashboard/parameter/watermark-dokumen",
+        icon: "lucide lucide-stamp",
+        order: 19,
+      },
     ],
   },
 ];
@@ -533,6 +582,10 @@ const LEGACY_MENU_URLS = [
   "/dashboard/laporan/npf",
   "/dashboard/laporan/aktivitas-marketing",
   "/dashboard/parameter/template-dokumen-legal",
+  "/dashboard/arsip-digital/report",
+  "/dashboard/arsip-digital/reports",
+  "/dashboard/arsip-digital/laporan-arsip-digital",
+  "/dashboard/arsip-digital/report-arsip-digital",
 ];
 
 const LEGACY_EMPTY_MENU_NAMES = [
@@ -560,6 +613,10 @@ async function seedMenus() {
         name: node.name,
         url,
         icon: node.icon || null,
+        menu_type: node.menu_type || "NAVIGATION",
+        placement: node.placement || "SIDEBAR",
+        render_in_sidebar: node.render_in_sidebar ?? true,
+        component_key: node.component_key || null,
         order: node.order,
         parent_id: parentId,
         parent_label: parentName,

@@ -12,7 +12,12 @@ const {
 const STORAGE_READ_MENU_URLS = [
   "/dashboard/parameter/tempat-penyimpanan",
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
   "/dashboard/arsip-digital/input-dokumen",
+  "/dashboard/arsip-digital/peminjaman/request",
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk",
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar",
+  "/dashboard/manajemen-surat/kelola-surat/input-memorandum",
 ];
 const STORAGE_WRITE_MENU_URL = "/dashboard/parameter/tempat-penyimpanan";
 

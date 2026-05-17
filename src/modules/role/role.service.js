@@ -1,29 +1,13 @@
 const repository = require("./role.repository");
 const { AppError } = require("../../utils/errors");
-const {
-  ROLE_TYPES,
-  normalizeRoleType,
-  serializeRole,
-} = require("../../utils/role-types");
+const { serializeRole } = require("../../utils/role-types");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 function normalizeName(value) {
   return value.trim().replace(/\s+/g, " ");
 }
 
-function resolveOptionalRoleType(value) {
-  if (value === undefined || value === null || value === "") return null;
-
-  const type = normalizeRoleType(value, null);
-  if (!type) {
-    throw new AppError("Tipe role harus Role Utama atau Role Tambahan.", 422);
-  }
-
-  return type;
-}
-
-exports.getRoles = async ({ page, limit, search, type }) => {
-  const skip = (page - 1) * limit;
-  const normalizedType = resolveOptionalRoleType(type);
+exports.getRoles = async ({ pagination, search }) => {
   const where = {};
 
   if (search) {
@@ -33,20 +17,16 @@ exports.getRoles = async ({ page, limit, search, type }) => {
     };
   }
 
-  if (normalizedType) {
-    where.type = normalizedType;
-  }
-
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data: data.map(serializeRole),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -61,14 +41,8 @@ exports.getRoleById = async (id) => {
 };
 
 exports.createRole = async (payload) => {
-  const type = normalizeRoleType(payload.type, ROLE_TYPES.ADDITIONAL);
-  if (!type) {
-    throw new AppError("Tipe role harus Role Utama atau Role Tambahan.", 422);
-  }
-
   const normalizedPayload = {
     name: normalizeName(payload.name),
-    type,
   };
 
   const existing = await repository.findByName(normalizedPayload.name);
@@ -93,14 +67,6 @@ exports.updateRole = async (id, payload) => {
     normalizedPayload.name = normalizeName(payload.name);
   }
 
-  if (payload.type !== undefined) {
-    const type = normalizeRoleType(payload.type, null);
-    if (!type) {
-      throw new AppError("Tipe role harus Role Utama atau Role Tambahan.", 422);
-    }
-    normalizedPayload.type = type;
-  }
-
   if (normalizedPayload.name) {
     const existing = await repository.findByName(normalizedPayload.name);
     if (existing && existing.id !== id) {
@@ -120,14 +86,13 @@ exports.deleteRole = async (id) => {
 
   const dependencySummary = await repository.findDependencySummary(id);
   const linkedUsers = dependencySummary?._count?.users || 0;
-  const linkedRoleMenus = dependencySummary?._count?.roles_menus || 0;
 
-  if (linkedUsers > 0 || linkedRoleMenus > 0) {
+  if (linkedUsers > 0) {
     throw new AppError(
-      "Role tidak dapat dihapus karena masih digunakan oleh pengguna atau pengaturan akses menu.",
+      "Role tidak dapat dihapus karena masih digunakan oleh pengguna.",
       409,
     );
   }
 
-  return repository.delete(id);
+  return repository.deleteWithRoleMenus(id);
 };

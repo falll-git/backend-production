@@ -31,18 +31,6 @@ router.post(
   controller.createWithDisposition,
 );
 router.get(
-  "/initial-manager",
-  auth,
-  authorize(MEMORANDUM_MENU_URL, "create"),
-  controller.getInitialManager,
-);
-router.get(
-  "/initial-managers",
-  auth,
-  authorize(MEMORANDUM_MENU_URL, "create"),
-  controller.getInitialManagers,
-);
-router.get(
   "/disposition-recipients",
   auth,
   authorize(MEMORANDUM_MENU_URL, "update", { feature: REDISPOSE_FEATURE }),

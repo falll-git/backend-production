@@ -72,16 +72,9 @@ function findActiveApprovedByDocumentAndRequester(
       document_id: documentId,
       requester_id: requesterId,
       status: "APPROVED",
-      OR: [
-        {
-          expires_at: null,
-        },
-        {
-          expires_at: {
-            gte: new Date(),
-          },
-        },
-      ],
+      expires_at: {
+        gte: new Date(),
+      },
     },
   });
 }

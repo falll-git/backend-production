@@ -15,6 +15,7 @@ router.get(
   authorize(ROLE_MENU_URL, "read"),
   controller.getAllForManagement,
 );
+router.get("/dashboard-widgets", auth, controller.getDashboardWidgets);
 router.post(
   "/",
   auth,

@@ -33,7 +33,6 @@ async function resolveRequestUser(tokenUser) {
         select: {
           id: true,
           name: true,
-          type: true,
         },
       },
     },

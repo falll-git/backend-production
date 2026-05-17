@@ -47,8 +47,6 @@ const createDigitalDocumentSchema = Joi.object({
     .max(255)
     .required()
     .label("Nama dokumen"),
-  document_date: Joi.date().iso().allow(null, "").optional().label("Tanggal dokumen"),
-  due_date: Joi.date().iso().allow(null, "").optional().label("Tanggal jatuh tempo"),
   description: Joi.string().trim().allow("", null).optional(),
   is_restricted: Joi.boolean().default(false),
   file: fileInputSchema.required().label("File dokumen"),
@@ -58,7 +56,6 @@ const createDigitalDocumentSchema = Joi.object({
   "string.guid": "{{#label}} tidak valid.",
   "string.min": "{{#label}} minimal {{#limit}} karakter.",
   "string.max": "{{#label}} maksimal {{#limit}} karakter.",
-  "date.format": "{{#label}} harus menggunakan format tanggal yang valid.",
 });
 
 const updateDigitalDocumentSchema = Joi.object({
@@ -80,8 +77,6 @@ const updateDigitalDocumentSchema = Joi.object({
     .max(255)
     .optional()
     .label("Nama dokumen"),
-  document_date: Joi.date().iso().allow(null, "").optional().label("Tanggal dokumen"),
-  due_date: Joi.date().iso().allow(null, "").optional().label("Tanggal jatuh tempo"),
   description: Joi.string().trim().allow("", null).optional(),
   is_restricted: Joi.boolean().optional(),
   file: fileInputSchema.optional(),
@@ -89,7 +84,6 @@ const updateDigitalDocumentSchema = Joi.object({
   "string.guid": "{{#label}} tidak valid.",
   "string.min": "{{#label}} minimal {{#limit}} karakter.",
   "string.max": "{{#label}} maksimal {{#limit}} karakter.",
-  "date.format": "{{#label}} harus menggunakan format tanggal yang valid.",
 });
 
 module.exports = {

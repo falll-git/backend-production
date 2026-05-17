@@ -11,15 +11,44 @@ const {
 } = require("../../utils/persuratan-serializer");
 const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
 const {
-  resolveActiveDivisionManager,
+  buildTargetDivisionDataFromAssignments,
   resolveActiveDivisionManagers,
 } = require("../../utils/manager-assignment");
 const {
   normalizeMailWorkflowStatus,
 } = require("../../utils/persuratan-status");
 const { serializeRole } = require("../../utils/role-types");
+const { AppError } = require("../../utils/errors");
+const {
+  buildIncomingMailVisibilityWhere,
+  canManageIncomingMail,
+  canViewIncomingMail,
+  getPersuratanAccessScope,
+} = require("../../utils/persuratan-access");
+const {
+  PAGINATION_PROFILES,
+  paginateArray,
+  resolvePagination,
+} = require("../../utils/pagination");
+const {
+  resolveActiveStorageId,
+} = require("../../utils/persuratan-storage");
+const {
+  enqueueRecordWatermark,
+} = require("../watermark-settings/watermarkProcessor.service");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
+
+async function queueIncomingMailWatermark(entityId) {
+  try {
+    await enqueueRecordWatermark({
+      module: "incoming_mail",
+      entityId,
+    });
+  } catch (error) {
+    console.error("Failed to queue incoming mail watermark:", error);
+  }
+}
 
 function normalizeText(value) {
   if (typeof value !== "string") return value ?? null;
@@ -111,6 +140,19 @@ function resolveTargetDivisionIds(payload) {
   ]);
 }
 
+function normalizeReceiverIdsInput(payload) {
+  const receiverIds = [
+    ...(Array.isArray(payload.receiver_ids) ? payload.receiver_ids : []),
+    ...(payload.receiver_id ? [payload.receiver_id] : []),
+  ]
+    .map((receiverId) =>
+      typeof receiverId === "string" ? receiverId.trim() : "",
+    )
+    .filter(Boolean);
+
+  return [...new Set(receiverIds)];
+}
+
 function appendAndFilter(where, condition) {
   where.AND = Array.isArray(where.AND) ? where.AND : [];
   where.AND.push(condition);
@@ -139,43 +181,6 @@ function resolveDocumentStatusFromDispositions(dispositions) {
   return hasOverdue ? "OVERDUE" : "IN_PROGRESS";
 }
 
-function parsePagination({ page, limit }) {
-  if (!page && !limit) {
-    return { enabled: false, page: 1, limit: 0 };
-  }
-
-  const normalizedPage = Math.max(Number(page) || 1, 1);
-  const normalizedLimit = Math.max(Number(limit) || 10, 1);
-
-  return {
-    enabled: true,
-    page: normalizedPage,
-    limit: normalizedLimit,
-  };
-}
-
-function paginateData(data, pagination) {
-  if (!pagination.enabled) {
-    return {
-      data,
-      meta: null,
-    };
-  }
-
-  const startIndex = (pagination.page - 1) * pagination.limit;
-  const paginatedData = data.slice(startIndex, startIndex + pagination.limit);
-  const total = data.length;
-
-  return {
-    data: paginatedData,
-    meta: {
-      total,
-      page: pagination.page,
-      lastPage: Math.ceil(total / pagination.limit) || 1,
-    },
-  };
-}
-
 function buildWhere({
   search,
   dateFrom,
@@ -195,6 +200,29 @@ function buildWhere({
       { regarding: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
       { address: { contains: search, mode: "insensitive" } },
+      { storage: { is: { name: { contains: search, mode: "insensitive" } } } },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: { code: { contains: search, mode: "insensitive" } },
+            },
+          },
+        },
+      },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: {
+                office: {
+                  is: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
+            },
+          },
+        },
+      },
     ];
   }
 
@@ -274,9 +302,10 @@ function filterByStatus(records, status) {
   });
 }
 
-function buildIncomingMailData(payload, filePath, status) {
+function buildIncomingMailData(payload, filePath, fileSizeBytes, status) {
   return {
     letter_prioritie_id: payload.letter_prioritie_id,
+    storage_id: payload.storage_id,
     regarding: normalizeText(payload.regarding),
     description: normalizeText(payload.description),
     name: normalizeText(payload.name),
@@ -284,68 +313,63 @@ function buildIncomingMailData(payload, filePath, status) {
     address: normalizeText(payload.address),
     mail_number: normalizeText(payload.mail_number),
     file: filePath,
+    file_size_bytes: fileSizeBytes,
     status,
     created_by: payload.created_by ?? null,
   };
 }
 
-exports.getIncomingMails = async ({ req, query, userId }) => {
+exports.getIncomingMails = async ({
+  req,
+  query,
+  userId,
+  scopeOverride = null,
+}) => {
+  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
   const receiverId =
     normalizeText(query.receiver_id) ||
     (String(query.assigned_to_me).toLowerCase() === "true" ? userId : null);
-  const where = buildWhere({
-    search: normalizeText(query.search),
-    dateFrom: query.date_from,
-    dateTo: query.date_to,
-    letterPrioritieId: normalizeText(query.letter_prioritie_id),
-    divisionId: normalizeText(query.target_division_id ?? query.division_id),
-    receiverId,
-  });
+  const where = {
+    AND: [
+      buildWhere({
+        search: normalizeText(query.search),
+        dateFrom: query.date_from,
+        dateTo: query.date_to,
+        letterPrioritieId: normalizeText(query.letter_prioritie_id),
+        divisionId: normalizeText(query.target_division_id ?? query.division_id),
+        receiverId,
+      }),
+      buildIncomingMailVisibilityWhere(scope),
+    ],
+  };
 
   const records = await repository.findMany({ where });
   const serialized = await serializeList(req, records);
   const filtered = filterByStatus(serialized, query.status);
-  const pagination = parsePagination({
-    page: query.page,
-    limit: query.limit,
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
   });
 
-  return paginateData(filtered, pagination);
+  return paginateArray(filtered, pagination);
 };
 
-exports.getIncomingMailsById = async ({ req, id }) => {
+exports.getIncomingMailsById = async ({ req, id, userId }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canViewIncomingMail(incomingMail, scope)) {
+    throw new AppError("Surat masuk tidak ditemukan.", 404);
+  }
+
   return serializeIncomingMail({
     req,
     record: incomingMail,
   });
-};
-
-exports.getInitialManager = async ({ divisionId }) => {
-  const { division, manager } = await resolveActiveDivisionManager(divisionId);
-
-  return {
-    division,
-    manager: serializeAssignableUser(manager),
-  };
-};
-
-exports.getInitialManagers = async ({ divisionIds }) => {
-  const assignments = await resolveActiveDivisionManagers(
-    normalizeDivisionIdsInput(divisionIds),
-  );
-
-  return {
-    targets: assignments.map(({ division, manager }) => ({
-      division,
-      manager: serializeAssignableUser(manager),
-    })),
-  };
 };
 
 exports.getDispositionRecipients = async ({ query, currentUserId }) => {
@@ -366,6 +390,7 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
   const assignments = await resolveActiveDivisionManagers(
     resolveTargetDivisionIds(payload),
   );
+  const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({
     entity: "incoming-mails",
     input: payload.file,
@@ -380,9 +405,11 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
   const mailData = buildIncomingMailData(
     {
       ...payload,
+      storage_id: storageId,
       created_by: senderId,
     },
     storedFile.storedPath,
+    storedFile.sizeBytes,
     "IN_PROGRESS",
   );
   const dispositionsData = assignments.map(({ manager }) => ({
@@ -396,10 +423,8 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
     is_complete: false,
     completed_at: null,
   }));
-  const targetDivisionsData = assignments.map(({ division, manager }) => ({
-    division_id: division.id,
-    manager_id: manager.id,
-  }));
+  const targetDivisionsData =
+    buildTargetDivisionDataFromAssignments(assignments);
 
   let created;
 
@@ -416,6 +441,11 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
     throw mapPersuratanPrismaError(error, "incoming-mail");
   }
 
+  if (created?.file) {
+    await queueIncomingMailWatermark(created.id);
+    created = await repository.findById(created.id);
+  }
+
   return serializeIncomingMail({
     req,
     record: created,
@@ -430,7 +460,7 @@ exports.redispose = async ({ id, payload, senderId }) => {
   }
 
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
-    throw new Error("Surat masuk yang sudah selesai tidak dapat didisposisikan kembali.");
+    throw new Error("Surat masuk yang sudah selesai tidak dapat didisposisikan.");
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -442,43 +472,45 @@ exports.redispose = async ({ id, payload, senderId }) => {
 
   if (!currentDisposition) {
     throw new Error(
-      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi.",
+      "Hanya pemegang disposisi aktif yang dapat meneruskan disposisi.",
     );
   }
 
-  if (payload.receiver_id === senderId) {
-    throw new Error("Penerima redisposisi tidak boleh diri sendiri.");
+  const receiverIds = normalizeReceiverIdsInput(payload);
+
+  if (receiverIds.length === 0) {
+    throw new Error("Penerima disposisi wajib dipilih.");
   }
 
-  const receiver = await userRepository.findAssignableUserById(
-    payload.receiver_id,
+  if (receiverIds.includes(senderId)) {
+    throw new Error("Penerima disposisi tidak boleh diri sendiri.");
+  }
+
+  const receivers = await userRepository.findAssignableUsersByIds(receiverIds);
+  const foundReceiverIds = new Set(receivers.map((receiver) => receiver.id));
+  const missingReceiverIds = receiverIds.filter(
+    (receiverId) => !foundReceiverIds.has(receiverId),
   );
 
-  if (!receiver) {
+  if (missingReceiverIds.length > 0) {
     throw new Error(
-      "Penerima redisposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
+      "Penerima disposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
     );
   }
 
-  await repository.updateDisposition(currentDisposition.id, {
-    status: "FORWARDED",
-    is_complete: true,
-  });
-
-  const disposition = await repository.createDisposition({
-    incoming_mails_id: id,
-    sender_id: senderId,
-    receiver_id: payload.receiver_id,
-    parent_disposition_id: currentDisposition.id,
+  const dispositions = await repository.forwardDispositionToReceivers({
+    incomingMailId: id,
+    currentDispositionId: currentDisposition.id,
+    senderId,
+    receiverIds,
     note: normalizeText(payload.note),
-    start_date: normalizeOptionalDate(payload.start_date),
-    due_date: normalizeOptionalDate(payload.due_date),
-    status: payload.start_date ? "IN_PROGRESS" : "NEW",
+    startDate: normalizeOptionalDate(payload.start_date),
+    dueDate: normalizeOptionalDate(payload.due_date),
   });
 
-  await repository.update(id, { status: "IN_PROGRESS", updated_by: senderId });
-
-  return serializeIncomingDisposition(disposition, 1);
+  return dispositions.map((disposition, index) =>
+    serializeIncomingDisposition(disposition, { sequence: index + 1 }),
+  );
 };
 
 exports.completeIncomingMail = async ({ req, id, userId }) => {
@@ -488,9 +520,30 @@ exports.completeIncomingMail = async ({ req, id, userId }) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  await repository.completeDispositions(id);
-  const updated = await repository.update(id, {
+  const currentDisposition = await repository.findCurrentDispositionForReceiver({
+    incomingMailId: id,
+    receiverId: userId,
+  });
+
+  if (!currentDisposition) {
+    throw new AppError(
+      "Hanya penerima disposisi aktif yang dapat menandai surat selesai.",
+      403,
+    );
+  }
+
+  await repository.updateDisposition(currentDisposition.id, {
     status: "COMPLETED",
+    is_complete: true,
+    completed_at: new Date(),
+    start_date: currentDisposition.start_date || new Date(),
+  });
+
+  const refreshedMail = await repository.findById(id);
+  const updated = await repository.update(id, {
+    status: resolveDocumentStatusFromDispositions(
+      refreshedMail?.disposition_mails || [],
+    ),
     updated_by: userId,
   });
   return serializeIncomingMail({
@@ -595,9 +648,19 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageIncomingMail(incomingMail, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk mengubah surat masuk ini.", 403);
+  }
+
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
     throw new Error("Surat masuk yang sudah selesai tidak dapat diubah.");
   }
+
+  const nextStorageId =
+    payload.storage_id !== undefined
+      ? await resolveActiveStorageId(payload.storage_id)
+      : null;
 
   const storedFile = persistPersuratanFile({
     entity: "incoming-mails",
@@ -619,6 +682,9 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
 
   if (payload.letter_prioritie_id !== undefined) {
     updateData.letter_prioritie_id = payload.letter_prioritie_id;
+  }
+  if (payload.storage_id !== undefined) {
+    updateData.storage_id = nextStorageId;
   }
   if (payload.target_division_id !== undefined) {
     throw new Error("Divisi tujuan surat masuk tidak dapat diubah.");
@@ -646,6 +712,8 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_size_bytes =
+      storedFile.sizeBytes ?? incomingMail.file_size_bytes ?? null;
   }
   if (payload.status !== undefined) {
     updateData.status = normalizeMailWorkflowStatus(payload.status);
@@ -666,6 +734,11 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
     deleteReplacedStoredFile(incomingMail.file, updated.file);
   }
 
+  if (storedFile.isNewUpload && updated?.file) {
+    await queueIncomingMailWatermark(updated.id);
+    updated = await repository.findById(updated.id);
+  }
+
   return serializeIncomingMail({
     req,
     record: updated,
@@ -677,6 +750,11 @@ exports.deleteIncomingMail = async (id, userId) => {
 
   if (!incomingMail) {
     throw new Error("Surat masuk tidak ditemukan.");
+  }
+
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageIncomingMail(incomingMail, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk menghapus surat masuk ini.", 403);
   }
 
   const deleted = await repository.delete(id, userId);

@@ -14,6 +14,7 @@ const UNIQUE_FIELD_MESSAGES = {
 
 const REFERENCE_FIELD_MESSAGES = {
   letter_prioritie_id: "Prioritas surat tidak ditemukan.",
+  storage_id: "Tempat penyimpanan fisik tidak ditemukan.",
   origin_division_id: "Divisi asal memorandum tidak ditemukan.",
   division_id: "Divisi tujuan tidak ditemukan.",
   receiver_id: "Penerima disposisi tidak ditemukan.",

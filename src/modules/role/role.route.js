@@ -7,8 +7,15 @@ const authorize = require("../../middlewares/authorize.middleware");
 const { createRoleSchema, updateRoleSchema } = require("./role.validation");
 
 const ROLE_MENU_URL = "/dashboard/parameter/role";
+const ROLE_ACCESS_MENU_URL = "/dashboard/parameter/role-menu";
+const USER_MENU_URL = "/dashboard/users";
+const ROLE_READ_MENU_URLS = [
+  ROLE_MENU_URL,
+  ROLE_ACCESS_MENU_URL,
+  USER_MENU_URL,
+];
 
-router.get("/", auth, authorize(ROLE_MENU_URL, "read"), controller.getAll);
+router.get("/", auth, authorize(ROLE_READ_MENU_URLS, "read"), controller.getAll);
 router.post(
   "/",
   auth,
@@ -16,7 +23,7 @@ router.post(
   validate(createRoleSchema),
   controller.create,
 );
-router.get("/:id", auth, authorize(ROLE_MENU_URL, "read"), controller.getById);
+router.get("/:id", auth, authorize(ROLE_READ_MENU_URLS, "read"), controller.getById);
 router.put(
   "/:id",
   auth,

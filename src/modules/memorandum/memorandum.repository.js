@@ -10,7 +10,6 @@ const userSummarySelect = {
     select: {
       id: true,
       name: true,
-      type: true,
     },
   },
   division: {
@@ -21,8 +20,19 @@ const userSummarySelect = {
   },
 };
 
+const storageInclude = {
+  cabinet: {
+    include: {
+      office: true,
+    },
+  },
+};
+
 const baseInclude = {
   origin_division: true,
+  storage: {
+    include: storageInclude,
+  },
   creator: { select: userSummarySelect },
   updater: { select: userSummarySelect },
   deleter: { select: userSummarySelect },
@@ -158,6 +168,56 @@ exports.updateDisposition = (id, data) => {
       receiver: { select: userSummarySelect },
       sender: { select: userSummarySelect },
     },
+  });
+};
+
+exports.forwardDispositionToReceivers = async ({
+  memorandumId,
+  currentDispositionId,
+  senderId,
+  receiverIds,
+  note,
+  startDate,
+  dueDate,
+}) => {
+  return prisma.$transaction(async (tx) => {
+    await tx.memorandum_dispositions.update({
+      where: { id: currentDispositionId },
+      data: {
+        status: "FORWARDED",
+        is_complete: true,
+      },
+    });
+
+    const createdDispositions = [];
+
+    for (const receiverId of receiverIds) {
+      createdDispositions.push(
+        await tx.memorandum_dispositions.create({
+          data: {
+            memorandums_id: memorandumId,
+            sender_id: senderId,
+            receiver_id: receiverId,
+            parent_disposition_id: currentDispositionId,
+            note,
+            start_date: startDate,
+            due_date: dueDate,
+            status: startDate ? "IN_PROGRESS" : "NEW",
+          },
+          include: {
+            receiver: { select: userSummarySelect },
+            sender: { select: userSummarySelect },
+          },
+        }),
+      );
+    }
+
+    await tx.memorandums.update({
+      where: { id: memorandumId },
+      data: { status: "IN_PROGRESS", updated_by: senderId },
+    });
+
+    return createdDispositions;
   });
 };
 

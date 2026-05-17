@@ -17,7 +17,7 @@ function getUserSelect() {
     email: true,
     phone: true,
     is_active: true,
-    is_restrict: true,
+    can_access_restricted_documents: true,
     onboarding_status: true,
     email_verified_at: true,
     password_set_at: true,
@@ -41,7 +41,6 @@ function getUserSelect() {
       select: {
         id: true,
         name: true,
-        type: true,
       },
     },
     division: {
@@ -86,7 +85,28 @@ function getAssignableUserSelect() {
       select: {
         id: true,
         name: true,
-        type: true,
+      },
+    },
+    division: {
+      select: {
+        id: true,
+        name: true,
+      },
+    },
+  };
+}
+
+function getAssignableUserLiteSelect() {
+  return {
+    id: true,
+    role_id: true,
+    division_id: true,
+    name: true,
+    username: true,
+    role: {
+      select: {
+        id: true,
+        name: true,
       },
     },
     division: {
@@ -115,6 +135,28 @@ exports.findMany = ({ where, skip, take }) => {
     take,
     orderBy: { created_at: "desc" },
     select: getUserSelect(),
+  });
+};
+
+exports.findAssignableMany = ({ where, skip, take }) => {
+  return prisma.users.findMany({
+    where: {
+      ...assignableUserWhere(),
+      ...where,
+    },
+    skip,
+    take,
+    orderBy: { name: "asc" },
+    select: getAssignableUserLiteSelect(),
+  });
+};
+
+exports.countAssignable = (where = {}) => {
+  return prisma.users.count({
+    where: {
+      ...assignableUserWhere(),
+      ...where,
+    },
   });
 };
 
@@ -151,16 +193,28 @@ exports.findByUsername = (username) => {
   });
 };
 
-exports.findActiveManagersByDivisionId = (divisionId, roleName = "Manager") => {
+exports.findActiveUsersByDivisionRoleFeature = ({
+  divisionId,
+  menuUrls = [],
+  feature,
+}) => {
   return prisma.users.findMany({
     where: {
       ...assignableUserWhere(),
       division_id: divisionId,
       role: {
-        type: "MAIN",
-        name: {
-          equals: roleName,
-          mode: "insensitive",
+        roles_menus: {
+          some: {
+            can_read: true,
+            features: {
+              has: feature,
+            },
+            menu: {
+              url: {
+                in: menuUrls,
+              },
+            },
+          },
         },
       },
     },
@@ -175,7 +229,6 @@ exports.findActiveManagersByDivisionId = (divisionId, roleName = "Manager") => {
         select: {
           id: true,
           name: true,
-          type: true,
         },
       },
       division: {
@@ -193,6 +246,28 @@ exports.findAssignableUserById = (id) => {
   return prisma.users.findFirst({
     where: {
       id,
+      ...assignableUserWhere(),
+    },
+    select: getAssignableUserSelect(),
+  });
+};
+
+exports.findAssignableUsersByIds = (ids) => {
+  const normalizedIds = [
+    ...new Set(
+      (Array.isArray(ids) ? ids : [ids])
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter(Boolean),
+    ),
+  ];
+
+  if (normalizedIds.length === 0) return [];
+
+  return prisma.users.findMany({
+    where: {
+      id: {
+        in: normalizedIds,
+      },
       ...assignableUserWhere(),
     },
     select: getAssignableUserSelect(),

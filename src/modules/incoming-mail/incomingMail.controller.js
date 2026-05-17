@@ -26,40 +26,6 @@ exports.getAll = async (req, res) => {
   }
 };
 
-exports.getInitialManager = async (req, res) => {
-  try {
-    const result = await service.getInitialManager({
-      divisionId: req.query.target_division_id ?? req.query.division_id,
-    });
-
-    return successResponse(res, result);
-  } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
-  }
-};
-
-exports.getInitialManagers = async (req, res) => {
-  try {
-    const result = await service.getInitialManagers({
-      divisionIds:
-        req.query.target_division_ids ??
-        req.query.target_division_id ??
-        req.query.division_ids ??
-        req.query.division_id,
-    });
-
-    return successResponse(res, result);
-  } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
-  }
-};
-
 exports.getDispositionRecipients = async (req, res) => {
   try {
     const result = await service.getDispositionRecipients({
@@ -81,6 +47,7 @@ exports.getById = async (req, res) => {
     const result = await service.getIncomingMailsById({
       req,
       id: req.params.id,
+      userId: req.user.id,
     });
     return successResponse(res, result);
   } catch (error) {
@@ -101,7 +68,8 @@ exports.createWithDispo = async (req, res) => {
 
     return res.status(201).json({
       status: true,
-      message: "Surat masuk beserta disposisi awal ke manajer berhasil dibuat",
+      message:
+        "Surat masuk beserta disposisi awal ke penerima disposisi divisi berhasil dibuat",
       data: result,
     });
   } catch (error) {

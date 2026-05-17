@@ -25,6 +25,7 @@ const LOAN_READ_URLS = [
   "/dashboard/arsip-digital/peminjaman/accept",
   "/dashboard/arsip-digital/peminjaman/laporan",
   "/dashboard/arsip-digital/historis/peminjaman",
+  "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
   "/dashboard/arsip-digital/laporan",
 ];
 const LOAN_REQUEST_URL = "/dashboard/arsip-digital/peminjaman/request";

@@ -10,6 +10,7 @@ const {
 } = require("../../utils/menu-access");
 const { resolveRequestUser, roleHasPermission } = require("../../utils/rbac");
 const { serializeRole } = require("../../utils/role-types");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 const ROLE_MENU_ADMIN_URL = "/dashboard/parameter/role-menu";
 
@@ -90,22 +91,21 @@ async function resolveReadScope(requestUser, requestedRoleId = null) {
   };
 }
 
-exports.getRoleMenus = async ({ page, limit, role_id, requestUser }) => {
-  const skip = (page - 1) * limit;
+exports.getRoleMenus = async ({ pagination, role_id, requestUser }) => {
   const scope = await resolveReadScope(requestUser, role_id);
 
   const where = scope.role_id ? { role_id: scope.role_id } : {};
 
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data: data.map(serializeRoleMenu),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 

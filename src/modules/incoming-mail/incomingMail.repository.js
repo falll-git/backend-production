@@ -10,13 +10,20 @@ const userSummarySelect = {
     select: {
       id: true,
       name: true,
-      type: true,
     },
   },
   division: {
     select: {
       id: true,
       name: true,
+    },
+  },
+};
+
+const storageInclude = {
+  cabinet: {
+    include: {
+      office: true,
     },
   },
 };
@@ -30,6 +37,9 @@ const baseInclude = {
     },
   },
   letter_prioritie: true,
+  storage: {
+    include: storageInclude,
+  },
   target_divisions: {
     orderBy: { created_at: "asc" },
     include: {
@@ -172,6 +182,56 @@ exports.updateDisposition = (id, data) => {
       sender: { select: userSummarySelect },
       receiver: { select: userSummarySelect },
     },
+  });
+};
+
+exports.forwardDispositionToReceivers = async ({
+  incomingMailId,
+  currentDispositionId,
+  senderId,
+  receiverIds,
+  note,
+  startDate,
+  dueDate,
+}) => {
+  return prisma.$transaction(async (tx) => {
+    await tx.incoming_mail_dispositions.update({
+      where: { id: currentDispositionId },
+      data: {
+        status: "FORWARDED",
+        is_complete: true,
+      },
+    });
+
+    const createdDispositions = [];
+
+    for (const receiverId of receiverIds) {
+      createdDispositions.push(
+        await tx.incoming_mail_dispositions.create({
+          data: {
+            incoming_mails_id: incomingMailId,
+            sender_id: senderId,
+            receiver_id: receiverId,
+            parent_disposition_id: currentDispositionId,
+            note,
+            start_date: startDate,
+            due_date: dueDate,
+            status: startDate ? "IN_PROGRESS" : "NEW",
+          },
+          include: {
+            sender: { select: userSummarySelect },
+            receiver: { select: userSummarySelect },
+          },
+        }),
+      );
+    }
+
+    await tx.incoming_mails.update({
+      where: { id: incomingMailId },
+      data: { status: "IN_PROGRESS", updated_by: senderId },
+    });
+
+    return createdDispositions;
   });
 };
 

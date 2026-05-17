@@ -1,13 +1,12 @@
 const repository = require("./division.repository");
 const { AppError } = require("../../utils/errors");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 function normalizeDivisionName(name) {
   return name.trim().replace(/\s+/g, " ");
 }
 
-exports.getDivision = async ({ page, limit, search }) => {
-  const skip = (page - 1) * limit;
-
+exports.getDivision = async ({ pagination, search }) => {
   const where = search
     ? {
         name: {
@@ -17,16 +16,16 @@ exports.getDivision = async ({ page, limit, search }) => {
       }
     : {};
 
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data,
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 

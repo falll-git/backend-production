@@ -1,29 +1,26 @@
 const prisma = require("../config/prisma");
+const {
+  MANAGE_ALL_FEATURE,
+  REPORT_ALL_FEATURE,
+  VIEW_DIVISION_FEATURE,
+} = require("./menu-access");
+const { roleHasFeature } = require("./rbac");
 
-function normalizeName(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function isLegalIdentity(userOrScope) {
-  const roleName = normalizeName(userOrScope?.roleName || userOrScope?.role?.name);
-  const divisionName = normalizeName(
-    userOrScope?.divisionName || userOrScope?.division?.name,
-  );
-
-  return roleName === "legal" || divisionName === "legal";
-}
-
-function canReadDivisionDocuments(userOrScope) {
-  const roleName = normalizeName(userOrScope?.roleName || userOrScope?.role?.name);
-
-  return (
-    roleName === "manager" ||
-    roleName === "supervisor" ||
-    isLegalIdentity(userOrScope)
-  );
-}
+const DIGITAL_ARCHIVE_DATA_SCOPE_URLS = [
+  "/dashboard/arsip-digital/input-dokumen",
+  "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
+  "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
+  "/dashboard/arsip-digital/disposisi/pengajuan",
+  "/dashboard/arsip-digital/disposisi/permintaan",
+  "/dashboard/arsip-digital/disposisi/historis",
+  "/dashboard/arsip-digital/peminjaman/request",
+  "/dashboard/arsip-digital/peminjaman/accept",
+  "/dashboard/arsip-digital/peminjaman/laporan",
+  "/dashboard/arsip-digital/historis/penyimpanan",
+  "/dashboard/arsip-digital/historis/peminjaman",
+  "/dashboard/arsip-digital/laporan",
+];
 
 async function getDigitalArchiveAccessScope(userId) {
   if (!userId) {
@@ -34,8 +31,10 @@ async function getDigitalArchiveAccessScope(userId) {
       divisionId: null,
       divisionName: null,
       canAccessRestricted: false,
+      canAccessRestrictedDocuments: false,
+      canViewAllDocuments: false,
       canAccessDivisionDocuments: false,
-      isLegalUser: false,
+      canManageAllDocuments: false,
     };
   }
 
@@ -43,14 +42,13 @@ async function getDigitalArchiveAccessScope(userId) {
     where: { id: userId },
     select: {
       id: true,
-      is_restrict: true,
+      can_access_restricted_documents: true,
       role_id: true,
       division_id: true,
       role: {
         select: {
           id: true,
           name: true,
-          type: true,
         },
       },
       division: {
@@ -61,20 +59,30 @@ async function getDigitalArchiveAccessScope(userId) {
       },
     },
   });
-  const scopeUser = {
-    roleName: user?.role?.name,
-    divisionName: user?.division?.name,
-  };
+  const roleId = user?.role_id ?? null;
+  const [
+    canViewAllDocuments,
+    canAccessDivisionDocuments,
+    canManageAllDocuments,
+  ] = await Promise.all([
+    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, REPORT_ALL_FEATURE),
+    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, VIEW_DIVISION_FEATURE),
+    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, MANAGE_ALL_FEATURE),
+  ]);
 
   return {
     userId: user?.id ?? null,
-    roleId: user?.role_id ?? null,
+    roleId,
     roleName: user?.role?.name ?? null,
     divisionId: user?.division_id ?? null,
     divisionName: user?.division?.name ?? null,
-    canAccessRestricted: Boolean(user?.is_restrict),
-    canAccessDivisionDocuments: canReadDivisionDocuments(scopeUser),
-    isLegalUser: isLegalIdentity(scopeUser),
+    canAccessRestricted: Boolean(user?.can_access_restricted_documents),
+    canAccessRestrictedDocuments: Boolean(
+      user?.can_access_restricted_documents,
+    ),
+    canViewAllDocuments,
+    canAccessDivisionDocuments,
+    canManageAllDocuments,
   };
 }
 
@@ -82,25 +90,25 @@ function buildApprovedDocumentAccessWhere(userId, referenceDate = new Date()) {
   return {
     requester_id: userId,
     status: "APPROVED",
-    OR: [
-      {
-        expires_at: null,
-      },
-      {
-        expires_at: {
-          gte: referenceDate,
-        },
-      },
-    ],
+    expires_at: {
+      gte: referenceDate,
+    },
   };
 }
 
 function buildDocumentVisibilityWhere(scope) {
-  if (scope?.canAccessRestricted) {
-    return {};
-  }
+  const canAccessRestrictedDocuments = Boolean(
+    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
+  );
+  const restrictedDocumentWhere = canAccessRestrictedDocuments
+    ? {}
+    : { access_level: "NON_RESTRICT" };
 
-  if (scope?.userId) {
+  let ownershipWhere = {};
+
+  if (scope?.canViewAllDocuments) {
+    ownershipWhere = {};
+  } else if (scope?.userId) {
     const conditions = [
       {
         created_by: scope.userId,
@@ -128,19 +136,34 @@ function buildDocumentVisibilityWhere(scope) {
       });
     }
 
-    return {
+    ownershipWhere = {
       OR: conditions,
+    };
+  } else {
+    ownershipWhere = {
+      id: "__no_digital_archive_access__",
     };
   }
 
+  if (Object.keys(ownershipWhere).length === 0) return restrictedDocumentWhere;
+  if (Object.keys(restrictedDocumentWhere).length === 0) return ownershipWhere;
+
   return {
-    id: "__no_digital_archive_access__",
+    AND: [ownershipWhere, restrictedDocumentWhere],
   };
 }
 
 function canScopeAccessDocument(document, scope) {
   if (!document) return false;
-  if (scope?.canAccessRestricted) return true;
+
+  const isRestricted =
+    document.access_level === "RESTRICT" || document.is_restricted === true;
+  const canAccessRestrictedDocuments = Boolean(
+    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
+  );
+
+  if (isRestricted && !canAccessRestrictedDocuments) return false;
+  if (scope?.canViewAllDocuments) return true;
   if (!scope?.userId) return false;
 
   if (document.created_by === scope.userId) return true;
@@ -169,16 +192,14 @@ function canScopeAccessDocument(document, scope) {
       return false;
     }
 
-    if (!item.expires_at) return true;
     return new Date(item.expires_at) >= new Date();
   });
 }
 
 module.exports = {
   buildApprovedDocumentAccessWhere,
-  canReadDivisionDocuments,
   canScopeAccessDocument,
+  DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
-  isLegalIdentity,
 };

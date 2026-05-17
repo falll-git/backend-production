@@ -1,10 +1,41 @@
 const prisma = require("../../config/prisma");
 
+const userSummarySelect = {
+  id: true,
+  name: true,
+  email: true,
+  role_id: true,
+  division_id: true,
+  role: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  division: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+};
+
+const storageInclude = {
+  cabinet: {
+    include: {
+      office: true,
+    },
+  },
+};
+
 const baseInclude = {
   letter_prioritie: true,
-  creator: true,
-  updater: true,
-  deleter: true,
+  storage: {
+    include: storageInclude,
+  },
+  creator: { select: userSummarySelect },
+  updater: { select: userSummarySelect },
+  deleter: { select: userSummarySelect },
 };
 
 function loadById(id) {

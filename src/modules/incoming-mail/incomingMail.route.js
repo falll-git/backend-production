@@ -31,18 +31,6 @@ router.post(
   controller.createWithDispo,
 );
 router.get(
-  "/initial-manager",
-  auth,
-  authorize(INCOMING_MAIL_MENU_URL, "create"),
-  controller.getInitialManager,
-);
-router.get(
-  "/initial-managers",
-  auth,
-  authorize(INCOMING_MAIL_MENU_URL, "create"),
-  controller.getInitialManagers,
-);
-router.get(
   "/disposition-recipients",
   auth,
   authorize(INCOMING_MAIL_MENU_URL, "update", { feature: REDISPOSE_FEATURE }),

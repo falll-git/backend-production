@@ -1,5 +1,9 @@
 const service = require("./role.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const {
+  PAGINATION_PROFILES,
+  resolvePagination,
+} = require("../../utils/pagination");
 
 function resolveStatusCode(error, fallback = 400) {
   return error.statusCode || fallback;
@@ -7,12 +11,10 @@ function resolveStatusCode(error, fallback = 400) {
 
 exports.getAll = async (req, res) => {
   try {
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
+    const pagination = resolvePagination(req.query, PAGINATION_PROFILES.SETUP);
     const search = req.query.search || "";
-    const type = req.query.type || "";
 
-    const result = await service.getRoles({ page, limit, search, type });
+    const result = await service.getRoles({ pagination, search });
     paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({

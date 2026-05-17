@@ -11,6 +11,7 @@ exports.paginatedResponse = (res, data, meta) => {
   res.status(200).json({
     status: true,
     success: true,
+    meta,
     ...meta,
     data,
   });

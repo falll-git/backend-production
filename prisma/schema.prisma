@@ -7,29 +7,27 @@ datasource db {
 }
 
 model users {
-  id                       String                   @id @default(uuid())
-  name                     String
-  username                 String                   @unique
-  email                    String                   @unique
-  phone                    String?
-  is_active                Boolean                  @default(true)
-  is_restrict              Boolean                  @default(false)
-  onboarding_status        user_onboarding_statuses @default(NOT_ACTIVATED)
-  password                 String
-  role_id                  String
-  division_id              String
-  refresh_token            String?
-  refresh_token_expires_at DateTime?
-  email_verified_at        DateTime?
-  password_set_at          DateTime?
-  invited_at               DateTime?
-  activated_at             DateTime?
-  deactivated_at           DateTime?
-  deactivated_by           String?
-  deactivation_reason      String?
-  reactivated_at           DateTime?
-  reactivated_by           String?
-  reactivation_reason      String?
+  id                              String                   @id @default(uuid())
+  name                            String
+  username                        String                   @unique
+  email                           String                   @unique
+  phone                           String?
+  is_active                       Boolean                  @default(true)
+  can_access_restricted_documents Boolean                  @default(false)
+  onboarding_status               user_onboarding_statuses @default(NOT_ACTIVATED)
+  password                        String
+  role_id                         String
+  division_id                     String
+  email_verified_at               DateTime?
+  password_set_at                 DateTime?
+  invited_at                      DateTime?
+  activated_at                    DateTime?
+  deactivated_at                  DateTime?
+  deactivated_by                  String?
+  deactivation_reason             String?
+  reactivated_at                  DateTime?
+  reactivated_by                  String?
+  reactivation_reason             String?
 
   role               roles                @relation(fields: [role_id], references: [id])
   division           divisions            @relation(fields: [division_id], references: [id])
@@ -66,6 +64,8 @@ model users {
   handed_over_digital_document_loans  digital_document_loans[]           @relation("DigitalDocumentLoanHandOverActor")
   returned_digital_document_loans     digital_document_loans[]           @relation("DigitalDocumentLoanReturnActor")
   digital_document_activity_logs      digital_document_activity_logs[]   @relation("DigitalDocumentActivityActor")
+  marketing_debtors                   digital_debtors[]                  @relation("DebtorMarketingOwner")
+  marketing_contracts                 debtor_contracts[]                 @relation("ContractMarketingOwner")
 
   created_outgoing_mails outgoing_mails[] @relation("OutgoingMailsCreator")
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
@@ -157,9 +157,13 @@ enum storage_activity_actions {
   LOAN_RETURNED
 }
 
-enum role_types {
-  MAIN
-  ADDITIONAL
+enum watermark_statuses {
+  PENDING
+  PROCESSING
+  APPLIED
+  SKIPPED
+  FAILED
+  UNSUPPORTED
 }
 
 model auth_action_tokens {
@@ -195,13 +199,10 @@ model refresh_tokens {
 model roles {
   id          String       @id @default(uuid())
   name        String       @unique
-  type        role_types   @default(ADDITIONAL)
   users       users[]
   roles_menus role_menus[]
   created_at  DateTime     @default(now())
   updated_at  DateTime     @updatedAt
-
-  @@index([type])
 }
 
 model divisions {
@@ -224,6 +225,10 @@ model menus {
   children_snapshot String?      @map("children")
   icon              String?
   url               String       @default("")
+  menu_type         String       @default("NAVIGATION")
+  placement         String       @default("SIDEBAR")
+  render_in_sidebar Boolean      @default(true)
+  component_key     String?
   order             Int?
   roleMenus         role_menus[]
   parent            menus?       @relation("MenuHierarchy", fields: [parent_id], references: [id], onDelete: SetNull)
@@ -233,6 +238,9 @@ model menus {
 
   @@index([parent_id])
   @@index([order])
+  @@index([menu_type])
+  @@index([placement])
+  @@index([render_in_sidebar])
 }
 
 model role_menus {
@@ -253,6 +261,46 @@ model role_menus {
   updated_at DateTime @updatedAt
 
   @@unique([role_id, menu_id])
+}
+
+model watermark_settings {
+  id                  String   @id @default(uuid())
+  is_enabled          Boolean  @default(false)
+  target_modules      String[] @default(["digital_archive", "incoming_mail", "outgoing_mail", "memorandum"])
+  watermark_type      String   @default("TEXT")
+  text_template       String?
+  text_color          String   @default("#1F2937")
+  text_opacity        Float    @default(0.16)
+  font_family         String   @default("Arial")
+  font_size           Int      @default(42)
+  image_path          String?
+  image_original_name String?
+  image_mime_type     String?
+  image_size_bytes    Int?
+  image_opacity       Float    @default(0.16)
+  image_scale         Float    @default(0.35)
+  position            String   @default("CENTER")
+  repeat_pattern      Boolean  @default(true)
+  rotation            Float    @default(-35)
+  spacing_x           Int      @default(280)
+  spacing_y           Int      @default(180)
+  updated_by          String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  @@index([is_enabled])
+}
+
+model storage_usage_configs {
+  id                   String   @id @default(uuid())
+  free_quota_gb        Float    @default(500)
+  overage_price_per_gb Decimal  @default(0.0023) @db.Decimal(12, 6)
+  currency             String   @default("USD")
+  is_active            Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@index([is_active])
 }
 
 model storage_offices {
@@ -289,6 +337,9 @@ model storages {
   cabinet storage_cabinets @relation(fields: [cabinet_id], references: [id])
 
   digital_documents                   digital_documents[]
+  incoming_mails                      incoming_mails[]
+  outgoing_mails                      outgoing_mails[]
+  memorandums                         memorandums[]
   digital_document_activity_logs_from digital_document_activity_logs[] @relation("DigitalDocumentActivityFromStorage")
   digital_document_activity_logs_to   digital_document_activity_logs[] @relation("DigitalDocumentActivityToStorage")
 
@@ -318,32 +369,45 @@ model letter_priorities {
 }
 
 model incoming_mails {
-  id                  String                 @id @default(uuid())
-  letter_prioritie_id String
-  name                String
-  receive_date        DateTime
-  address             String
-  mail_number         String                 @unique
-  regarding           String
-  description         String?
-  file                String?
-  status              mail_workflow_statuses @default(NEW)
-  created_by          String?
-  updated_by          String?
-  deleted_by          String?
-  created_at          DateTime               @default(now())
-  updated_at          DateTime               @updatedAt
-  deleted_at          DateTime?
-  letter_prioritie    letter_priorities      @relation(fields: [letter_prioritie_id], references: [id])
-  creator             users?                 @relation("IncomingMailsCreator", fields: [created_by], references: [id])
-  updater             users?                 @relation("IncomingMailsUpdater", fields: [updated_by], references: [id])
-  deleter             users?                 @relation("IncomingMailsDeleter", fields: [deleted_by], references: [id])
+  id                        String                 @id @default(uuid())
+  letter_prioritie_id       String
+  storage_id                String
+  name                      String
+  receive_date              DateTime
+  address                   String
+  mail_number               String                 @unique
+  regarding                 String
+  description               String?
+  file                      String?
+  file_size_bytes           Int?
+  watermark_status          watermark_statuses     @default(SKIPPED)
+  watermark_file            String?
+  watermark_file_size_bytes Int?
+  watermark_source_path     String?
+  watermark_settings_hash   String?
+  watermark_error_message   String?
+  watermark_requested_at    DateTime?
+  watermark_applied_at      DateTime?
+  status                    mail_workflow_statuses @default(NEW)
+  created_by                String?
+  updated_by                String?
+  deleted_by                String?
+  created_at                DateTime               @default(now())
+  updated_at                DateTime               @updatedAt
+  deleted_at                DateTime?
+  letter_prioritie          letter_priorities      @relation(fields: [letter_prioritie_id], references: [id])
+  storage                   storages               @relation(fields: [storage_id], references: [id])
+  creator                   users?                 @relation("IncomingMailsCreator", fields: [created_by], references: [id])
+  updater                   users?                 @relation("IncomingMailsUpdater", fields: [updated_by], references: [id])
+  deleter                   users?                 @relation("IncomingMailsDeleter", fields: [deleted_by], references: [id])
 
   disposition_mails incoming_mail_dispositions[]
   target_divisions  incoming_mail_target_divisions[]
 
   @@index([letter_prioritie_id])
+  @@index([storage_id])
   @@index([status])
+  @@index([watermark_status])
 }
 
 model incoming_mail_target_divisions {
@@ -391,26 +455,32 @@ model incoming_mail_dispositions {
 }
 
 model digital_documents {
-  id                String                         @id @default(uuid())
-  storage_id        String
-  owner_user_id     String?
-  owner_division_id String?
-  debtor_id         String?
-  is_restricted     Boolean                        @default(false)
-  access_level      digital_document_access_levels @default(NON_RESTRICT)
-  document_type_id  String
-  document_number   String                         @unique
-  document_name     String
-  description       String?
-  file              String?
-  document_date     DateTime?
-  due_date          DateTime?
-  created_by        String
-  updated_by        String?
-  deleted_by        String?
-  created_at        DateTime                       @default(now())
-  updated_at        DateTime                       @updatedAt
-  deleted_at        DateTime?
+  id                        String                         @id @default(uuid())
+  storage_id                String
+  owner_user_id             String?
+  owner_division_id         String?
+  debtor_id                 String?
+  is_restricted             Boolean                        @default(false)
+  access_level              digital_document_access_levels @default(NON_RESTRICT)
+  document_type_id          String
+  document_number           String                         @unique
+  document_name             String
+  description               String?
+  file                      String?
+  watermark_status          watermark_statuses             @default(SKIPPED)
+  watermark_file            String?
+  watermark_file_size_bytes Int?
+  watermark_source_path     String?
+  watermark_settings_hash   String?
+  watermark_error_message   String?
+  watermark_requested_at    DateTime?
+  watermark_applied_at      DateTime?
+  created_by                String
+  updated_by                String?
+  deleted_by                String?
+  created_at                DateTime                       @default(now())
+  updated_at                DateTime                       @updatedAt
+  deleted_at                DateTime?
 
   storage       storages       @relation(fields: [storage_id], references: [id])
   document_type document_types @relation(fields: [document_type_id], references: [id])
@@ -435,22 +505,45 @@ model digital_documents {
   @@index([document_type_id])
   @@index([created_by])
   @@index([access_level])
-  @@index([due_date])
+  @@index([watermark_status])
 }
 
 model digital_debtors {
-  id               String              @id @default(uuid())
-  debtor_number    String?             @unique
-  name             String
-  identity_number  String?             @unique
-  financing_number String?
-  description      String?
-  documents        digital_documents[]
-  created_at       DateTime            @default(now())
-  updated_at       DateTime            @updatedAt
+  id                String    @id @default(uuid())
+  debtor_number     String?   @unique
+  name              String
+  identity_number   String?   @unique
+  financing_number  String?
+  address           String?
+  phone             String?
+  branch_id         String?
+  marketing_user_id String?
+  status            String    @default("ACTIVE")
+  description       String?
+  created_by        String?
+  updated_by        String?
+  deleted_by        String?
+  deleted_at        DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  branch         branches?           @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  marketing_user users?              @relation("DebtorMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
+  documents      digital_documents[]
+
+  contracts        debtor_contracts[]
+  debtor_documents debtor_documents[]
+  import_records   debtor_external_records[]
+  marketing_items  debtor_marketing_activities[]
+  warning_letters  debtor_warning_letters[]
+  legal_ideb       legal_ideb_uploads[]
 
   @@index([name])
   @@index([financing_number])
+  @@index([branch_id])
+  @@index([marketing_user_id])
+  @@index([status])
+  @@index([deleted_at])
 }
 
 model digital_document_related_users {
@@ -497,7 +590,7 @@ model digital_document_access_requests {
   status         digital_document_access_request_statuses @default(PENDING)
   request_reason String
   action_note    String?
-  expires_at     DateTime?
+  expires_at     DateTime
   acted_by       String?
   acted_at       DateTime?
   approved_at    DateTime?
@@ -579,41 +672,64 @@ model digital_document_activity_logs {
 model outgoing_mails {
   id String @id @default(uuid())
 
-  letter_prioritie_id String
-  delivery_media      outgoing_mail_delivery_media
-  name                String
-  send_date           DateTime
-  address             String
-  mail_number         String                       @unique
-  file                String?
-  status              outgoing_mail_statuses       @default(ACTIVE)
-  created_by          String?
-  updated_by          String?
-  deleted_by          String?
-  created_at          DateTime                     @default(now())
-  updated_at          DateTime                     @updatedAt
-  deleted_at          DateTime?
+  letter_prioritie_id       String
+  storage_id                String
+  delivery_media            outgoing_mail_delivery_media
+  name                      String
+  send_date                 DateTime
+  address                   String
+  mail_number               String                       @unique
+  file                      String?
+  file_size_bytes           Int?
+  watermark_status          watermark_statuses           @default(SKIPPED)
+  watermark_file            String?
+  watermark_file_size_bytes Int?
+  watermark_source_path     String?
+  watermark_settings_hash   String?
+  watermark_error_message   String?
+  watermark_requested_at    DateTime?
+  watermark_applied_at      DateTime?
+  status                    outgoing_mail_statuses       @default(ACTIVE)
+  created_by                String?
+  updated_by                String?
+  deleted_by                String?
+  created_at                DateTime                     @default(now())
+  updated_at                DateTime                     @updatedAt
+  deleted_at                DateTime?
 
   creator          users?            @relation("OutgoingMailsCreator", fields: [created_by], references: [id])
   updater          users?            @relation("OutgoingMailsUpdater", fields: [updated_by], references: [id])
   deleter          users?            @relation("OutgoingMailsDeleter", fields: [deleted_by], references: [id])
   letter_prioritie letter_priorities @relation(fields: [letter_prioritie_id], references: [id])
+  storage          storages          @relation(fields: [storage_id], references: [id])
 
   @@index([letter_prioritie_id])
+  @@index([storage_id])
   @@index([status])
+  @@index([watermark_status])
 }
 
 model memorandums {
-  id                 String                 @id @default(uuid())
-  origin_division_id String
-  memo_number        String                 @unique
-  memo_date          DateTime
-  received_date      DateTime
-  due_date           DateTime?
-  regarding          String
-  description        String?
-  file               String?
-  status             mail_workflow_statuses @default(NEW)
+  id                        String                 @id @default(uuid())
+  origin_division_id        String
+  storage_id                String
+  memo_number               String                 @unique
+  memo_date                 DateTime
+  received_date             DateTime
+  due_date                  DateTime?
+  regarding                 String
+  description               String?
+  file                      String?
+  file_size_bytes           Int?
+  watermark_status          watermark_statuses     @default(SKIPPED)
+  watermark_file            String?
+  watermark_file_size_bytes Int?
+  watermark_source_path     String?
+  watermark_settings_hash   String?
+  watermark_error_message   String?
+  watermark_requested_at    DateTime?
+  watermark_applied_at      DateTime?
+  status                    mail_workflow_statuses @default(NEW)
 
   created_by String?
   updated_by String?
@@ -623,6 +739,7 @@ model memorandums {
   deleted_at DateTime?
 
   origin_division divisions @relation(fields: [origin_division_id], references: [id])
+  storage         storages  @relation(fields: [storage_id], references: [id])
 
   creator users? @relation("MemorandumCreator", fields: [created_by], references: [id])
   updater users? @relation("MemorandumUpdater", fields: [updated_by], references: [id])
@@ -632,7 +749,9 @@ model memorandums {
   target_divisions memorandum_target_divisions[]
 
   @@index([origin_division_id])
+  @@index([storage_id])
   @@index([status])
+  @@index([watermark_status])
 }
 
 model memorandum_target_divisions {
@@ -677,4 +796,737 @@ model memorandum_dispositions {
 
   @@index([memorandums_id, status])
   @@index([parent_disposition_id])
+}
+
+model branches {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  name       String
+  address    String?
+  phone      String?
+  is_active  Boolean   @default(true)
+  created_by String?
+  updated_by String?
+  deleted_by String?
+  deleted_at DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  debtors   digital_debtors[]
+  contracts debtor_contracts[]
+
+  @@index([name])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model financing_products {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String    @unique
+  description String?
+  is_active   Boolean   @default(true)
+  created_by  String?
+  updated_by  String?
+  deleted_by  String?
+  deleted_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  contracts debtor_contracts[]
+
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model collectibility_levels {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  level       Int       @unique
+  name        String    @unique
+  is_npf      Boolean   @default(false)
+  description String?
+  is_active   Boolean   @default(true)
+  created_by  String?
+  updated_by  String?
+  deleted_by  String?
+  deleted_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  collectibilities debtor_collectibilities[]
+
+  @@index([is_npf])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model contract_types {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String    @unique
+  description String?
+  is_active   Boolean   @default(true)
+  created_by  String?
+  updated_by  String?
+  deleted_by  String?
+  deleted_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  contracts debtor_contracts[]
+
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model third_parties {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  name           String
+  category       String
+  address        String?
+  phone          String?
+  email          String?
+  contact_person String?
+  description    String?
+  is_active      Boolean   @default(true)
+  created_by     String?
+  updated_by     String?
+  deleted_by     String?
+  deleted_at     DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  notary_progress    legal_notary_progress[]
+  insurance_progress legal_insurance_progress[]
+  deposits           legal_deposits[]
+
+  @@unique([category, name])
+  @@index([category])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model document_checklists {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  name          String
+  category      String?
+  document_type String?
+  description   String?
+  is_required   Boolean   @default(false)
+  is_active     Boolean   @default(true)
+  created_by    String?
+  updated_by    String?
+  deleted_by    String?
+  deleted_at    DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  debtor_documents debtor_documents[]
+
+  @@index([category])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model numbering_templates {
+  id               String    @id @default(uuid())
+  code             String    @unique
+  name             String
+  module           String
+  document_type    String
+  prefix_template  String
+  sequence_padding Int       @default(4)
+  reset_period     String    @default("MONTHLY")
+  last_sequence    Int       @default(0)
+  last_period_key  String?
+  description      String?
+  is_active        Boolean   @default(true)
+  created_by       String?
+  updated_by       String?
+  deleted_by       String?
+  deleted_at       DateTime?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  print_histories legal_print_histories[]
+
+  @@index([module, document_type])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model institution_profiles {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  name            String
+  legal_name      String?
+  address         String?
+  phone           String?
+  email           String?
+  tax_number      String?
+  license_number  String?
+  logo_file_path  String?
+  logo_file_name  String?
+  logo_mime_type  String?
+  logo_size_bytes Int?
+  is_active       Boolean   @default(true)
+  created_by      String?
+  updated_by      String?
+  deleted_by      String?
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model sla_reminder_configs {
+  id                   String    @id @default(uuid())
+  code                 String    @unique
+  name                 String
+  module               String
+  event_key            String
+  due_days             Int
+  reminder_days_before Int       @default(0)
+  escalation_days      Int?
+  description          String?
+  is_active            Boolean   @default(true)
+  created_by           String?
+  updated_by           String?
+  deleted_by           String?
+  deleted_at           DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  @@index([module, event_key])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model marketing_activity_types {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String
+  category    String?
+  description String?
+  is_active   Boolean   @default(true)
+  created_by  String?
+  updated_by  String?
+  deleted_by  String?
+  deleted_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  marketing_items debtor_marketing_activities[]
+
+  @@index([category])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model deposit_types {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String
+  category    String?
+  description String?
+  is_active   Boolean   @default(true)
+  created_by  String?
+  updated_by  String?
+  deleted_by  String?
+  deleted_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  deposits legal_deposits[]
+
+  @@index([category])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model debtor_contracts {
+  id                  String    @id @default(uuid())
+  no_kontrak          String    @unique
+  debtor_id           String
+  product_id          String
+  akad_type_id        String
+  branch_id           String?
+  marketing_user_id   String?
+  tanggal_akad        DateTime
+  tanggal_jatuh_tempo DateTime?
+  plafond             Decimal   @default(0) @db.Decimal(18, 2)
+  pokok               Decimal   @default(0) @db.Decimal(18, 2)
+  margin              Decimal   @default(0) @db.Decimal(18, 2)
+  tenor               Int
+  outstanding_pokok   Decimal   @default(0) @db.Decimal(18, 2)
+  outstanding_margin  Decimal   @default(0) @db.Decimal(18, 2)
+  status              String    @default("ACTIVE")
+  objek_pembiayaan    String?
+  agunan              String?
+  created_by          String?
+  updated_by          String?
+  deleted_by          String?
+  deleted_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  debtor             digital_debtors               @relation(fields: [debtor_id], references: [id])
+  product            financing_products            @relation(fields: [product_id], references: [id])
+  akad_type          contract_types                @relation(fields: [akad_type_id], references: [id])
+  branch             branches?                     @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  marketing_user     users?                        @relation("ContractMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
+  collectibilities   debtor_collectibilities[]
+  documents          debtor_documents[]
+  import_records     debtor_external_records[]
+  marketing_items    debtor_marketing_activities[]
+  warning_letters    debtor_warning_letters[]
+  legal_prints       legal_print_histories[]
+  legal_ideb         legal_ideb_uploads[]
+  notary_progress    legal_notary_progress[]
+  insurance_progress legal_insurance_progress[]
+  claims             legal_claims[]
+  deposits           legal_deposits[]
+
+  @@index([debtor_id])
+  @@index([product_id])
+  @@index([akad_type_id])
+  @@index([branch_id])
+  @@index([marketing_user_id])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model debtor_collectibilities {
+  id                 String    @id @default(uuid())
+  contract_id        String
+  period_month       String
+  kol_level_id       String
+  outstanding_pokok  Decimal   @default(0) @db.Decimal(18, 2)
+  outstanding_margin Decimal   @default(0) @db.Decimal(18, 2)
+  dpd                Int       @default(0)
+  notes              String?
+  created_by         String?
+  updated_by         String?
+  deleted_by         String?
+  deleted_at         DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  contract  debtor_contracts      @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+  kol_level collectibility_levels @relation(fields: [kol_level_id], references: [id])
+
+  @@unique([contract_id, period_month])
+  @@index([kol_level_id])
+  @@index([period_month])
+  @@index([deleted_at])
+}
+
+model debtor_import_jobs {
+  id            String    @id @default(uuid())
+  type          String
+  status        String    @default("PENDING")
+  file_path     String
+  file_name     String?
+  mime_type     String?
+  size_bytes    Int?
+  checksum      String?
+  total_rows    Int       @default(0)
+  success_rows  Int       @default(0)
+  failed_rows   Int       @default(0)
+  error_summary Json?
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_by    String?
+  updated_by    String?
+  deleted_by    String?
+  deleted_at    DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  records debtor_external_records[]
+
+  @@index([type, status])
+  @@index([created_at])
+  @@index([deleted_at])
+}
+
+model debtor_external_records {
+  id            String    @id @default(uuid())
+  import_job_id String?
+  source_type   String
+  debtor_id     String?
+  contract_id   String?
+  period_month  String?
+  status        String    @default("MATCH_PENDING")
+  raw_reference String?
+  summary       Json?
+  file_path     String?
+  file_name     String?
+  mime_type     String?
+  size_bytes    Int?
+  created_by    String?
+  updated_by    String?
+  deleted_by    String?
+  deleted_at    DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  import_job debtor_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
+  debtor     digital_debtors?    @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract   debtor_contracts?   @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+
+  @@index([source_type, status])
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([period_month])
+  @@index([deleted_at])
+}
+
+model debtor_documents {
+  id                    String    @id @default(uuid())
+  debtor_id             String
+  contract_id           String?
+  document_checklist_id String?
+  document_type         String
+  category              String    @default("LAINNYA")
+  description           String?
+  file_path             String
+  file_name             String?
+  mime_type             String?
+  size_bytes            Int?
+  checksum              String?
+  uploaded_by           String?
+  created_by            String?
+  updated_by            String?
+  deleted_by            String?
+  deleted_at            DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  debtor             digital_debtors      @relation(fields: [debtor_id], references: [id])
+  contract           debtor_contracts?    @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  document_checklist document_checklists? @relation(fields: [document_checklist_id], references: [id], onDelete: SetNull)
+
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([document_checklist_id])
+  @@index([document_type])
+  @@index([category])
+  @@index([deleted_at])
+}
+
+model debtor_marketing_activities {
+  id                         String    @id @default(uuid())
+  activity_kind              String
+  debtor_id                  String
+  contract_id                String?
+  marketing_activity_type_id String?
+  activity_date              DateTime?
+  target_date                DateTime?
+  status                     String    @default("PENDING")
+  action_plan                String?
+  visit_address              String?
+  visit_result               String?
+  conclusion                 String?
+  handling_step              String?
+  handling_result            String?
+  notes                      String?
+  file_path                  String?
+  file_name                  String?
+  mime_type                  String?
+  size_bytes                 Int?
+  checksum                   String?
+  created_by                 String?
+  updated_by                 String?
+  deleted_by                 String?
+  deleted_at                 DateTime?
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
+
+  debtor        digital_debtors           @relation(fields: [debtor_id], references: [id])
+  contract      debtor_contracts?         @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  activity_type marketing_activity_types? @relation(fields: [marketing_activity_type_id], references: [id], onDelete: SetNull)
+
+  @@index([activity_kind, status])
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([marketing_activity_type_id])
+  @@index([activity_date])
+  @@index([deleted_at])
+}
+
+model debtor_warning_letters {
+  id              String    @id @default(uuid())
+  debtor_id       String
+  contract_id     String?
+  letter_type     String
+  issued_at       DateTime
+  sent_at         DateTime?
+  delivery_status String    @default("BELUM_DIKIRIM")
+  description     String?
+  file_path       String?
+  file_name       String?
+  mime_type       String?
+  size_bytes      Int?
+  checksum        String?
+  created_by      String?
+  updated_by      String?
+  deleted_by      String?
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  debtor   digital_debtors   @relation(fields: [debtor_id], references: [id])
+  contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([letter_type])
+  @@index([delivery_status])
+  @@index([deleted_at])
+}
+
+model legal_document_templates {
+  id               String    @id @default(uuid())
+  template_type    String
+  version          Int       @default(1)
+  title            String
+  content_template String?
+  file_path        String?
+  file_name        String?
+  mime_type        String?
+  size_bytes       Int?
+  checksum         String?
+  is_active        Boolean   @default(true)
+  created_by       String?
+  updated_by       String?
+  deleted_by       String?
+  deleted_at       DateTime?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  print_histories legal_print_histories[]
+
+  @@unique([template_type, version])
+  @@index([template_type])
+  @@index([is_active])
+  @@index([deleted_at])
+}
+
+model legal_print_histories {
+  id                    String    @id @default(uuid())
+  template_id           String?
+  numbering_template_id String?
+  contract_id           String
+  document_type         String
+  generated_number      String    @unique
+  payload_snapshot      Json?
+  generated_file_path   String?
+  generated_file_name   String?
+  generated_mime_type   String?
+  generated_size_bytes  Int?
+  printed_by            String?
+  printed_at            DateTime  @default(now())
+  created_by            String?
+  updated_by            String?
+  deleted_by            String?
+  deleted_at            DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  template           legal_document_templates? @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  numbering_template numbering_templates?      @relation(fields: [numbering_template_id], references: [id], onDelete: SetNull)
+  contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
+
+  @@index([contract_id])
+  @@index([document_type])
+  @@index([printed_at])
+  @@index([deleted_at])
+}
+
+model legal_ideb_uploads {
+  id             String    @id @default(uuid())
+  debtor_id      String?
+  contract_id    String?
+  month          Int
+  year           Int
+  status         String    @default("PENDING")
+  result_summary Json?
+  file_path      String
+  file_name      String?
+  mime_type      String?
+  size_bytes     Int?
+  checksum       String?
+  uploaded_by    String?
+  created_by     String?
+  updated_by     String?
+  deleted_by     String?
+  deleted_at     DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([year, month])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_notary_progress {
+  id                     String    @id @default(uuid())
+  contract_id            String
+  third_party_id         String
+  deed_type              String
+  received_at            DateTime
+  estimated_completed_at DateTime?
+  completed_at           DateTime?
+  status                 String    @default("PROSES")
+  deed_number            String?
+  notes                  String?
+  file_path              String?
+  file_name              String?
+  mime_type              String?
+  size_bytes             Int?
+  checksum               String?
+  created_by             String?
+  updated_by             String?
+  deleted_by             String?
+  deleted_at             DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+
+  @@index([contract_id])
+  @@index([third_party_id])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_insurance_progress {
+  id              String    @id @default(uuid())
+  contract_id     String
+  third_party_id  String
+  insurance_type  String
+  coverage_amount Decimal   @default(0) @db.Decimal(18, 2)
+  period_start    DateTime
+  period_end      DateTime?
+  policy_number   String?
+  status          String    @default("PROSES")
+  notes           String?
+  file_path       String?
+  file_name       String?
+  mime_type       String?
+  size_bytes      Int?
+  checksum        String?
+  created_by      String?
+  updated_by      String?
+  deleted_by      String?
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  claims      legal_claims[]
+
+  @@index([contract_id])
+  @@index([third_party_id])
+  @@index([policy_number])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_claims {
+  id                    String    @id @default(uuid())
+  contract_id           String
+  insurance_progress_id String?
+  policy_number         String?
+  claim_type            String
+  claim_amount          Decimal   @default(0) @db.Decimal(18, 2)
+  submitted_at          DateTime
+  status                String    @default("PENGAJUAN")
+  approved_amount       Decimal?  @db.Decimal(18, 2)
+  disbursed_amount      Decimal?  @db.Decimal(18, 2)
+  disbursed_at          DateTime?
+  rejection_reason      String?
+  notes                 String?
+  file_path             String?
+  file_name             String?
+  mime_type             String?
+  size_bytes            Int?
+  checksum              String?
+  created_by            String?
+  updated_by            String?
+  deleted_by            String?
+  deleted_at            DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
+  insurance_progress legal_insurance_progress? @relation(fields: [insurance_progress_id], references: [id], onDelete: SetNull)
+
+  @@index([contract_id])
+  @@index([insurance_progress_id])
+  @@index([policy_number])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_deposits {
+  id               String    @id @default(uuid())
+  deposit_type_id  String?
+  type             String
+  contract_id      String
+  third_party_id   String?
+  nominal          Decimal   @default(0) @db.Decimal(18, 2)
+  paid_amount      Decimal   @default(0) @db.Decimal(18, 2)
+  processed_amount Decimal   @default(0) @db.Decimal(18, 2)
+  remaining_amount Decimal   @default(0) @db.Decimal(18, 2)
+  status           String    @default("PENDING")
+  notes            String?
+  created_by       String?
+  updated_by       String?
+  deleted_by       String?
+  deleted_at       DateTime?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  deposit_type deposit_types?               @relation(fields: [deposit_type_id], references: [id], onDelete: SetNull)
+  contract     debtor_contracts             @relation(fields: [contract_id], references: [id])
+  third_party  third_parties?               @relation(fields: [third_party_id], references: [id], onDelete: SetNull)
+  transactions legal_deposit_transactions[]
+
+  @@index([deposit_type_id])
+  @@index([type])
+  @@index([contract_id])
+  @@index([third_party_id])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_deposit_transactions {
+  id               String   @id @default(uuid())
+  deposit_id       String
+  transaction_date DateTime
+  action           String
+  amount           Decimal  @default(0) @db.Decimal(18, 2)
+  notes            String?
+  created_by       String?
+  created_at       DateTime @default(now())
+
+  deposit legal_deposits @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+
+  @@index([deposit_id])
+  @@index([transaction_date])
+  @@index([action])
 }

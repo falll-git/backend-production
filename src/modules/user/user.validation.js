@@ -16,9 +16,10 @@ exports.createUserSchema = Joi.object({
   }),
   phone: Joi.string().trim().optional(),
   is_active: Joi.boolean().optional(),
+  can_access_restricted_documents: Joi.boolean().optional(),
   is_restrict: Joi.boolean().optional(),
-  password: Joi.string().min(8).optional().messages({
-    "string.min": "Password minimal 8 karakter.",
+  password: Joi.forbidden().messages({
+    "any.unknown": "Password dibuat melalui tautan aktivasi.",
   }),
   send_invite: Joi.boolean().optional(),
   role_id: Joi.string().trim().required().messages({
@@ -44,9 +45,10 @@ exports.updateUserSchema = Joi.object({
   }),
   phone: Joi.string().trim().optional(),
   is_active: Joi.boolean().optional(),
+  can_access_restricted_documents: Joi.boolean().optional(),
   is_restrict: Joi.boolean().optional(),
-  password: Joi.string().min(8).optional().messages({
-    "string.min": "Password minimal 8 karakter.",
+  password: Joi.forbidden().messages({
+    "any.unknown": "Password hanya dapat diubah melalui alur reset password.",
   }),
   role_id: Joi.string().trim().optional().messages({
     "string.empty": "Role wajib dipilih.",

@@ -2,75 +2,115 @@ const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
 const { hashPassword } = require("../../src/utils/bcrypt");
 
-const DEFAULT_BOOTSTRAP_USER = {
-  name: "ruwangarsip dev",
-  username: "root",
-  email: "ruwangarsip@test.com",
-  password: null,
-  role: "IT",
-  division: "IT",
-  phone: null,
-};
-
-function readSeedValue(key, fallback) {
+function readEnv(key) {
   const value = process.env[key];
-  if (typeof value !== "string") return fallback;
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizePhone(value) {
-  if (typeof value !== "string") return null;
-
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "-") return null;
-  return trimmed;
+function readBooleanEnv(key) {
+  return readEnv(key).toLowerCase() === "true";
 }
 
-function getBootstrapUser() {
+function normalizeSeedUser(seedUser) {
   return {
-    name: readSeedValue("SEED_ADMIN_NAME", DEFAULT_BOOTSTRAP_USER.name),
-    username: readSeedValue(
-      "SEED_ADMIN_USERNAME",
-      DEFAULT_BOOTSTRAP_USER.username,
-    ).toLowerCase(),
-    email: readSeedValue(
-      "SEED_ADMIN_EMAIL",
-      DEFAULT_BOOTSTRAP_USER.email,
-    ).toLowerCase(),
-    password: readSeedValue(
-      "SEED_ADMIN_PASSWORD",
-      DEFAULT_BOOTSTRAP_USER.password,
-    ),
-    role: readSeedValue("SEED_ADMIN_ROLE", DEFAULT_BOOTSTRAP_USER.role),
-    division: readSeedValue(
-      "SEED_ADMIN_DIVISION",
-      DEFAULT_BOOTSTRAP_USER.division,
-    ),
-    phone: normalizePhone(
-      readSeedValue("SEED_ADMIN_PHONE", DEFAULT_BOOTSTRAP_USER.phone),
+    name: seedUser.name || seedUser.username,
+    username: String(seedUser.username || "").trim().toLowerCase(),
+    email: String(seedUser.email || "").trim().toLowerCase(),
+    password: String(seedUser.password || ""),
+    role: String(seedUser.role || "").trim(),
+    division: String(seedUser.division || "").trim(),
+    phone: seedUser.phone || null,
+    can_access_restricted_documents: Boolean(
+      seedUser.can_access_restricted_documents,
     ),
   };
 }
 
-async function seedUsers() {
-  console.log("Seeding users...");
+function parseSeedUsersJson() {
+  const raw = readEnv("SEED_USERS_JSON");
+  if (!raw) return [];
 
-  const bootstrapUser = getBootstrapUser();
-
-  if (!bootstrapUser.password) {
-    throw new Error("SEED_ADMIN_PASSWORD must be set.");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("SEED_USERS_JSON harus berupa JSON array yang valid.");
   }
 
-  if (bootstrapUser.password.length < 8) {
-    throw new Error("SEED_ADMIN_PASSWORD must be at least 8 characters.");
+  if (!Array.isArray(parsed)) {
+    throw new Error("SEED_USERS_JSON harus berupa JSON array.");
   }
+
+  return parsed.map(normalizeSeedUser);
+}
+
+function buildSeedUsers() {
+  const adminUsername = readEnv("SEED_ADMIN_USERNAME");
+  const adminEmail = readEnv("SEED_ADMIN_EMAIL");
+  const adminPassword = readEnv("SEED_ADMIN_PASSWORD");
+  const adminRole = readEnv("SEED_ADMIN_ROLE");
+  const adminDivision = readEnv("SEED_ADMIN_DIVISION");
+
+  if (
+    !adminUsername ||
+    !adminEmail ||
+    !adminPassword ||
+    !adminRole ||
+    !adminDivision
+  ) {
+    throw new Error(
+      "Seed user admin wajib dikonfigurasi lewat SEED_ADMIN_USERNAME, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_ROLE, dan SEED_ADMIN_DIVISION.",
+    );
+  }
+
+  return [
+    normalizeSeedUser({
+      name: readEnv("SEED_ADMIN_NAME") || adminUsername,
+      username: adminUsername,
+      email: adminEmail,
+      password: adminPassword,
+      role: adminRole,
+      division: adminDivision,
+      phone: readEnv("SEED_ADMIN_PHONE") || null,
+      can_access_restricted_documents: readBooleanEnv(
+        "SEED_ADMIN_CAN_ACCESS_RESTRICTED_DOCUMENTS",
+      ),
+    }),
+    ...parseSeedUsersJson(),
+  ];
+}
+
+function assertValidSeedPassword(seedUser) {
+  if (!seedUser.password) {
+    throw new Error(`Password seed wajib diisi untuk user ${seedUser.username}.`);
+  }
+
+  if (seedUser.password.length < 8) {
+    throw new Error(
+      `Password seed user ${seedUser.username} minimal 8 karakter.`,
+    );
+  }
+
+  if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(seedUser.password)) {
+    throw new Error(
+      `Password seed user ${seedUser.username} wajib mengandung huruf dan angka.`,
+    );
+  }
+
+  if (process.env.NODE_ENV === "production" && seedUser.password.length < 12) {
+    throw new Error(
+      `Password seed user ${seedUser.username} minimal 12 karakter di production.`,
+    );
+  }
+}
+
+async function upsertSeedUser(seedUser) {
+  assertValidSeedPassword(seedUser);
 
   const role = await prisma.roles.findFirst({
     where: {
       name: {
-        equals: bootstrapUser.role,
+        equals: seedUser.role,
         mode: "insensitive",
       },
     },
@@ -78,7 +118,7 @@ async function seedUsers() {
   const division = await prisma.divisions.findFirst({
     where: {
       name: {
-        equals: bootstrapUser.division,
+        equals: seedUser.division,
         mode: "insensitive",
       },
     },
@@ -86,17 +126,16 @@ async function seedUsers() {
 
   if (!role || !division) {
     throw new Error(
-      "Bootstrap user role or division not found. Make sure roles and divisions are seeded first.",
+      `Role atau divisi seed user ${seedUser.username} tidak ditemukan. Pastikan roles dan divisions sudah di-seed.`,
     );
   }
 
   const now = new Date();
-  const hashedPassword = await hashPassword(bootstrapUser.password);
   const existingByUsername = await prisma.users.findUnique({
-    where: { username: bootstrapUser.username },
+    where: { username: seedUser.username },
   });
   const existingByEmail = await prisma.users.findUnique({
-    where: { email: bootstrapUser.email },
+    where: { email: seedUser.email },
   });
   const existingUser = existingByUsername || existingByEmail;
 
@@ -106,19 +145,20 @@ async function seedUsers() {
     existingByUsername.id !== existingByEmail.id
   ) {
     throw new Error(
-      "Bootstrap username and email are already used by different users.",
+      `Username dan email seed user ${seedUser.username} sudah dipakai user berbeda.`,
     );
   }
 
-  const data = {
-    name: bootstrapUser.name,
-    username: bootstrapUser.username,
-    email: bootstrapUser.email,
-    phone: bootstrapUser.phone,
+  const baseData = {
+    name: seedUser.name,
+    username: seedUser.username,
+    email: seedUser.email,
+    phone: seedUser.phone,
     role_id: role.id,
     division_id: division.id,
     is_active: true,
-    is_restrict: false,
+    can_access_restricted_documents:
+      seedUser.can_access_restricted_documents ?? false,
     onboarding_status: "ACTIVE",
     email_verified_at: existingUser?.email_verified_at || now,
     password_set_at: existingUser?.password_set_at || now,
@@ -126,6 +166,11 @@ async function seedUsers() {
   };
 
   if (existingUser) {
+    const data = { ...baseData };
+    if (readBooleanEnv("SEED_RESET_EXISTING_PASSWORDS")) {
+      data.password = await hashPassword(seedUser.password);
+    }
+
     await prisma.users.update({
       where: { id: existingUser.id },
       data,
@@ -133,14 +178,25 @@ async function seedUsers() {
   } else {
     await prisma.users.create({
       data: {
-        ...data,
+        ...baseData,
         id: crypto.randomUUID(),
-        password: hashedPassword,
+        password: await hashPassword(seedUser.password),
       },
     });
   }
+}
 
-  console.log(`Users seeded! (Login username: ${bootstrapUser.username})`);
+async function seedUsers() {
+  console.log("Seeding users...");
+
+  const seededUsernames = [];
+
+  for (const seedUser of buildSeedUsers()) {
+    await upsertSeedUser(seedUser);
+    seededUsernames.push(seedUser.username);
+  }
+
+  console.log(`Users seeded! (Login usernames: ${seededUsernames.join(", ")})`);
 }
 
 module.exports = { seedUsers };

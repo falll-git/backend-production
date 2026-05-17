@@ -4,6 +4,13 @@ const {
   normalizeStoredPath,
 } = require("./persuratan-files");
 const {
+  buildWatermarkMeta,
+  resolveEffectiveFileUrl,
+} = require("../modules/watermark-settings/watermarkProcessor.service");
+const {
+  appendFileAccessToken,
+} = require("./file-access-token");
+const {
   getDeliveryMediaLabel,
   getOutgoingStatusCode,
   normalizeMailWorkflowStatus,
@@ -190,6 +197,30 @@ function serializeDivision(division) {
   };
 }
 
+function serializeStorageSummary(storage) {
+  if (!storage) return null;
+
+  const cabinet = storage.cabinet || null;
+  const office = cabinet?.office || null;
+  const locationLabel =
+    office && cabinet
+      ? `${office.name} - ${cabinet.code} (${storage.name})`
+      : storage.name || null;
+
+  return {
+    id: storage.id,
+    office_id: office?.id ?? null,
+    office_code: office?.code ?? null,
+    office_name: office?.name ?? null,
+    cabinet_id: cabinet?.id ?? storage.cabinet_id ?? null,
+    cabinet_code: cabinet?.code ?? null,
+    rack_name: storage.name ?? null,
+    capacity: storage.capacity ?? 0,
+    is_active: Boolean(storage.is_active),
+    location_label: locationLabel,
+  };
+}
+
 function serializeIncomingMailTargetDivision(item) {
   if (!item) return null;
 
@@ -228,6 +259,69 @@ function serializeMemorandumTargetDivision(item) {
     created_at: toIsoDateTime(item.created_at),
     updated_at: toIsoDateTime(item.updated_at),
   };
+}
+
+function uniqueUsersById(users) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const user of Array.isArray(users) ? users : []) {
+    if (!user?.id || seen.has(user.id)) continue;
+    seen.add(user.id);
+    unique.push(user);
+  }
+
+  return unique;
+}
+
+function mapInitialDispositionManagersByDivision(dispositions) {
+  const managersByDivision = new Map();
+
+  for (const disposition of Array.isArray(dispositions) ? dispositions : []) {
+    if (disposition.parent_disposition_id) continue;
+
+    const receiver = disposition.receiver;
+    const divisionId = receiver?.division_id;
+    if (!receiver?.id || !divisionId) continue;
+
+    const current = managersByDivision.get(divisionId) ?? [];
+    current.push(receiver);
+    managersByDivision.set(divisionId, uniqueUsersById(current));
+  }
+
+  return managersByDivision;
+}
+
+function attachTargetDivisionManagers(targetDivisions, dispositions) {
+  const managersByDivision = mapInitialDispositionManagersByDivision(dispositions);
+
+  return targetDivisions.map((target) => {
+    const dispositionManagers = managersByDivision.get(target.division_id) ?? [];
+    const managers = uniqueUsersById([
+      ...(target.manager ? [target.manager] : []),
+      ...dispositionManagers,
+    ]);
+
+    return {
+      ...target,
+      manager: target.manager ?? managers[0] ?? null,
+      manager_id: target.manager_id ?? (managers.length === 1 ? managers[0].id : null),
+      manager_name:
+        target.manager_name ?? (managers.length === 1 ? managers[0].name : null),
+      managers,
+      manager_ids: managers.map((manager) => manager.id),
+      manager_names: managers.map((manager) => manager.name).filter(Boolean),
+    };
+  });
+}
+
+function flattenTargetManagers(targetDivisions) {
+  return uniqueUsersById(
+    targetDivisions.flatMap((target) => [
+      ...(Array.isArray(target.managers) ? target.managers : []),
+      ...(target.manager ? [target.manager] : []),
+    ]),
+  );
 }
 
 function isOverdueDate(value, referenceDate = new Date()) {
@@ -318,13 +412,26 @@ function resolveMemorandumStatus(record) {
 
 async function serializePersuratanFile({
   req,
+  record,
+  module,
   currentValue,
   fallbackBaseName,
 }) {
   const normalizedStoredPath = normalizeStoredPath(currentValue) || null;
-  const fileUrl = normalizedStoredPath
-    ? buildFileUrl(req, normalizedStoredPath)
+  const originalFileUrl = normalizedStoredPath
+    ? appendFileAccessToken(req, buildFileUrl(req, normalizedStoredPath), {
+        storedPath: normalizedStoredPath,
+        module,
+        entityId: record?.id,
+      })
     : null;
+  const watermark = buildWatermarkMeta(req, record || {}, module);
+  const fileUrl = resolveEffectiveFileUrl(
+    req,
+    record || {},
+    originalFileUrl,
+    module,
+  );
   const fileName = currentValue
     ? deriveDocumentFileName(
         normalizedStoredPath || currentValue,
@@ -336,10 +443,12 @@ async function serializePersuratanFile({
     file: fileUrl,
     file_url: fileUrl,
     fileUrl: fileUrl,
+    original_file_url: originalFileUrl,
     file_path: normalizedStoredPath,
     filePath: normalizedStoredPath,
     file_name: fileName,
     fileName: fileName,
+    watermark,
   };
 }
 
@@ -426,6 +535,8 @@ async function serializeIncomingMail({ req, record }) {
     record.mail_number || record.regarding || record.name || record.id;
   const fileData = await serializePersuratanFile({
     req,
+    record,
+    module: "incoming_mail",
     currentValue: record.file,
     fallbackBaseName,
   });
@@ -451,7 +562,12 @@ async function serializeIncomingMail({ req, record }) {
   )
     .map(serializeIncomingMailTargetDivision)
     .filter(Boolean);
-  const effectiveTargetDivisions = targetDivisions;
+  const effectiveTargetDivisions = attachTargetDivisionManagers(
+    targetDivisions,
+    dispositions,
+  );
+  const targetManagers = flattenTargetManagers(effectiveTargetDivisions);
+  const storage = serializeStorageSummary(record.storage);
 
   return {
     ...record,
@@ -465,11 +581,17 @@ async function serializeIncomingMail({ req, record }) {
     target_division_names: effectiveTargetDivisions
       .map((item) => item.division_name)
       .filter(Boolean),
-    target_managers: effectiveTargetDivisions
-      .map((item) => item.manager)
+    target_managers: targetManagers,
+    target_manager_ids: targetManagers.map((manager) => manager.id),
+    target_manager_names: targetManagers
+      .map((manager) => manager.name)
       .filter(Boolean),
     disposition_mails: dispositions,
     receive_date: toIsoDateTime(record.receive_date),
+    storage_id: record.storage_id ?? storage?.id ?? null,
+    storage,
+    physical_storage: storage,
+    physical_storage_label: storage?.location_label ?? null,
     created_at: toIsoDateTime(record.created_at),
     updated_at: toIsoDateTime(record.updated_at),
     status: status.code,
@@ -485,10 +607,13 @@ async function serializeOutgoingMail({ req, record }) {
   const fallbackBaseName = record.mail_number || record.name || record.id;
   const fileData = await serializePersuratanFile({
     req,
+    record,
+    module: "outgoing_mail",
     currentValue: record.file,
     fallbackBaseName,
   });
   const status = resolveOutgoingMailStatus(record);
+  const storage = serializeStorageSummary(record.storage);
 
   return {
     ...record,
@@ -500,6 +625,10 @@ async function serializeOutgoingMail({ req, record }) {
     letter_prioritie: record.letter_prioritie
       ? { ...record.letter_prioritie }
       : null,
+    storage_id: record.storage_id ?? storage?.id ?? null,
+    storage,
+    physical_storage: storage,
+    physical_storage_label: storage?.location_label ?? null,
     send_date: toIsoDateTime(record.send_date),
     created_at: toIsoDateTime(record.created_at),
     updated_at: toIsoDateTime(record.updated_at),
@@ -515,6 +644,8 @@ async function serializeMemorandum({ req, record }) {
   const fallbackBaseName = record.memo_number || record.regarding || record.id;
   const fileData = await serializePersuratanFile({
     req,
+    record,
+    module: "memorandum",
     currentValue: record.file,
     fallbackBaseName,
   });
@@ -538,13 +669,22 @@ async function serializeMemorandum({ req, record }) {
     .map(serializeMemorandumTargetDivision)
     .filter(Boolean);
   const originDivision = serializeDivision(record.origin_division);
-  const effectiveTargetDivisions = targetDivisions;
+  const effectiveTargetDivisions = attachTargetDivisionManagers(
+    targetDivisions,
+    dispositions,
+  );
+  const targetManagers = flattenTargetManagers(effectiveTargetDivisions);
+  const storage = serializeStorageSummary(record.storage);
 
   return {
     ...record,
     origin_division: originDivision,
     origin_division_id: record.origin_division_id ?? null,
     origin_division_name: originDivision?.name ?? null,
+    storage_id: record.storage_id ?? storage?.id ?? null,
+    storage,
+    physical_storage: storage,
+    physical_storage_label: storage?.location_label ?? null,
     creator: serializeUser(record.creator),
     updater: serializeUser(record.updater),
     deleter: serializeUser(record.deleter),
@@ -555,8 +695,10 @@ async function serializeMemorandum({ req, record }) {
     target_division_names: effectiveTargetDivisions
       .map((item) => item.division_name)
       .filter(Boolean),
-    target_managers: effectiveTargetDivisions
-      .map((item) => item.manager)
+    target_managers: targetManagers,
+    target_manager_ids: targetManagers.map((manager) => manager.id),
+    target_manager_names: targetManagers
+      .map((manager) => manager.name)
       .filter(Boolean),
     dispositions,
     memo_date: toIsoDateTime(record.memo_date),
@@ -627,6 +769,10 @@ function toPrintableDocumentItems({ incoming, outgoing, memorandums }) {
       file_url: item.file_url,
       file_path: item.file_path,
       file_name: item.file_name,
+      storage_id: item.storage_id,
+      storage: item.storage,
+      physical_storage: item.physical_storage,
+      physical_storage_label: item.physical_storage_label,
       record: item,
     }),
   );
@@ -646,6 +792,10 @@ function toPrintableDocumentItems({ incoming, outgoing, memorandums }) {
       file_url: item.file_url,
       file_path: item.file_path,
       file_name: item.file_name,
+      storage_id: item.storage_id,
+      storage: item.storage,
+      physical_storage: item.physical_storage,
+      physical_storage_label: item.physical_storage_label,
       record: item,
     }),
   );
@@ -665,6 +815,10 @@ function toPrintableDocumentItems({ incoming, outgoing, memorandums }) {
       file_url: item.file_url,
       file_path: item.file_path,
       file_name: item.file_name,
+      storage_id: item.storage_id,
+      storage: item.storage,
+      physical_storage: item.physical_storage,
+      physical_storage_label: item.physical_storage_label,
       record: item,
     }),
   );

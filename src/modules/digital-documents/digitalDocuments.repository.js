@@ -11,7 +11,6 @@ const USER_SUMMARY_SELECT = {
     select: {
       id: true,
       name: true,
-      type: true,
     },
   },
   division: {
@@ -64,16 +63,9 @@ function getDocumentInclude() {
     access_requests: {
       where: {
         status: "APPROVED",
-        OR: [
-          {
-            expires_at: null,
-          },
-          {
-            expires_at: {
-              gte: new Date(),
-            },
-          },
-        ],
+        expires_at: {
+          gte: new Date(),
+        },
       },
       select: {
         id: true,

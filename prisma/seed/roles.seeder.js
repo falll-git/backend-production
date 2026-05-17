@@ -1,10 +1,11 @@
 const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
 
-const MAIN_ROLE_NAMES = ["Admin", "Staf", "Supervisor", "Manager", "IT"];
+const SEEDED_ROLE_NAMES = ["Admin", "Staf", "Supervisor", "Manager"];
 const LEGACY_ROLE_RENAMES = [
   { from: "Manajer", to: "Manager" },
   { from: "Staff", to: "Staf" },
+  { from: "IT", to: "Admin" },
 ];
 
 function mergePermissions(current, next) {
@@ -76,10 +77,7 @@ async function normalizeLegacyRole({ from, to }) {
     if (!targetRole) {
       await tx.roles.update({
         where: { id: sourceRole.id },
-        data: {
-          name: to,
-          type: "MAIN",
-        },
+        data: { name: to },
       });
       return;
     }
@@ -90,13 +88,13 @@ async function normalizeLegacyRole({ from, to }) {
   });
 }
 
-async function ensureRole(name, type) {
+async function ensureRole(name) {
   const existing = await findRoleByName(name);
 
   if (existing) {
     return prisma.roles.update({
       where: { id: existing.id },
-      data: { name, type },
+      data: { name },
     });
   }
 
@@ -104,7 +102,6 @@ async function ensureRole(name, type) {
     data: {
       id: crypto.randomUUID(),
       name,
-      type,
     },
   });
 }
@@ -116,18 +113,9 @@ async function seedRoles() {
     await normalizeLegacyRole(legacyRole);
   }
 
-  for (const name of MAIN_ROLE_NAMES) {
-    await ensureRole(name, "MAIN");
+  for (const name of SEEDED_ROLE_NAMES) {
+    await ensureRole(name);
   }
-
-  await prisma.roles.updateMany({
-    where: {
-      name: {
-        notIn: MAIN_ROLE_NAMES,
-      },
-    },
-    data: { type: "ADDITIONAL" },
-  });
 
   console.log("Roles seeded!");
 }

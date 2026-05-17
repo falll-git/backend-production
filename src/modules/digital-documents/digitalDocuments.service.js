@@ -12,17 +12,31 @@ const {
   serializeDigitalDocumentSummary,
   serializeDigitalDocumentActivityLog,
 } = require("../../utils/digital-archive-serializer");
+const {
+  PAGINATION_PROFILES,
+  buildPaginationMeta,
+  resolvePagination,
+} = require("../../utils/pagination");
+const {
+  enqueueRecordWatermark,
+} = require("../watermark-settings/watermarkProcessor.service");
+
+async function queueDigitalDocumentWatermark(documentId) {
+  try {
+    await enqueueRecordWatermark({
+      module: "digital_archive",
+      entityId: documentId,
+    });
+  } catch (error) {
+    console.error("Failed to queue digital archive watermark:", error);
+  }
+}
 
 function normalizeText(value) {
   if (value === undefined || value === null) return null;
 
   const normalized = String(value).trim().replace(/\s+/g, " ");
   return normalized || null;
-}
-
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function normalizeDocumentName(value) {
@@ -62,44 +76,6 @@ function normalizeUniqueIdArray(value) {
         .map((item) => item.trim());
 
   return [...new Set(rawItems.map(normalizeOptionalId).filter(Boolean))];
-}
-
-function parseOptionalDate(value, fieldLabel) {
-  if (value === undefined) return undefined;
-  if (value === null || value === "") return null;
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new AppError(`${fieldLabel} tidak valid`, 422);
-  }
-
-  return parsed;
-}
-
-function buildDateRangeWhere(field, start, end) {
-  const range = {};
-
-  if (start) {
-    const parsedStart = new Date(start);
-    if (!Number.isNaN(parsedStart.getTime())) {
-      range.gte = parsedStart;
-    }
-  }
-
-  if (end) {
-    const parsedEnd = new Date(end);
-    if (!Number.isNaN(parsedEnd.getTime())) {
-      range.lte = parsedEnd;
-    }
-  }
-
-  return Object.keys(range).length > 0 ? { [field]: range } : {};
-}
-
-function normalizeDateTime(value) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
 function buildDocumentFilePayload({
@@ -376,66 +352,6 @@ function buildDocumentWhere(query, scope) {
     });
   }
 
-  const documentDateRange = buildDateRangeWhere(
-    "document_date",
-    query.document_date_from,
-    query.document_date_to,
-  );
-  if (isNonEmptyObject(documentDateRange)) {
-    clauses.push(documentDateRange);
-  }
-
-  const dueDateRange = buildDateRangeWhere(
-    "due_date",
-    query.due_date_from,
-    query.due_date_to,
-  );
-  if (isNonEmptyObject(dueDateRange)) {
-    clauses.push(dueDateRange);
-  }
-
-  if (query.has_due_date !== undefined) {
-    const normalized = String(query.has_due_date).trim().toLowerCase();
-    if (normalized === "true") {
-      clauses.push({
-        due_date: {
-          not: null,
-        },
-      });
-    } else if (normalized === "false") {
-      clauses.push({
-        due_date: null,
-      });
-    }
-  }
-
-  switch (
-    String(query.due_status || "")
-      .trim()
-      .toUpperCase()
-  ) {
-    case "OVERDUE":
-      clauses.push({
-        due_date: {
-          lt: new Date(),
-        },
-      });
-      break;
-    case "UPCOMING": {
-      const nextThirtyDays = new Date();
-      nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
-      clauses.push({
-        due_date: {
-          gte: new Date(),
-          lte: nextThirtyDays,
-        },
-      });
-      break;
-    }
-    default:
-      break;
-  }
-
   if (query.is_restricted !== undefined) {
     const normalized = String(query.is_restricted).trim().toLowerCase();
     if (normalized === "true" || normalized === "false") {
@@ -451,16 +367,20 @@ function buildDocumentWhere(query, scope) {
 }
 
 function buildRequestableDocumentWhere(query, scope) {
-  if (!scope?.userId || scope.canAccessRestricted) {
+  if (!scope?.userId || scope.canViewAllDocuments) {
     return {
       id: "__no_requestable_digital_documents__",
     };
   }
 
+  const canAccessRestrictedDocuments = Boolean(
+    scope.canAccessRestrictedDocuments ?? scope.canAccessRestricted,
+  );
   const clauses = [
     {
       deleted_at: null,
     },
+    canAccessRestrictedDocuments ? {} : { access_level: "NON_RESTRICT" },
     {
       NOT: buildDocumentVisibilityWhere(scope),
     },
@@ -690,7 +610,7 @@ async function resolveOwnershipData({ payload, current, userId, client }) {
 
 function canManageDocument(document, scope, userId) {
   if (!document || !userId) return false;
-  if (scope?.canAccessRestricted) return true;
+  if (scope?.canManageAllDocuments) return true;
 
   return document.created_by === userId || document.owner_user_id === userId;
 }
@@ -706,10 +626,6 @@ async function createDocumentWithGeneratedNumber({
 }) {
   const normalizedName = normalizeDocumentName(payload.document_name);
   const description = normalizeText(payload.description);
-  const documentDate =
-    parseOptionalDate(payload.document_date, "Tanggal dokumen") || null;
-  const dueDate =
-    parseOptionalDate(payload.due_date, "Tanggal jatuh tempo") || null;
   const storedFile = persistDigitalArchiveFile({
     entity: "documents",
     input: payload.file,
@@ -735,8 +651,6 @@ async function createDocumentWithGeneratedNumber({
           owner_user_id: ownership.owner_user_id,
           owner_division_id: ownership.owner_division_id,
           debtor_id: debtorId,
-          document_date: documentDate,
-          due_date: dueDate,
           is_restricted: Boolean(payload.is_restricted),
           access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
           created_by: userId,
@@ -837,64 +751,56 @@ async function hydrateDocumentMetrics(document) {
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
   const where = buildDocumentWhere(query, scope);
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  if (String(query.limit || "").toLowerCase() === "all") {
+  if (pagination.all) {
     const data = await repository.findMany({ where });
     return {
       data: data.map((item) => serializeDigitalDocumentSummary(req, item)),
     };
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
-
   const data = await repository.findMany({
     where,
-    skip,
-    take: limit,
+    skip: pagination.skip,
+    take: pagination.take,
   });
   const total = await repository.count(where);
 
   return {
     data: data.map((item) => serializeDigitalDocumentSummary(req, item)),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
 exports.getRequestable = async ({ req, query, userId }) => {
   const scope = await getDigitalArchiveAccessScope(userId);
   const where = buildRequestableDocumentWhere(query, scope);
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  if (String(query.limit || "").toLowerCase() === "all") {
+  if (pagination.all) {
     const data = await repository.findMany({ where });
     return {
       data: data.map((item) => serializeRequestableDocument(req, item)),
     };
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
-
   const data = await repository.findMany({
     where,
-    skip,
-    take: limit,
+    skip: pagination.skip,
+    take: pagination.take,
   });
   const total = await repository.count(where);
 
   return {
     data: data.map((item) => serializeRequestableDocument(req, item)),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -937,23 +843,17 @@ exports.getActivityLogs = async ({ id, query, userId }) => {
     throw new AppError("Dokumen tidak ditemukan", 404);
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
+  const pagination = resolvePagination(query, PAGINATION_PROFILES.HISTORY);
 
   const data = await repository.findActivityLogsByDocumentId(id, {
-    skip,
-    take: limit,
+    skip: pagination.skip,
+    take: pagination.take,
   });
   const total = await repository.countActivityLogsByDocumentId(id);
 
   return {
     data: data.map(serializeDigitalDocumentActivityLog),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -1010,9 +910,19 @@ exports.create = async ({ req, payload, userId }) => {
     deleted_at: null,
   });
 
+  if (freshDocument?.file) {
+    await queueDigitalDocumentWatermark(freshDocument.id);
+  }
+
+  const serializedDocument = freshDocument?.file
+    ? await repository.findById(created.id, {
+        deleted_at: null,
+      })
+    : freshDocument;
+
   return serializeDigitalDocumentDetail(
     req,
-    await hydrateDocumentMetrics(freshDocument),
+    await hydrateDocumentMetrics(serializedDocument),
   );
 };
 
@@ -1048,12 +958,6 @@ exports.update = async ({ req, id, payload, userId }) => {
       current,
       client,
     });
-    const documentDate = hasField(payload, "document_date")
-      ? parseOptionalDate(payload.document_date, "Tanggal dokumen")
-      : current.document_date;
-    const dueDate = hasField(payload, "due_date")
-      ? parseOptionalDate(payload.due_date, "Tanggal jatuh tempo")
-      : current.due_date;
 
     if (payload.storage_id && payload.storage_id !== current.storage_id) {
       nextStorage = await repository.findStorageById(
@@ -1102,8 +1006,6 @@ exports.update = async ({ req, id, payload, userId }) => {
       owner_user_id: ownership.owner_user_id,
       owner_division_id: ownership.owner_division_id,
       debtor_id: debtorId,
-      document_date: documentDate,
-      due_date: dueDate,
       is_restricted:
         payload.is_restricted !== undefined
           ? Boolean(payload.is_restricted)
@@ -1129,10 +1031,6 @@ exports.update = async ({ req, id, payload, userId }) => {
       current.owner_user_id !== updatePayload.owner_user_id ||
       current.owner_division_id !== updatePayload.owner_division_id ||
       current.debtor_id !== updatePayload.debtor_id ||
-      normalizeDateTime(current.document_date) !==
-        normalizeDateTime(updatePayload.document_date) ||
-      normalizeDateTime(current.due_date) !==
-        normalizeDateTime(updatePayload.due_date) ||
       current.is_restricted !== updatePayload.is_restricted;
 
     const result = await repository.update(id, updatePayload, client);
@@ -1178,16 +1076,30 @@ exports.update = async ({ req, id, payload, userId }) => {
       );
     }
 
-    return result;
+    return {
+      document: result,
+      fileChanged,
+    };
   });
 
-  const freshDocument = await repository.findById(updated.id, {
+  const freshDocument = await repository.findById(updated.document.id, {
     deleted_at: null,
   });
 
+  if (updated.fileChanged && freshDocument?.file) {
+    await queueDigitalDocumentWatermark(freshDocument.id);
+  }
+
+  const serializedDocument =
+    updated.fileChanged && freshDocument?.file
+      ? await repository.findById(updated.document.id, {
+          deleted_at: null,
+        })
+      : freshDocument;
+
   return serializeDigitalDocumentDetail(
     req,
-    await hydrateDocumentMetrics(freshDocument),
+    await hydrateDocumentMetrics(serializedDocument),
   );
 };
 

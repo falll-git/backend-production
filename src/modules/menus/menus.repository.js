@@ -26,6 +26,19 @@ exports.findReadableMenuIdsByRoleId = async (roleId) => {
   return roleMenus.map((item) => item.menu_id);
 };
 
+exports.findReadableRoleMenusByRoleId = async (roleId, menuWhere = {}) => {
+  return prisma.role_menus.findMany({
+    where: {
+      role_id: roleId,
+      can_read: true,
+      menu: menuWhere,
+    },
+    include: {
+      menu: true,
+    },
+  });
+};
+
 exports.create = (data) => {
   return prisma.menus.create({ data });
 };

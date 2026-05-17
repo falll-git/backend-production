@@ -11,6 +11,11 @@ const {
 } = require("../../utils/digital-archive-access");
 const { APPROVE_FEATURE, REJECT_FEATURE } = require("../../utils/menu-access");
 const { roleHasFeature, roleHasPermission } = require("../../utils/rbac");
+const {
+  PAGINATION_PROFILES,
+  buildPaginationMeta,
+  resolvePagination,
+} = require("../../utils/pagination");
 
 const ACCESS_REQUEST_ACTION_URL =
   "/dashboard/arsip-digital/disposisi/permintaan";
@@ -21,9 +26,8 @@ function normalizeText(value) {
     .replace(/\s+/g, " ");
 }
 
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function isRestrictedDocument(document) {
+  return document?.access_level === "RESTRICT" || document?.is_restricted === true;
 }
 
 function buildSearchWhere(search) {
@@ -159,13 +163,13 @@ function buildWhere(query, userId) {
 }
 
 function buildVisibilityWhere(scope, userId) {
-  if (scope?.canAccessRestricted) {
-    return {};
-  }
-
   const visibleDocumentWhere = {
     document: buildDocumentVisibilityWhere(scope),
   };
+
+  if (scope?.canViewAllDocuments) {
+    return visibleDocumentWhere;
+  }
 
   if (!userId) {
     return visibleDocumentWhere;
@@ -189,7 +193,9 @@ function buildVisibilityWhere(scope, userId) {
 
 function canViewAccessRequest(item, scope, userId) {
   if (!item) return false;
-  if (scope?.canAccessRestricted) return true;
+  if (scope?.canViewAllDocuments) {
+    return canScopeAccessDocument(item.document, scope);
+  }
   if (!userId) return false;
 
   return (
@@ -207,7 +213,7 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
     roleHasFeature(scope.roleId, ACCESS_REQUEST_ACTION_URL, feature),
   ]);
 
-  if (!canUpdate || !hasFeature) {
+  if (!canUpdate) {
     throw new AppError(
       "Anda tidak memiliki izin untuk memproses permintaan disposisi",
       403,
@@ -217,6 +223,17 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
   if (!canScopeAccessDocument(item.document, scope)) {
     throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
   }
+
+  if (item.owner_id === userId) {
+    return;
+  }
+
+  if (!hasFeature) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk memproses permintaan disposisi",
+      403,
+    );
+  }
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
@@ -224,28 +241,28 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
   };
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  if (String(query.limit || "").toLowerCase() === "all") {
+  if (pagination.all) {
     const data = await repository.findMany({ where });
     return {
       data: data.map((item) => serializeDigitalDocumentAccessRequest(req, item)),
     };
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
-
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data: data.map((item) => serializeDigitalDocumentAccessRequest(req, item)),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -271,6 +288,14 @@ exports.create = async ({ req, payload, userId }) => {
   const documentIds = Array.from(new Set(payload.document_ids));
   const createdIds = [];
   const requesterScope = await getDigitalArchiveAccessScope(userId);
+  const expiresAt = new Date(payload.expires_at);
+
+  if (expiresAt.getTime() <= Date.now()) {
+    throw new AppError(
+      "Tanggal berakhir akses harus lebih besar dari waktu saat ini",
+      422,
+    );
+  }
 
   await repository.withTransaction(async (client) => {
     for (const documentId of documentIds) {
@@ -279,6 +304,16 @@ exports.create = async ({ req, payload, userId }) => {
       });
 
       if (!document) {
+        throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
+      }
+
+      if (
+        isRestrictedDocument(document) &&
+        !Boolean(
+          requesterScope.canAccessRestrictedDocuments ??
+            requesterScope.canAccessRestricted,
+        )
+      ) {
         throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
       }
 
@@ -323,6 +358,7 @@ exports.create = async ({ req, payload, userId }) => {
           requester_id: userId,
           owner_id: document.owner_user_id || document.created_by,
           request_reason: normalizeText(payload.request_reason),
+          expires_at: expiresAt,
         },
         client,
       );
@@ -380,7 +416,7 @@ exports.approve = async ({ req, id, payload, userId }) => {
     feature: APPROVE_FEATURE,
   });
 
-  const expiresAt = new Date(payload.expires_at);
+  const expiresAt = new Date(payload.expires_at || item.expires_at);
   if (expiresAt.getTime() <= Date.now()) {
     throw new AppError(
       "Tanggal berakhir akses harus lebih besar dari waktu saat ini",
