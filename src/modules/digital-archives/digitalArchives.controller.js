@@ -1,11 +1,28 @@
 const service = require("./digitalArchives.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
 
+function isCollectionQuery(query = {}) {
+  return (
+    query.page !== undefined ||
+    query.limit !== undefined ||
+    query.search !== undefined
+  );
+}
+
 exports.getStorageSummary = async (req, res) => {
   try {
-    const result = await service.getStorageSummary({
-      userId: req.user?.id,
-    });
+    const result = isCollectionQuery(req.query)
+      ? await service.getStorageOffices({
+          query: req.query,
+          userId: req.user?.id,
+        })
+      : await service.getStorageSummary({
+          userId: req.user?.id,
+        });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
 
     return successResponse(res, result);
   } catch (error) {
@@ -21,8 +38,13 @@ exports.getOfficeCabinets = async (req, res) => {
   try {
     const result = await service.getOfficeCabinets({
       officeId: req.params.officeId,
+      query: req.query,
       userId: req.user?.id,
     });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
 
     return successResponse(res, result);
   } catch (error) {
@@ -38,8 +60,13 @@ exports.getCabinetRacks = async (req, res) => {
   try {
     const result = await service.getCabinetRacks({
       cabinetId: req.params.cabinetId,
+      query: req.query,
       userId: req.user?.id,
     });
+
+    if (result.meta) {
+      return paginatedResponse(res, result.data, result.meta);
+    }
 
     return successResponse(res, result);
   } catch (error) {
@@ -161,28 +188,6 @@ exports.getLoanReport = async (req, res) => {
   }
 };
 
-exports.getOverdueLoans = async (req, res) => {
-  try {
-    const result = await service.getOverdueLoans({
-      req,
-      query: req.query,
-      userId: req.user?.id,
-    });
-
-    if (!result.meta) {
-      return successResponse(res, result.data);
-    }
-
-    return paginatedResponse(res, result.data, result.meta);
-  } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
 exports.getReportSummary = async (req, res) => {
   try {
     const result = await service.getReportSummary({
@@ -212,22 +217,6 @@ exports.getDocumentReport = async (req, res) => {
     }
 
     return successResponse(res, result.data);
-  } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-exports.getStorageReport = async (req, res) => {
-  try {
-    const result = await service.getStorageReport({
-      userId: req.user?.id,
-    });
-
-    return successResponse(res, result);
   } catch (error) {
     return res.status(error.statusCode || 400).json({
       status: false,

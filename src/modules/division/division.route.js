@@ -10,15 +10,20 @@ const {
 } = require("./division.validation");
 
 const DIVISION_MENU_URL = "/dashboard/parameter/divisi";
+const USER_MENU_URL = "/dashboard/users";
 const DIGITAL_DOCUMENT_INPUT_MENU_URL =
   "/dashboard/arsip-digital/input-dokumen";
+const DIGITAL_DOCUMENT_LIST_MENU_URL =
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen";
 const INCOMING_MAIL_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
 const MEMORANDUM_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 const DIVISION_READ_MENU_URLS = [
   DIVISION_MENU_URL,
+  USER_MENU_URL,
   DIGITAL_DOCUMENT_INPUT_MENU_URL,
+  DIGITAL_DOCUMENT_LIST_MENU_URL,
   INCOMING_MAIL_MENU_URL,
   MEMORANDUM_MENU_URL,
 ];

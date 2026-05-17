@@ -16,6 +16,11 @@ const {
   RETURN_FEATURE,
 } = require("../../utils/menu-access");
 const { roleHasFeature, roleHasPermission } = require("../../utils/rbac");
+const {
+  PAGINATION_PROFILES,
+  buildPaginationMeta,
+  resolvePagination,
+} = require("../../utils/pagination");
 
 const LOAN_ACTION_URL = "/dashboard/arsip-digital/peminjaman/accept";
 
@@ -25,9 +30,24 @@ function normalizeText(value) {
     .replace(/\s+/g, " ");
 }
 
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function buildDateRange(start, end) {
+  const range = {};
+
+  if (start) {
+    const parsedStart = new Date(start);
+    if (!Number.isNaN(parsedStart.getTime())) {
+      range.gte = parsedStart;
+    }
+  }
+
+  if (end) {
+    const parsedEnd = new Date(end);
+    if (!Number.isNaN(parsedEnd.getTime())) {
+      range.lte = parsedEnd;
+    }
+  }
+
+  return range;
 }
 
 function buildSearchWhere(search) {
@@ -159,17 +179,70 @@ function buildWhere(query, userId) {
     };
   }
 
+  const startDateRange = buildDateRange(
+    query.requested_start_date_from || query.start_date_from || query.date_from,
+    query.requested_start_date_to || query.start_date_to || query.date_to,
+  );
+  if (Object.keys(startDateRange).length > 0) {
+    where.requested_start_date = {
+      ...(where.requested_start_date || {}),
+      ...startDateRange,
+    };
+  }
+
+  const dueDateRange = buildDateRange(
+    query.requested_due_date_from || query.due_date_from,
+    query.requested_due_date_to || query.due_date_to,
+  );
+  if (Object.keys(dueDateRange).length > 0) {
+    where.requested_due_date = {
+      ...(where.requested_due_date || {}),
+      ...dueDateRange,
+    };
+  }
+
+  switch (
+    String(query.due_status || "")
+      .trim()
+      .toUpperCase()
+  ) {
+    case "OVERDUE":
+      where.status = {
+        in: ["HANDED_OVER", "BORROWED"],
+      };
+      where.requested_due_date = {
+        ...(where.requested_due_date || {}),
+        lt: new Date(),
+      };
+      break;
+    case "UPCOMING": {
+      const nextThirtyDays = new Date();
+      nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
+      where.status = {
+        in: ["HANDED_OVER", "BORROWED"],
+      };
+      where.requested_due_date = {
+        ...(where.requested_due_date || {}),
+        gte: new Date(),
+        lte: nextThirtyDays,
+      };
+      break;
+    }
+    default:
+      break;
+  }
+
   return where;
 }
 
 function buildVisibilityWhere(scope, userId) {
-  if (scope?.canAccessRestricted) {
-    return {};
-  }
-
   const visibleDocumentWhere = {
     document: buildDocumentVisibilityWhere(scope),
   };
+
+  if (scope?.canViewAllDocuments) {
+    return visibleDocumentWhere;
+  }
 
   if (!userId) {
     return visibleDocumentWhere;
@@ -199,7 +272,9 @@ function buildVisibilityWhere(scope, userId) {
 
 function canViewLoan(item, scope, userId) {
   if (!item) return false;
-  if (scope?.canAccessRestricted) return true;
+  if (scope?.canViewAllDocuments) {
+    return canScopeAccessDocument(item.document, scope);
+  }
   if (!userId) return false;
 
   return (
@@ -248,28 +323,28 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
   };
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  if (String(query.limit || "").toLowerCase() === "all") {
+  if (pagination.all) {
     const data = await repository.findMany({ where });
     return {
       data: data.map((item) => serializeDigitalDocumentLoan(req, item)),
     };
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
-
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data: data.map((item) => serializeDigitalDocumentLoan(req, item)),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 

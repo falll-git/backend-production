@@ -7,7 +7,11 @@ function resolveStatusCode(error, fallback = 400) {
 
 exports.getAll = async (req, res) => {
   try {
-    const result = await service.getAll({ req, query: req.query });
+    const result = await service.getAll({
+      req,
+      query: req.query,
+      userId: req.user.id,
+    });
 
     if (result.meta) {
       return paginatedResponse(res, result.data, result.meta);
@@ -23,7 +27,11 @@ exports.getAll = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    const result = await service.getById({ req, id: req.params.id });
+    const result = await service.getById({
+      req,
+      id: req.params.id,
+      userId: req.user.id,
+    });
     return successResponse(res, result);
   } catch (error) {
     return res

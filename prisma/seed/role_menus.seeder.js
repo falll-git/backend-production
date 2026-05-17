@@ -2,18 +2,23 @@ const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
 const {
   APPROVE_FEATURE,
+  DIVISION_MANAGER_FEATURE,
   HANDOVER_FEATURE,
+  MANAGE_ALL_FEATURE,
   REDISPOSE_FEATURE,
   REJECT_FEATURE,
   REPORT_ALL_FEATURE,
   RETURN_FEATURE,
+  VIEW_DIVISION_FEATURE,
 } = require("../../src/utils/menu-access");
 
-const SEEDED_MAIN_ROLES = ["Admin", "Staf", "Supervisor", "Manager", "IT"];
-const BOOTSTRAP_ROLE = "IT";
+const SEEDED_ROLES = ["Admin", "Staf", "Supervisor", "Manager"];
+const BOOTSTRAP_ROLE = "Admin";
 const DASHBOARD_URL = "/dashboard";
+const DASHBOARD_WIDGET_MENU_TYPE = "DASHBOARD_WIDGET";
 const URLS = {
   dashboard: DASHBOARD_URL,
+  storageUsage: "/dashboard/storage-usage",
 
   archiveInput: "/dashboard/arsip-digital/input-dokumen",
   archiveStorage: "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
@@ -35,6 +40,42 @@ const URLS = {
   correspondenceReport: "/dashboard/manajemen-surat/laporan",
   correspondencePrint: "/dashboard/manajemen-surat/cetak-dokumen",
 
+  debtorReport: "/dashboard/informasi-debitur/laporan",
+  debtorList: "/dashboard/informasi-debitur",
+  debtorMaster: "/dashboard/informasi-debitur/master-debitur",
+  debtorActionPlan: "/dashboard/informasi-debitur/marketing/action-plan",
+  debtorVisitResult:
+    "/dashboard/informasi-debitur/marketing/hasil-kunjungan",
+  debtorHandlingStep:
+    "/dashboard/informasi-debitur/marketing/langkah-penanganan",
+  debtorImportMaster: "/dashboard/informasi-debitur/admin/import-debitur",
+  debtorImportCollectibility:
+    "/dashboard/informasi-debitur/admin/import-kolektibilitas",
+  debtorUploadSlik: "/dashboard/informasi-debitur/admin/upload-slik",
+  debtorUploadRestrik: "/dashboard/informasi-debitur/admin/upload-restrik",
+  debtorReportNpf: "/dashboard/informasi-debitur/laporan/npf",
+  debtorReportMarketingActivity:
+    "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+  legalTemplate: "/dashboard/legal/template-dokumen",
+  legalPrintAkad: "/dashboard/legal/cetak/akad",
+  legalPrintHaftsheet: "/dashboard/legal/cetak/haftsheet",
+  legalPrintWarningLetter: "/dashboard/legal/cetak/surat-peringatan",
+  legalPrintInsuranceForm: "/dashboard/legal/cetak/formulir-asuransi",
+  legalPrintSkl: "/dashboard/legal/cetak/keterangan-lunas",
+  legalPrintSamsat: "/dashboard/legal/cetak/surat-samsat",
+  legalDepositInsurance: "/dashboard/legal/titipan/asuransi",
+  legalDepositNotary: "/dashboard/legal/titipan/notaris",
+  legalDepositInstallment: "/dashboard/legal/titipan/angsuran",
+  legalProgressNotary: "/dashboard/legal/progress/notaris",
+  legalProgressInsurance: "/dashboard/legal/progress/asuransi",
+  legalProgressClaim: "/dashboard/legal/progress/klaim",
+  legalUploadIdeb: "/dashboard/legal/upload-ideb",
+  legalReport: "/dashboard/legal/laporan",
+  legalReportThirdPartyDocuments:
+    "/dashboard/legal/laporan/pihak-ketiga/dokumen",
+  legalReportThirdPartyDepositFunds:
+    "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
+
   users: "/dashboard/users",
   role: "/dashboard/parameter/role",
   roleMenu: "/dashboard/parameter/role-menu",
@@ -42,6 +83,21 @@ const URLS = {
   documentType: "/dashboard/parameter/jenis-dokumen",
   storage: "/dashboard/parameter/tempat-penyimpanan",
   letterPriority: "/dashboard/parameter/prioritas-surat",
+  thirdPartyNotary: "/dashboard/parameter/pihak-ketiga/notaris",
+  thirdPartyInsurance:
+    "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
+  thirdPartyKjpp: "/dashboard/parameter/pihak-ketiga/kjpp",
+  numberingTemplate: "/dashboard/parameter/template-penomoran",
+  documentChecklist: "/dashboard/parameter/checklist-dokumen",
+  financingProduct: "/dashboard/parameter/produk-pembiayaan",
+  contractType: "/dashboard/parameter/jenis-akad",
+  collectibility: "/dashboard/parameter/kolektibilitas",
+  branch: "/dashboard/parameter/cabang",
+  institutionProfile: "/dashboard/parameter/profil-lembaga",
+  slaReminder: "/dashboard/parameter/sla-pengingat",
+  marketingActivityType: "/dashboard/parameter/aktivitas-marketing",
+  depositType: "/dashboard/parameter/jenis-titipan",
+  watermarkSettings: "/dashboard/parameter/watermark-dokumen",
 };
 const CORE_PARAMETER_URLS = [
   URLS.users,
@@ -52,116 +108,222 @@ const CORE_PARAMETER_URLS = [
   URLS.storage,
   URLS.letterPriority,
 ];
-const BASIC_MASTER_DATA_URLS = [
-  URLS.division,
-  URLS.documentType,
-  URLS.storage,
-  URLS.letterPriority,
+const EXTENDED_PARAMETER_URLS = [
+  URLS.thirdPartyNotary,
+  URLS.thirdPartyInsurance,
+  URLS.thirdPartyKjpp,
+  URLS.numberingTemplate,
+  URLS.documentChecklist,
+  URLS.financingProduct,
+  URLS.contractType,
+  URLS.collectibility,
+  URLS.branch,
+  URLS.institutionProfile,
+  URLS.slaReminder,
+  URLS.marketingActivityType,
+  URLS.depositType,
 ];
-const DISABLED_MENU_ROOT_NAMES = [
-  "Informasi Debitur",
-  "Manajemen Legal",
+const DEBTOR_CRUD_URLS = [
+  URLS.debtorMaster,
+  URLS.debtorActionPlan,
+  URLS.debtorVisitResult,
+  URLS.debtorHandlingStep,
 ];
-const DISABLED_MENU_BRANCHES = [
-  { name: "Setup Pihak Ketiga", parentLabel: "Parameter" },
+const DEBTOR_IMPORT_URLS = [
+  URLS.debtorImportMaster,
+  URLS.debtorImportCollectibility,
+  URLS.debtorUploadSlik,
+  URLS.debtorUploadRestrik,
 ];
-const DISABLED_MENU_URLS = [
-  "/dashboard/parameter/pihak-ketiga/notaris",
-  "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
-  "/dashboard/parameter/template-penomoran",
-  "/dashboard/parameter/checklist-dokumen",
-  "/dashboard/parameter/produk-pembiayaan",
-  "/dashboard/parameter/jenis-akad",
-  "/dashboard/parameter/kolektibilitas",
-  "/dashboard/parameter/cabang",
-  "/dashboard/parameter/profil-lembaga",
-  "/dashboard/parameter/sla-pengingat",
-  "/dashboard/parameter/aktivitas-marketing",
-  "/dashboard/parameter/jenis-titipan",
+const DEBTOR_REPORT_URLS = [
+  URLS.debtorReport,
+  URLS.debtorReportNpf,
+  URLS.debtorReportMarketingActivity,
 ];
+const LEGAL_CRUD_URLS = [
+  URLS.legalTemplate,
+  URLS.legalDepositInsurance,
+  URLS.legalDepositNotary,
+  URLS.legalDepositInstallment,
+  URLS.legalProgressNotary,
+  URLS.legalProgressInsurance,
+  URLS.legalProgressClaim,
+  URLS.legalUploadIdeb,
+];
+const LEGAL_PRINT_URLS = [
+  URLS.legalPrintAkad,
+  URLS.legalPrintHaftsheet,
+  URLS.legalPrintWarningLetter,
+  URLS.legalPrintInsuranceForm,
+  URLS.legalPrintSkl,
+  URLS.legalPrintSamsat,
+];
+const LEGAL_REPORT_URLS = [
+  URLS.legalReport,
+  URLS.legalReportThirdPartyDocuments,
+  URLS.legalReportThirdPartyDepositFunds,
+];
+const DASHBOARD_REPORT_WIDGET_URLS = [
+  URLS.archiveReport,
+  URLS.correspondenceReport,
+  URLS.debtorReport,
+  URLS.legalReport,
+  URLS.legalReportThirdPartyDocuments,
+  URLS.legalReportThirdPartyDepositFunds,
+  URLS.debtorReportNpf,
+  URLS.debtorReportMarketingActivity,
+];
+const ARCHIVE_MONITOR_URLS = [
+  URLS.archiveInput,
+  URLS.archiveStorage,
+  URLS.archiveList,
+  URLS.archiveDueDate,
+  URLS.archiveAccessRequest,
+  URLS.archiveAccessApproval,
+  URLS.archiveAccessHistory,
+  URLS.archiveLoanRequest,
+  URLS.archiveLoanApproval,
+  URLS.archiveLoanReport,
+  URLS.archiveStorageHistory,
+  URLS.archiveLoanHistory,
+  URLS.archiveReport,
+];
+const CORRESPONDENCE_MONITOR_URLS = [
+  URLS.incomingMail,
+  URLS.outgoingMail,
+  URLS.memorandum,
+  URLS.correspondenceReport,
+  URLS.correspondencePrint,
+];
+const DISABLED_MENU_ROOT_NAMES = [];
+const DISABLED_MENU_BRANCHES = [];
+const DISABLED_MENU_URLS = [];
 const ROLE_MENU_POLICIES = {
-  IT: [
+  Admin: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.storageUsage, permissions: ["read"] },
+
     ...CORE_PARAMETER_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update", "delete"],
     })),
-  ],
-  Admin: [
-    { url: URLS.dashboard, permissions: ["read"] },
-
-    { url: URLS.archiveInput, permissions: ["create", "read"] },
-    { url: URLS.archiveStorage, permissions: ["read"] },
-    {
-      url: URLS.archiveList,
-      permissions: ["create", "read", "update", "delete"],
-    },
-    { url: URLS.archiveDueDate, permissions: ["read"] },
-    { url: URLS.archiveAccessRequest, permissions: ["create", "read"] },
-    { url: URLS.archiveAccessHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanRequest, permissions: ["create", "read"] },
-    { url: URLS.archiveLoanReport, permissions: ["read"] },
-    { url: URLS.archiveStorageHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanHistory, permissions: ["read"] },
-    {
-      url: URLS.archiveReport,
-      permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
-    },
-
-    {
-      url: URLS.incomingMail,
-      permissions: ["create", "read", "update", "delete"],
-    },
-    {
-      url: URLS.outgoingMail,
-      permissions: ["create", "read", "update", "delete"],
-    },
-    {
-      url: URLS.memorandum,
-      permissions: ["create", "read", "update", "delete"],
-    },
-    {
-      url: URLS.correspondenceReport,
-      permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
-    },
-    {
-      url: URLS.correspondencePrint,
-      permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
-    },
-
-    ...BASIC_MASTER_DATA_URLS.map((url) => ({
+    ...EXTENDED_PARAMETER_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update", "delete"],
+    })),
+
+    { url: URLS.watermarkSettings, permissions: ["read", "update"] },
+
+    ...ARCHIVE_MONITOR_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+
+    ...CORRESPONDENCE_MONITOR_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+
+    {
+      url: URLS.debtorList,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+    },
+    ...DEBTOR_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read", "update", "delete"],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
+    })),
+    ...DEBTOR_IMPORT_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+    ...DEBTOR_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+
+    ...LEGAL_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read", "update", "delete"],
+      features: [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+    })),
+    ...LEGAL_PRINT_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+    ...LEGAL_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
+
+    ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
     })),
   ],
   Manager: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.storageUsage, permissions: ["read"] },
 
-    { url: URLS.archiveStorage, permissions: ["read"] },
-    { url: URLS.archiveList, permissions: ["read"] },
-    { url: URLS.archiveDueDate, permissions: ["read"] },
+    {
+      url: URLS.archiveStorage,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveList,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveDueDate,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
     {
       url: URLS.archiveAccessApproval,
       permissions: ["read", "update"],
-      features: [APPROVE_FEATURE, REJECT_FEATURE],
+      features: [REPORT_ALL_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
     },
     {
       url: URLS.archiveLoanApproval,
       permissions: ["read", "update"],
       features: [
+        REPORT_ALL_FEATURE,
         APPROVE_FEATURE,
         REJECT_FEATURE,
         HANDOVER_FEATURE,
         RETURN_FEATURE,
       ],
     },
-    { url: URLS.archiveAccessHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanReport, permissions: ["read"] },
-    { url: URLS.archiveStorageHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanHistory, permissions: ["read"] },
+    {
+      url: URLS.archiveAccessHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveLoanReport,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveStorageHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveLoanHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
     {
       url: URLS.archiveReport,
       permissions: ["read"],
@@ -171,13 +333,27 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.incomingMail,
       permissions: ["read", "update"],
-      features: [REDISPOSE_FEATURE],
+      features: [
+        REPORT_ALL_FEATURE,
+        VIEW_DIVISION_FEATURE,
+        DIVISION_MANAGER_FEATURE,
+        REDISPOSE_FEATURE,
+      ],
     },
-    { url: URLS.outgoingMail, permissions: ["read"] },
+    {
+      url: URLS.outgoingMail,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+    },
     {
       url: URLS.memorandum,
       permissions: ["read", "update"],
-      features: [REDISPOSE_FEATURE],
+      features: [
+        REPORT_ALL_FEATURE,
+        VIEW_DIVISION_FEATURE,
+        DIVISION_MANAGER_FEATURE,
+        REDISPOSE_FEATURE,
+      ],
     },
     {
       url: URLS.correspondenceReport,
@@ -189,23 +365,72 @@ const ROLE_MENU_POLICIES = {
       permissions: ["read"],
       features: [REPORT_ALL_FEATURE],
     },
+
+    ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
   ],
   Supervisor: [
     { url: URLS.dashboard, permissions: ["read"] },
 
-    { url: URLS.archiveInput, permissions: ["create", "read"] },
-    { url: URLS.archiveStorage, permissions: ["read"] },
-    { url: URLS.archiveList, permissions: ["read"] },
-    { url: URLS.archiveDueDate, permissions: ["read"] },
+    {
+      url: URLS.archiveInput,
+      permissions: ["create", "read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveStorage,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveList,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveDueDate,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
     {
       url: URLS.archiveAccessApproval,
       permissions: ["read", "update"],
-      features: [APPROVE_FEATURE, REJECT_FEATURE],
+      features: [REPORT_ALL_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
     },
-    { url: URLS.archiveAccessHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanReport, permissions: ["read"] },
-    { url: URLS.archiveStorageHistory, permissions: ["read"] },
-    { url: URLS.archiveLoanHistory, permissions: ["read"] },
+    {
+      url: URLS.archiveAccessHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveLoanApproval,
+      permissions: ["read", "update"],
+      features: [
+        REPORT_ALL_FEATURE,
+        APPROVE_FEATURE,
+        REJECT_FEATURE,
+        HANDOVER_FEATURE,
+        RETURN_FEATURE,
+      ],
+    },
+    {
+      url: URLS.archiveLoanReport,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveStorageHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveLoanHistory,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    },
     {
       url: URLS.archiveReport,
       permissions: ["read"],
@@ -215,13 +440,17 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.incomingMail,
       permissions: ["read", "update"],
-      features: [REDISPOSE_FEATURE],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
     },
-    { url: URLS.outgoingMail, permissions: ["read"] },
+    {
+      url: URLS.outgoingMail,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+    },
     {
       url: URLS.memorandum,
       permissions: ["read", "update"],
-      features: [REDISPOSE_FEATURE],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
     },
     {
       url: URLS.correspondenceReport,
@@ -233,6 +462,12 @@ const ROLE_MENU_POLICIES = {
       permissions: ["read"],
       features: [REPORT_ALL_FEATURE],
     },
+
+    ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [REPORT_ALL_FEATURE],
+    })),
   ],
   Staf: [
     { url: URLS.dashboard, permissions: ["read"] },
@@ -242,6 +477,7 @@ const ROLE_MENU_POLICIES = {
     { url: URLS.archiveList, permissions: ["read", "update"] },
     { url: URLS.archiveDueDate, permissions: ["read"] },
     { url: URLS.archiveAccessRequest, permissions: ["create", "read"] },
+    { url: URLS.archiveAccessApproval, permissions: ["read", "update"] },
     { url: URLS.archiveAccessHistory, permissions: ["read"] },
     { url: URLS.archiveLoanRequest, permissions: ["create", "read"] },
     { url: URLS.archiveLoanReport, permissions: ["read"] },
@@ -312,11 +548,24 @@ function readPermission() {
   return buildPermission({ permissions: ["read"] });
 }
 
-function collectDescendantMenuIds(menu, menusByParentId, store) {
-  store.add(menu.id);
+function isDashboardWidgetMenu(menu) {
+  return menu?.menu_type === DASHBOARD_WIDGET_MENU_TYPE;
+}
+
+function collectDescendantMenuIds(
+  menu,
+  menusByParentId,
+  store,
+  { skipDashboardWidgets = false } = {},
+) {
+  if (!(skipDashboardWidgets && isDashboardWidgetMenu(menu))) {
+    store.add(menu.id);
+  }
 
   for (const child of menusByParentId.get(menu.id) || []) {
-    collectDescendantMenuIds(child, menusByParentId, store);
+    collectDescendantMenuIds(child, menusByParentId, store, {
+      skipDashboardWidgets,
+    });
   }
 }
 
@@ -327,7 +576,7 @@ async function seedRoleMenus() {
   const roles = await prisma.roles.findMany({
     where: {
       name: {
-        in: SEEDED_MAIN_ROLES,
+        in: SEEDED_ROLES,
       },
     },
   });
@@ -339,7 +588,7 @@ async function seedRoleMenus() {
     throw new Error(`Role seed tidak lengkap: ${BOOTSTRAP_ROLE} tidak ditemukan.`);
   }
 
-  for (const roleName of SEEDED_MAIN_ROLES) {
+  for (const roleName of SEEDED_ROLES) {
     if (!rolesByName.has(roleName)) {
       throw new Error(`Role seed tidak lengkap: ${roleName} tidak ditemukan.`);
     }
@@ -362,7 +611,9 @@ async function seedRoleMenus() {
   const disabledMenuIds = new Set();
   for (const menu of menus) {
     if (!menu.parent_id && DISABLED_MENU_ROOT_NAMES.includes(menu.name)) {
-      collectDescendantMenuIds(menu, menusByParentId, disabledMenuIds);
+      collectDescendantMenuIds(menu, menusByParentId, disabledMenuIds, {
+        skipDashboardWidgets: true,
+      });
     }
   }
 
@@ -382,16 +633,6 @@ async function seedRoleMenus() {
     if (menu) {
       collectDescendantMenuIds(menu, menusByParentId, disabledMenuIds);
     }
-  }
-
-  if (disabledMenuIds.size > 0) {
-    await prisma.role_menus.deleteMany({
-      where: {
-        menu_id: {
-          in: Array.from(disabledMenuIds),
-        },
-      },
-    });
   }
 
   const roleMenusByKey = new Map();
@@ -420,7 +661,6 @@ async function seedRoleMenus() {
   }
 
   const expectedRoleMenus = Array.from(roleMenusByKey.values());
-  const expectedKeys = new Set(roleMenusByKey.keys());
   const managedRoleIds = roles.map((role) => role.id);
 
   const existingRoleMenus = await prisma.role_menus.findMany({
@@ -436,43 +676,26 @@ async function seedRoleMenus() {
     },
   });
 
-  const staleRoleMenuIds = existingRoleMenus
-    .filter((item) => !expectedKeys.has(`${item.role_id}:${item.menu_id}`))
-    .map((item) => item.id);
+  const existingKeys = new Set(
+    existingRoleMenus.map((item) => `${item.role_id}:${item.menu_id}`),
+  );
+  const missingInitialRoleMenus = expectedRoleMenus.filter(
+    (roleMenu) => !existingKeys.has(`${roleMenu.role_id}:${roleMenu.menu_id}`),
+  );
 
-  if (staleRoleMenuIds.length > 0) {
-    await prisma.role_menus.deleteMany({
-      where: {
-        id: {
-          in: staleRoleMenuIds,
-        },
-      },
-    });
-  }
-
-  for (const roleMenu of expectedRoleMenus) {
-    await prisma.role_menus.upsert({
-      where: {
-        role_id_menu_id: {
-          role_id: roleMenu.role_id,
-          menu_id: roleMenu.menu_id,
-        },
-      },
-      update: {
-        can_create: roleMenu.can_create,
-        can_read: roleMenu.can_read,
-        can_update: roleMenu.can_update,
-        can_delete: roleMenu.can_delete,
-        features: roleMenu.features,
-      },
-      create: {
+  if (missingInitialRoleMenus.length > 0) {
+    await prisma.role_menus.createMany({
+      data: missingInitialRoleMenus.map((roleMenu) => ({
         id: crypto.randomUUID(),
         ...roleMenu,
-      },
+      })),
+      skipDuplicates: true,
     });
   }
 
-  console.log("Role menus seeded!");
+  console.log(
+    `Role menus seeded! ${missingInitialRoleMenus.length} initial permission(s) created; existing role-menu settings preserved.`,
+  );
 }
 
 module.exports = { seedRoleMenus };

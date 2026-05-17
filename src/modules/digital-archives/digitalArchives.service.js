@@ -1,4 +1,4 @@
-const prisma = require("../../config/prisma");
+const repository = require("./digitalArchives.repository");
 const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
@@ -11,13 +11,13 @@ const {
 const digitalDocumentService = require("../digital-documents/digitalDocuments.service");
 const accessRequestService = require("../digital-document-access-requests/digitalDocumentAccessRequests.service");
 const loanService = require("../digital-document-loans/digitalDocumentLoans.service");
+const {
+  PAGINATION_PROFILES,
+  buildPaginationMeta,
+  resolvePagination,
+} = require("../../utils/pagination");
 
 const DIGITAL_ARCHIVE_REPORT_URL = "/dashboard/arsip-digital/laporan";
-
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
 
 function isNonEmptyObject(value) {
   return Boolean(
@@ -45,7 +45,11 @@ async function getDigitalArchiveReportScope(userId) {
   return {
     ...scope,
     canReportAll,
-    canAccessRestricted: Boolean(scope.canAccessRestricted || canReportAll),
+    canViewAllDocuments: Boolean(scope.canViewAllDocuments || canReportAll),
+    canAccessRestricted: Boolean(scope.canAccessRestricted),
+    canAccessRestrictedDocuments: Boolean(
+      scope.canAccessRestrictedDocuments ?? scope.canAccessRestricted,
+    ),
   };
 }
 
@@ -72,92 +76,25 @@ function buildRackIdentityMaps(offices) {
 }
 
 async function loadStorageHierarchy() {
-  return prisma.storage_offices.findMany({
-    orderBy: {
-      name: "asc",
-    },
-    include: {
-      cabinets: {
-        orderBy: {
-          code: "asc",
-        },
-        include: {
-          racks: {
-            orderBy: {
-              name: "asc",
-            },
-            include: {
-              cabinet: {
-                include: {
-                  office: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+  return repository.findStorageHierarchy();
 }
 
 async function loadStorageSummaryData(scope) {
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
 
   const offices = await loadStorageHierarchy();
-  const documents = await prisma.digital_documents.findMany({
-    where: andWhere(
-      {
-        deleted_at: null,
-      },
-      visibilityWhere,
-    ),
-    select: {
-      id: true,
-      storage_id: true,
+  const documentWhere = andWhere(
+    {
+      deleted_at: null,
     },
-  });
+    visibilityWhere,
+  );
+  const documents = await repository.findStorageSummaryDocuments(documentWhere);
 
   const pendingAccessRequests =
-    await prisma.digital_document_access_requests.findMany({
-      where: {
-        status: "PENDING",
-        document: andWhere(
-          {
-            deleted_at: null,
-          },
-          visibilityWhere,
-        ),
-      },
-      select: {
-        document: {
-          select: {
-            storage_id: true,
-          },
-        },
-      },
-    });
+    await repository.findPendingAccessRequestsByDocument(documentWhere);
 
-  const borrowedLoans = await prisma.digital_document_loans.findMany({
-    where: {
-      status: {
-        in: ["HANDED_OVER", "BORROWED"],
-      },
-      document: andWhere(
-        {
-          deleted_at: null,
-        },
-        visibilityWhere,
-      ),
-    },
-    select: {
-      requested_due_date: true,
-      document: {
-        select: {
-          storage_id: true,
-        },
-      },
-    },
-  });
+  const borrowedLoans = await repository.findBorrowedLoansByDocument(documentWhere);
 
   return {
     offices,
@@ -235,6 +172,7 @@ function buildStorageSummaryResponse({
       rack_count: rackIds.length,
       pending_access_request_count: accessCountByOffice.get(office.id) || 0,
       borrowed_document_count: borrowedCountByOffice.get(office.id) || 0,
+      overdue_loan_count: overdueCountByOffice.get(office.id) || 0,
       overdue_document_count: overdueCountByOffice.get(office.id) || 0,
     };
   });
@@ -246,10 +184,16 @@ function buildStorageSummaryResponse({
       office_code: office.code,
       office_name: office.name,
       code: cabinet.code,
+      capacity: cabinet.racks.reduce(
+        (total, rack) => total + (rack.capacity || 0),
+        0,
+      ),
+      is_active: cabinet.racks.some((rack) => Boolean(rack.is_active)),
       rack_count: cabinet.racks.length,
       total_documents: documentCountByCabinet.get(cabinet.id) || 0,
       pending_access_request_count: accessCountByCabinet.get(cabinet.id) || 0,
       borrowed_document_count: borrowedCountByCabinet.get(cabinet.id) || 0,
+      overdue_loan_count: overdueCountByCabinet.get(cabinet.id) || 0,
       overdue_document_count: overdueCountByCabinet.get(cabinet.id) || 0,
     })),
   );
@@ -269,6 +213,7 @@ function buildStorageSummaryResponse({
         total_documents: documentCountByRack.get(rack.id) || 0,
         pending_access_request_count: accessCountByRack.get(rack.id) || 0,
         borrowed_document_count: borrowedCountByRack.get(rack.id) || 0,
+        overdue_loan_count: overdueCountByRack.get(rack.id) || 0,
         overdue_document_count: overdueCountByRack.get(rack.id) || 0,
       })),
     ),
@@ -281,102 +226,58 @@ function buildStorageSummaryResponse({
   };
 }
 
+function hasCollectionQuery(query = {}) {
+  return (
+    query.page !== undefined ||
+    query.limit !== undefined ||
+    query.search !== undefined
+  );
+}
+
+function normalizeSearch(search = "") {
+  return String(search || "").trim().toLowerCase();
+}
+
+function matchesSummarySearch(fields, search) {
+  if (!search) return true;
+
+  return fields.some((field) =>
+    String(field ?? "")
+      .toLowerCase()
+      .includes(search),
+  );
+}
+
+function paginateSummaryCollection(items, query, getSearchFields) {
+  const search = normalizeSearch(query.search);
+  const filtered = search
+    ? items.filter((item) => matchesSummarySearch(getSearchFields(item), search))
+    : items;
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.SETUP,
+    allowAll: true,
+  });
+
+  if (pagination.all) {
+    return filtered;
+  }
+
+  return {
+    data: filtered.slice(
+      pagination.skip,
+      pagination.skip + pagination.limit,
+    ),
+    meta: buildPaginationMeta(filtered.length, pagination),
+  };
+}
+
 function calculatePercentage(part, total) {
   if (!total) return 0;
   return Number(((part / total) * 100).toFixed(2));
 }
 
-function buildStorageHealth(storageSummary) {
-  const usedRacks = storageSummary.racks.filter(
-    (item) => item.total_documents > 0,
-  );
-  const usedRackCountByOffice = new Map();
-  const capacityByOffice = new Map();
-  const totalCapacity = storageSummary.racks.reduce((total, rack) => {
-    const capacity = Number(rack.capacity) || 0;
-    capacityByOffice.set(
-      rack.office_id,
-      (capacityByOffice.get(rack.office_id) || 0) + capacity,
-    );
-    return total + capacity;
-  }, 0);
-  const usedCapacity = storageSummary.racks.reduce(
-    (total, rack) => total + (rack.total_documents || 0),
-    0,
-  );
-
-  for (const rack of usedRacks) {
-    usedRackCountByOffice.set(
-      rack.office_id,
-      (usedRackCountByOffice.get(rack.office_id) || 0) + 1,
-    );
-  }
-
-  const offices = storageSummary.offices.map((office) => {
-    const usedRackCount = usedRackCountByOffice.get(office.id) || 0;
-    const totalOfficeCapacity = capacityByOffice.get(office.id) || 0;
-    const riskCount =
-      office.pending_access_request_count +
-      office.borrowed_document_count +
-      office.overdue_document_count;
-
-    return {
-      id: office.id,
-      code: office.code,
-      name: office.name,
-      total_documents: office.total_documents,
-      cabinet_count: office.cabinet_count,
-      rack_count: office.rack_count,
-      total_capacity: totalOfficeCapacity,
-      used_rack_count: usedRackCount,
-      empty_rack_count: Math.max(office.rack_count - usedRackCount, 0),
-      utilization_percent: calculatePercentage(
-        usedRackCount,
-        office.rack_count,
-      ),
-      capacity_usage_percent: calculatePercentage(
-        office.total_documents,
-        totalOfficeCapacity,
-      ),
-      pending_access_request_count: office.pending_access_request_count,
-      borrowed_document_count: office.borrowed_document_count,
-      overdue_document_count: office.overdue_document_count,
-      risk_count: riskCount,
-    };
-  });
-
-  const rankedOffices = [...offices].sort((left, right) => {
-    if (right.risk_count !== left.risk_count) {
-      return right.risk_count - left.risk_count;
-    }
-
-    return right.total_documents - left.total_documents;
-  });
-
-  return {
-    total_offices: storageSummary.offices.length,
-    total_cabinets: storageSummary.cabinets.length,
-    total_racks: storageSummary.racks.length,
-    used_racks: usedRacks.length,
-    empty_racks: Math.max(storageSummary.racks.length - usedRacks.length, 0),
-    total_capacity: totalCapacity,
-    used_capacity: usedCapacity,
-    utilization_percent: calculatePercentage(
-      usedRacks.length,
-      storageSummary.racks.length,
-    ),
-    capacity_usage_percent: calculatePercentage(usedCapacity, totalCapacity),
-    offices,
-    top_risk_offices: rankedOffices.filter((item) => item.risk_count > 0),
-    top_document_offices: [...offices]
-      .sort((left, right) => right.total_documents - left.total_documents)
-      .slice(0, 5),
-  };
-}
-
 function buildRiskQueue({
-  dueSoonDocuments,
-  overdueDocuments,
+  dueSoonLoans,
   pendingAccessRequests,
   pendingLoans,
   approvedLoans,
@@ -388,10 +289,10 @@ function buildRiskQueue({
 
   return [
     {
-      key: "overdue_documents",
-      label: "Dokumen melewati jatuh tempo",
-      total: overdueDocuments,
-      severity: "critical",
+      key: "overdue_loans",
+      label: "Peminjaman melewati jatuh tempo",
+      total: overdueLoans,
+      severity: overdueLoans > 0 ? "critical" : "normal",
       report_key: "due_dates",
       endpoint: "/api/digital-archives/reports/due-dates",
       query: {
@@ -399,14 +300,13 @@ function buildRiskQueue({
       },
     },
     {
-      key: "due_soon_documents",
-      label: "Dokumen jatuh tempo 30 hari",
-      total: dueSoonDocuments,
-      severity: dueSoonDocuments > 0 ? "warning" : "normal",
+      key: "due_soon_loans",
+      label: "Peminjaman jatuh tempo 30 hari",
+      total: dueSoonLoans,
+      severity: dueSoonLoans > 0 ? "warning" : "normal",
       report_key: "due_dates",
       endpoint: "/api/digital-archives/reports/due-dates",
       query: {
-        has_due_date: "true",
         due_status: "UPCOMING",
       },
     },
@@ -441,17 +341,6 @@ function buildRiskQueue({
       endpoint: "/api/digital-archives/reports/loans",
       query: {
         status: "ACTIVE",
-      },
-    },
-    {
-      key: "overdue_loans",
-      label: "Peminjaman terlambat kembali",
-      total: overdueLoans,
-      severity: overdueLoans > 0 ? "critical" : "normal",
-      report_key: "overdue_loans",
-      endpoint: "/api/digital-archives/reports/overdue",
-      query: {
-        report: "overdue",
       },
     },
     {
@@ -519,44 +408,55 @@ function buildWorkflowSummary({
   };
 }
 
-function buildQuickReports() {
-  return [
-    {
-      key: "documents",
-      label: "Inventaris Dokumen",
-      description: "Daftar dokumen, pemilik, jenis, lokasi, dan status akses.",
-      endpoint: "/api/digital-archives/reports/documents",
-      menu_url: "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
+function buildReportScope(scope) {
+  return {
+    user_id: scope.userId,
+    role_name: scope.roleName,
+    division_id: scope.divisionId,
+    division_name: scope.divisionName,
+    can_view_division_documents: scope.canAccessDivisionDocuments,
+    can_view_all_documents: Boolean(scope.canViewAllDocuments),
+    can_access_restricted_documents: Boolean(
+      scope.canAccessRestrictedDocuments ?? scope.canAccessRestricted,
+    ),
+    can_manage_all_documents: Boolean(scope.canManageAllDocuments),
+    can_report_all: Boolean(scope.canReportAll),
+  };
+}
+
+function buildOperationalSummary({
+  now,
+  scope,
+  totalDocuments,
+  restrictedDocuments,
+  activeAccessRequests,
+  expiringAccessRequests,
+  expiredAccessRequests,
+  dueSoonLoans,
+  overdueLoans,
+  pendingAccessRequests,
+  pendingLoans,
+  activeLoans,
+}) {
+  return {
+    version: "digital_archive_operational_summary.v3",
+    generated_at: now.toISOString(),
+    scope,
+    metrics: {
+      total_active_documents: totalDocuments,
+      restricted_documents: restrictedDocuments,
+      non_restricted_documents: totalDocuments - restrictedDocuments,
+      active_access_requests: activeAccessRequests,
+      expiring_access_requests: expiringAccessRequests,
+      expired_access_requests: expiredAccessRequests,
+      active_loans: activeLoans,
+      pending_access_requests: pendingAccessRequests,
+      pending_loans: pendingLoans,
+      due_soon_loans: dueSoonLoans,
+      overdue_loans: overdueLoans,
+      due_or_overdue_loans: dueSoonLoans + overdueLoans,
     },
-    {
-      key: "storage",
-      label: "Kesehatan Ruang Arsip",
-      description: "Sebaran dokumen per kantor, kabinet, dan rak.",
-      endpoint: "/api/digital-archives/reports/storage",
-      menu_url: "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
-    },
-    {
-      key: "due_dates",
-      label: "Jatuh Tempo Dokumen",
-      description: "Dokumen yang perlu ditindaklanjuti berdasarkan due date.",
-      endpoint: "/api/digital-archives/reports/due-dates",
-      menu_url: "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
-    },
-    {
-      key: "access_requests",
-      label: "Disposisi Arsip",
-      description: "Monitoring pengajuan, approval, dan penolakan akses.",
-      endpoint: "/api/digital-archives/reports/access-requests",
-      menu_url: "/dashboard/arsip-digital/disposisi/historis",
-    },
-    {
-      key: "loans",
-      label: "Peminjaman Fisik",
-      description: "Monitoring request, approval, serah terima, dan kembali.",
-      endpoint: "/api/digital-archives/reports/loans",
-      menu_url: "/dashboard/arsip-digital/peminjaman/laporan",
-    },
-  ];
+  };
 }
 
 function mapGroupedCount(rows, lookup, idField, fallbackLabel) {
@@ -564,11 +464,38 @@ function mapGroupedCount(rows, lookup, idField, fallbackLabel) {
     .map((row) => {
       const id = row[idField] || null;
       const item = id ? lookup.get(id) : null;
-
-      return {
+      const mapped = {
         id,
         code: item?.code || null,
         name: item?.name || fallbackLabel,
+        total: row._count?._all || 0,
+      };
+
+      if (item?.division_id) mapped.division_id = item.division_id;
+      if (item?.division_name) mapped.division_name = item.division_name;
+
+      return mapped;
+    })
+    .sort((left, right) => right.total - left.total);
+}
+
+function mapOwnerUserGroupedCount(rows, ownerLookup, divisionLookup) {
+  return rows
+    .map((row) => {
+      const ownerId = row.owner_user_id || null;
+      const divisionId = row.owner_division_id || null;
+      const owner = ownerId ? ownerLookup.get(ownerId) : null;
+      const division =
+        (divisionId ? divisionLookup.get(divisionId) : null) ??
+        owner?.division ??
+        null;
+
+      return {
+        id: ownerId,
+        code: owner?.username || null,
+        name: owner?.name || owner?.username || "Tanpa PIC",
+        division_id: division?.id || divisionId,
+        division_name: division?.name || null,
         total: row._count?._all || 0,
       };
     })
@@ -576,56 +503,48 @@ function mapGroupedCount(rows, lookup, idField, fallbackLabel) {
 }
 
 async function buildDocumentBreakdowns(documentWhere) {
-  const [typeGroups, divisionGroups, accessLevelGroups] = await Promise.all([
-    prisma.digital_documents.groupBy({
-      by: ["document_type_id"],
-      where: documentWhere,
-      _count: {
-        _all: true,
-      },
-    }),
-    prisma.digital_documents.groupBy({
-      by: ["owner_division_id"],
-      where: documentWhere,
-      _count: {
-        _all: true,
-      },
-    }),
-    prisma.digital_documents.groupBy({
-      by: ["access_level"],
-      where: documentWhere,
-      _count: {
-        _all: true,
-      },
-    }),
-  ]);
+  const [typeGroups, divisionGroups, ownerGroups, accessLevelGroups] =
+    await Promise.all([
+      repository.groupDigitalDocuments({
+        by: ["document_type_id"],
+        where: documentWhere,
+        _count: {
+          _all: true,
+        },
+      }),
+      repository.groupDigitalDocuments({
+        by: ["owner_division_id"],
+        where: documentWhere,
+        _count: {
+          _all: true,
+        },
+      }),
+      repository.groupDigitalDocuments({
+        by: ["owner_user_id", "owner_division_id"],
+        where: documentWhere,
+        _count: {
+          _all: true,
+        },
+      }),
+      repository.groupDigitalDocuments({
+        by: ["access_level"],
+        where: documentWhere,
+        _count: {
+          _all: true,
+        },
+      }),
+    ]);
 
-  const [documentTypes, divisions] = await Promise.all([
-    prisma.document_types.findMany({
-      where: {
-        id: {
-          in: typeGroups.map((item) => item.document_type_id).filter(Boolean),
-        },
-      },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-      },
-    }),
-    prisma.divisions.findMany({
-      where: {
-        id: {
-          in: divisionGroups
-            .map((item) => item.owner_division_id)
-            .filter(Boolean),
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    }),
+  const [documentTypes, divisions, owners] = await Promise.all([
+    repository.findDocumentTypesByIds(
+      typeGroups.map((item) => item.document_type_id).filter(Boolean),
+    ),
+    repository.findDivisionsByIds(
+      divisionGroups.map((item) => item.owner_division_id).filter(Boolean),
+    ),
+    repository.findUsersByIds(
+      ownerGroups.map((item) => item.owner_user_id).filter(Boolean),
+    ),
   ]);
 
   return {
@@ -640,6 +559,21 @@ async function buildDocumentBreakdowns(documentWhere) {
       new Map(divisions.map((item) => [item.id, item])),
       "owner_division_id",
       "Tanpa divisi pemilik",
+    ),
+    by_owner_user: mapOwnerUserGroupedCount(
+      ownerGroups,
+      new Map(
+        owners.map((item) => [
+          item.id,
+          {
+            id: item.id,
+            username: item.username,
+            name: item.name,
+            division: item.division,
+          },
+        ]),
+      ),
+      new Map(divisions.map((item) => [item.id, item])),
     ),
     by_access_level: accessLevelGroups
       .map((item) => ({
@@ -776,6 +710,18 @@ exports.getStorageSummary = async ({ userId, scopeOverride = null }) => {
   const data = await loadStorageSummaryData(scope);
   return buildStorageSummaryResponse(data);
 };
+exports.getStorageOffices = async ({ query = {}, userId }) => {
+  const summary = await exports.getStorageSummary({ userId });
+
+  if (!hasCollectionQuery(query)) {
+    return summary;
+  }
+
+  return paginateSummaryCollection(summary.offices, query, (item) => [
+    item.code,
+    item.name,
+  ]);
+};
 
 exports.getReportSummary = async ({ userId }) => {
   const scope = await getDigitalArchiveReportScope(userId);
@@ -791,38 +737,35 @@ exports.getReportSummary = async ({ userId }) => {
   nextThirtyDays.setDate(nextThirtyDays.getDate() + 30);
 
   const documentCount = (extraWhere = {}) =>
-    prisma.digital_documents.count({
-      where: andWhere(
+    repository.countDocuments(
+      andWhere(
         {
           deleted_at: null,
         },
         visibilityWhere,
         extraWhere,
       ),
-    });
-  const accessCount = (status) =>
-    prisma.digital_document_access_requests.count({
-      where: {
-        status,
-        document: documentWhere,
-      },
+    );
+  const accessCount = (where = {}) =>
+    repository.countAccessRequests({
+      ...where,
+      document: documentWhere,
     });
   const loanCount = (status) =>
-    prisma.digital_document_loans.count({
-      where: {
-        status,
-        document: documentWhere,
-      },
+    repository.countLoans({
+      status,
+      document: documentWhere,
     });
 
   const [
     totalDocuments,
     restrictedDocuments,
     debtorDocuments,
-    dueSoonDocuments,
-    overdueDocuments,
+    dueSoonLoans,
     pendingAccessRequests,
-    approvedAccessRequests,
+    activeAccessRequests,
+    expiringAccessRequests,
+    expiredAccessRequests,
     rejectedAccessRequests,
     pendingLoans,
     approvedLoans,
@@ -831,7 +774,6 @@ exports.getReportSummary = async ({ userId }) => {
     returnedLoans,
     rejectedLoans,
     overdueLoans,
-    storageSummary,
     documentBreakdowns,
   ] = await Promise.all([
     documentCount(),
@@ -841,82 +783,103 @@ exports.getReportSummary = async ({ userId }) => {
         not: null,
       },
     }),
-    documentCount({
-      due_date: {
+    repository.countLoans({
+      status: {
+        in: ["HANDED_OVER", "BORROWED"],
+      },
+      requested_due_date: {
+        gte: now,
+        lte: nextThirtyDays,
+      },
+      document: documentWhere,
+    }),
+    accessCount({ status: "PENDING" }),
+    accessCount({
+      status: "APPROVED",
+      expires_at: {
+        gte: now,
+      },
+    }),
+    accessCount({
+      status: "APPROVED",
+      expires_at: {
         gte: now,
         lte: nextThirtyDays,
       },
     }),
-    documentCount({
-      due_date: {
+    accessCount({
+      status: "APPROVED",
+      expires_at: {
         lt: now,
       },
     }),
-    accessCount("PENDING"),
-    accessCount("APPROVED"),
-    accessCount("REJECTED"),
+    accessCount({ status: "REJECTED" }),
     loanCount("PENDING"),
     loanCount("APPROVED"),
     loanCount("HANDED_OVER"),
     loanCount("BORROWED"),
     loanCount("RETURNED"),
     loanCount("REJECTED"),
-    prisma.digital_document_loans.count({
-      where: {
-        status: {
-          in: ["HANDED_OVER", "BORROWED"],
-        },
-        requested_due_date: {
-          lt: now,
-        },
-        document: documentWhere,
+    repository.countLoans({
+      status: {
+        in: ["HANDED_OVER", "BORROWED"],
       },
+      requested_due_date: {
+        lt: now,
+      },
+      document: documentWhere,
     }),
-    exports.getStorageSummary({ userId, scopeOverride: scope }),
     buildDocumentBreakdowns(documentWhere),
   ]);
-  const storageHealth = buildStorageHealth(storageSummary);
   const activeLoans = handedOverLoans + borrowedLoans;
+  const reportScope = buildReportScope(scope);
 
   return {
-    version: "digital_archive_report.v2",
+    version: "digital_archive_report.v5",
+    report_mode: "OPERATIONAL_SUMMARY",
     generated_at: now.toISOString(),
-    scope: {
-      user_id: scope.userId,
-      role_name: scope.roleName,
-      division_id: scope.divisionId,
-      division_name: scope.divisionName,
-      can_view_division_documents: scope.canAccessDivisionDocuments,
-      can_view_all_documents: scope.canAccessRestricted,
-      can_report_all: Boolean(scope.canReportAll),
-    },
+    scope: reportScope,
+    operational_summary: buildOperationalSummary({
+      now,
+      scope: reportScope,
+      totalDocuments,
+      restrictedDocuments,
+      activeAccessRequests,
+      expiringAccessRequests,
+      expiredAccessRequests,
+      dueSoonLoans,
+      overdueLoans,
+      pendingAccessRequests,
+      pendingLoans,
+      activeLoans,
+    }),
     overview: {
       total_documents: totalDocuments,
       restricted_documents: restrictedDocuments,
       non_restricted_documents: totalDocuments - restrictedDocuments,
       linked_to_debtor_documents: debtorDocuments,
-      due_soon_documents: dueSoonDocuments,
-      overdue_documents: overdueDocuments,
+      due_soon_loans: dueSoonLoans,
+      due_or_overdue_loans: dueSoonLoans + overdueLoans,
       pending_access_requests: pendingAccessRequests,
+      active_access_requests: activeAccessRequests,
+      expiring_access_requests: expiringAccessRequests,
+      expired_access_requests: expiredAccessRequests,
       pending_loans: pendingLoans,
       active_loans: activeLoans,
       overdue_loans: overdueLoans,
-      total_racks: storageHealth.total_racks,
-      used_racks: storageHealth.used_racks,
-      rack_utilization_percent: storageHealth.utilization_percent,
-      capacity_usage_percent: storageHealth.capacity_usage_percent,
     },
     documents: {
       total: totalDocuments,
       restricted: restrictedDocuments,
       non_restricted: totalDocuments - restrictedDocuments,
       linked_to_debtor: debtorDocuments,
-      due_soon: dueSoonDocuments,
-      overdue: overdueDocuments,
     },
     access_requests: {
       pending: pendingAccessRequests,
-      approved: approvedAccessRequests,
+      approved: activeAccessRequests,
+      active: activeAccessRequests,
+      expiring_soon: expiringAccessRequests,
+      expired: expiredAccessRequests,
       rejected: rejectedAccessRequests,
     },
     loans: {
@@ -926,22 +889,11 @@ exports.getReportSummary = async ({ userId }) => {
       borrowed: borrowedLoans,
       returned: returnedLoans,
       rejected: rejectedLoans,
+      due_soon: dueSoonLoans,
       overdue: overdueLoans,
     },
-    storage: {
-      offices: storageSummary.offices.length,
-      cabinets: storageSummary.cabinets.length,
-      racks: storageSummary.racks.length,
-      used_racks: storageSummary.racks.filter(
-        (item) => item.total_documents > 0,
-      ).length,
-      utilization_percent: storageHealth.utilization_percent,
-      capacity_usage_percent: storageHealth.capacity_usage_percent,
-    },
-    storage_health: storageHealth,
     risk_queue: buildRiskQueue({
-      dueSoonDocuments,
-      overdueDocuments,
+      dueSoonLoans,
       pendingAccessRequests,
       pendingLoans,
       approvedLoans,
@@ -951,7 +903,7 @@ exports.getReportSummary = async ({ userId }) => {
     }),
     workflow: buildWorkflowSummary({
       pendingAccessRequests,
-      approvedAccessRequests,
+      approvedAccessRequests: activeAccessRequests,
       rejectedAccessRequests,
       pendingLoans,
       approvedLoans,
@@ -962,7 +914,6 @@ exports.getReportSummary = async ({ userId }) => {
       overdueLoans,
     }),
     breakdowns: documentBreakdowns,
-    quick_reports: buildQuickReports(),
   };
 };
 
@@ -977,20 +928,20 @@ exports.getDocumentReport = async ({ req, query, userId }) => {
   });
 };
 
-exports.getStorageReport = async ({ userId }) => {
-  const scope = await getDigitalArchiveReportScope(userId);
-  return exports.getStorageSummary({ userId, scopeOverride: scope });
-};
-
 exports.getDueDateReport = async ({ req, query, userId }) => {
   const scope = await getDigitalArchiveReportScope(userId);
 
-  return digitalDocumentService.getAll({
+  const nextQuery = {
+    ...query,
+  };
+
+  if (!nextQuery.status && !nextQuery.due_status && !nextQuery.report) {
+    nextQuery.status = "ACTIVE";
+  }
+
+  return loanService.getAll({
     req,
-    query: {
-      ...query,
-      has_due_date: query.has_due_date || "true",
-    },
+    query: nextQuery,
     userId,
     scopeOverride: scope,
   });
@@ -1007,14 +958,36 @@ exports.getAccessRequestReport = async ({ req, query, userId }) => {
   });
 };
 
-exports.getOfficeCabinets = async ({ officeId, userId }) => {
+exports.getOfficeCabinets = async ({ officeId, query = {}, userId }) => {
   const summary = await exports.getStorageSummary({ userId });
-  return summary.cabinets.filter((item) => item.office_id === officeId);
+  const cabinets = summary.cabinets.filter((item) => item.office_id === officeId);
+
+  if (!hasCollectionQuery(query)) {
+    return cabinets;
+  }
+
+  return paginateSummaryCollection(cabinets, query, (item) => [
+    item.code,
+    item.office_code,
+    item.office_name,
+  ]);
 };
 
-exports.getCabinetRacks = async ({ cabinetId, userId }) => {
+exports.getCabinetRacks = async ({ cabinetId, query = {}, userId }) => {
   const summary = await exports.getStorageSummary({ userId });
-  return summary.racks.filter((item) => item.cabinet_id === cabinetId);
+  const racks = summary.racks.filter((item) => item.cabinet_id === cabinetId);
+
+  if (!hasCollectionQuery(query)) {
+    return racks;
+  }
+
+  return paginateSummaryCollection(racks, query, (item) => [
+    item.rack_name,
+    item.cabinet_code,
+    item.office_name,
+    item.capacity,
+    item.is_active ? "aktif" : "nonaktif",
+  ]);
 };
 
 exports.getRackDocuments = async ({ req, rackId, query, userId }) => {
@@ -1032,48 +1005,14 @@ exports.getStorageHistories = async ({ query, userId }) => {
   const scope = await getDigitalArchiveAccessScope(userId);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const where = buildActivityWhere(query, visibilityWhere);
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.HISTORY,
+    allowAll: true,
+  });
 
-  if (String(query.limit || "").toLowerCase() === "all") {
-    const data = await prisma.digital_document_activity_logs.findMany({
+  if (pagination.all) {
+    const data = await repository.findActivityLogs({
       where,
-      orderBy: {
-        created_at: "desc",
-      },
-      include: {
-        actor: {
-          select: {
-            id: true,
-            name: true,
-            username: true,
-            email: true,
-          },
-        },
-        document: {
-          select: {
-            id: true,
-            document_number: true,
-            document_name: true,
-          },
-        },
-        from_storage: {
-          include: {
-            cabinet: {
-              include: {
-                office: true,
-              },
-            },
-          },
-        },
-        to_storage: {
-          include: {
-            cabinet: {
-              include: {
-                office: true,
-              },
-            },
-          },
-        },
-      },
     });
 
     return {
@@ -1081,62 +1020,16 @@ exports.getStorageHistories = async ({ query, userId }) => {
     };
   }
 
-  const page = parsePositiveInteger(query.page, 1);
-  const limit = Math.min(parsePositiveInteger(query.limit, 20), 100);
-  const skip = (page - 1) * limit;
-
-  const data = await prisma.digital_document_activity_logs.findMany({
+  const data = await repository.findActivityLogs({
     where,
-    skip,
-    take: limit,
-    orderBy: {
-      created_at: "desc",
-    },
-    include: {
-      actor: {
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          email: true,
-        },
-      },
-      document: {
-        select: {
-          id: true,
-          document_number: true,
-          document_name: true,
-        },
-      },
-      from_storage: {
-        include: {
-          cabinet: {
-            include: {
-              office: true,
-            },
-          },
-        },
-      },
-      to_storage: {
-        include: {
-          cabinet: {
-            include: {
-              office: true,
-            },
-          },
-        },
-      },
-    },
+    skip: pagination.skip,
+    take: pagination.take,
   });
-  const total = await prisma.digital_document_activity_logs.count({ where });
+  const total = await repository.countActivityLogs(where);
 
   return {
     data: data.map(serializeDigitalDocumentActivityLog),
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -1170,16 +1063,5 @@ exports.getLoanReport = async ({ req, query, userId }) => {
     query,
     userId,
     scopeOverride: scope,
-  });
-};
-
-exports.getOverdueLoans = async ({ req, query, userId }) => {
-  return loanService.getAll({
-    req,
-    query: {
-      ...query,
-      report: "overdue",
-    },
-    userId,
   });
 };

@@ -10,10 +10,8 @@ const authUserSelect = {
   password: true,
   created_at: true,
   updated_at: true,
-  refresh_token: true,
-  refresh_token_expires_at: true,
   is_active: true,
-  is_restrict: true,
+  can_access_restricted_documents: true,
   phone: true,
   onboarding_status: true,
   email_verified_at: true,
@@ -24,7 +22,6 @@ const authUserSelect = {
     select: {
       id: true,
       name: true,
-      type: true,
     },
   },
   division: {
@@ -181,10 +178,25 @@ exports.revokeActiveRefreshTokensByUserId = (userId, revokedAt, client = prisma)
   });
 };
 
+exports.revokeActiveRefreshTokenByHash = (
+  tokenHash,
+  revokedAt,
+  client = prisma,
+) => {
+  return client.refresh_tokens.updateMany({
+    where: {
+      token_hash: tokenHash,
+      revoked_at: null,
+    },
+    data: {
+      revoked_at: revokedAt,
+    },
+  });
+};
+
 exports.rotateRefreshToken = ({
   oldRefreshTokenId,
   userId,
-  refreshToken,
   refreshTokenHash,
   expiresAt,
   now,
@@ -205,12 +217,8 @@ exports.rotateRefreshToken = ({
       tx,
     );
 
-    return tx.users.update({
+    return tx.users.findUnique({
       where: { id: userId },
-      data: {
-        refresh_token: refreshToken,
-        refresh_token_expires_at: expiresAt,
-      },
       select: authUserSelect,
     });
   });
@@ -231,8 +239,6 @@ exports.completeInviteOnboarding = async ({
         email_verified_at: now,
         onboarding_status: "ACTIVE",
         activated_at: now,
-        refresh_token: null,
-        refresh_token_expires_at: null,
       },
       select: authUserSelect,
     });
@@ -273,8 +279,6 @@ exports.completePasswordReset = async ({
         password_set_at: now,
         onboarding_status: "ACTIVE",
         activated_at: now,
-        refresh_token: null,
-        refresh_token_expires_at: null,
         ...(emailVerifiedAt ? { email_verified_at: emailVerifiedAt } : {}),
       },
       select: authUserSelect,

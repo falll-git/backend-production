@@ -34,6 +34,21 @@ exports.getAllForManagement = async (req, res) => {
   }
 };
 
+exports.getDashboardWidgets = async (req, res) => {
+  try {
+    const result = await service.getDashboardWidgets(req.user);
+    return res.status(200).json({
+      status: true,
+      data: result,
+      message: "Widget dashboard berhasil dimuat",
+    });
+  } catch (error) {
+    return res
+      .status(resolveStatusCode(error, 400))
+      .json({ status: false, message: error.message });
+  }
+};
+
 exports.getById = async (req, res) => {
   try {
     const result = await service.getMenuById(req.params.id, req.user);

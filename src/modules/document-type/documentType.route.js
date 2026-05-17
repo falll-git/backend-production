@@ -12,9 +12,12 @@ const {
 const DOCUMENT_TYPE_MENU_URL = "/dashboard/parameter/jenis-dokumen";
 const DIGITAL_DOCUMENT_INPUT_MENU_URL =
   "/dashboard/arsip-digital/input-dokumen";
+const DIGITAL_DOCUMENT_LIST_MENU_URL =
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen";
 const DOCUMENT_TYPE_READ_MENU_URLS = [
   DOCUMENT_TYPE_MENU_URL,
   DIGITAL_DOCUMENT_INPUT_MENU_URL,
+  DIGITAL_DOCUMENT_LIST_MENU_URL,
 ];
 
 router.get("/", auth, authorize(DOCUMENT_TYPE_READ_MENU_URLS, "read"), controller.getAll);

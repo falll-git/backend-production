@@ -1,13 +1,32 @@
 const jwt = require("jsonwebtoken");
 
+function requireSecret(key) {
+  const value = process.env[key];
+  if (!value) {
+    throw new Error(`${key} belum dikonfigurasi.`);
+  }
+
+  return value;
+}
+
 exports.generateAccessToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN,
+  const expiresIn = process.env.JWT_EXPIRES_IN;
+  if (!expiresIn) {
+    throw new Error("JWT_EXPIRES_IN belum dikonfigurasi.");
+  }
+
+  return jwt.sign(payload, requireSecret("JWT_SECRET"), {
+    expiresIn,
   });
 };
 
 exports.generateRefreshToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: "7d",
+  const expiresIn = process.env.JWT_REFRESH_EXPIRES_IN;
+  if (!expiresIn) {
+    throw new Error("JWT_REFRESH_EXPIRES_IN belum dikonfigurasi.");
+  }
+
+  return jwt.sign(payload, requireSecret("JWT_REFRESH_SECRET"), {
+    expiresIn,
   });
 };

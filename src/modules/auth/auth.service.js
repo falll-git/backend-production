@@ -20,7 +20,6 @@ const {
 } = require("../../utils/mail-templates");
 const { sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
-const { getRoleTypeLabel } = require("../../utils/role-types");
 
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
@@ -45,7 +44,9 @@ function buildAuthUserPayload(user) {
     division_id: user.division_id,
     phone: user.phone,
     is_active: user.is_active,
-    is_restrict: user.is_restrict,
+    can_access_restricted_documents:
+      user.can_access_restricted_documents ?? false,
+    is_restrict: user.can_access_restricted_documents ?? false,
     email_verified_at: user.email_verified_at,
     password_set_at: user.password_set_at,
     invited_at: user.invited_at,
@@ -57,8 +58,6 @@ function buildAuthUserPayload(user) {
     role: {
       id: user.role?.id,
       name: user.role?.name,
-      type: user.role?.type,
-      type_label: user.role?.type ? getRoleTypeLabel(user.role.type) : null,
       role_name: user.role?.name,
     },
     division: {
@@ -78,7 +77,6 @@ function buildJwtPayload(user) {
     division_id: user.division_id,
     role: {
       role_name: user.role?.name,
-      role_type: user.role?.type,
     },
     division: {
       division_name: user.division?.name,
@@ -154,7 +152,6 @@ async function issueRefreshToken(user, oldRefreshTokenId = null) {
   const updatedUser = await repository.rotateRefreshToken({
     oldRefreshTokenId,
     userId: user.id,
-    refreshToken,
     refreshTokenHash: hashToken(refreshToken),
     expiresAt,
     now,
@@ -203,6 +200,7 @@ exports.login = async (payload) => {
     data: buildAuthUserPayload(refresh.user),
     token,
     refreshToken: refresh.refreshToken,
+    refreshTokenExpiresAt: refresh.expiresAt,
   };
 };
 
@@ -221,17 +219,11 @@ exports.refreshToken = async (token) => {
   const tokenRecord = await repository.findActiveRefreshTokenByHash(
     hashToken(token),
   );
-  let user = tokenRecord?.user || null;
-  let oldRefreshTokenId = tokenRecord?.id || null;
+  const user = tokenRecord?.user || null;
+  const oldRefreshTokenId = tokenRecord?.id || null;
 
   if (!user) {
-    const legacyUser = await repository.findById(decoded.id);
-    if (!legacyUser || legacyUser.refresh_token !== token) {
-      throw new AppError("Sesi login tidak valid.", 401);
-    }
-
-    user = legacyUser;
-    oldRefreshTokenId = null;
+    throw new AppError("Sesi login tidak valid.", 401);
   }
 
   if (user.id !== decoded.id) {
@@ -246,6 +238,7 @@ exports.refreshToken = async (token) => {
   return {
     token: newAccessToken,
     refreshToken: refresh.refreshToken,
+    refreshTokenExpiresAt: refresh.expiresAt,
     user: buildAuthUserPayload(refresh.user),
   };
 };
@@ -273,8 +266,6 @@ exports.changePassword = async (userId, payload) => {
     email_verified_at: user.email_verified_at || now,
     onboarding_status: "ACTIVE",
     activated_at: user.activated_at || now,
-    refresh_token: null,
-    refresh_token_expires_at: null,
   });
   await repository.revokeActiveRefreshTokensByUserId(userId, now);
 
@@ -402,13 +393,13 @@ exports.resetPassword = async ({ token, password }) => {
   };
 };
 
-exports.logout = async (userId) => {
+exports.logout = async (refreshToken) => {
+  if (!refreshToken) {
+    return true;
+  }
+
   const now = new Date();
-  await repository.update(userId, {
-    refresh_token: null,
-    refresh_token_expires_at: null,
-  });
-  await repository.revokeActiveRefreshTokensByUserId(userId, now);
+  await repository.revokeActiveRefreshTokenByHash(hashToken(refreshToken), now);
 
   return true;
 };

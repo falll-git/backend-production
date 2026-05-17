@@ -89,6 +89,10 @@ exports.createMemorandumSchema = Joi.object({
     "any.required": "Divisi asal memorandum wajib dipilih.",
     "string.empty": "Divisi asal memorandum wajib dipilih.",
   }),
+  storage_id: Joi.string().trim().required().messages({
+    "any.required": "Tempat penyimpanan fisik wajib dipilih.",
+    "string.empty": "Tempat penyimpanan fisik wajib dipilih.",
+  }),
   target_division_id: Joi.string().trim().optional().messages({
     "string.empty": "Divisi tujuan wajib dipilih.",
   }),
@@ -140,6 +144,9 @@ exports.createMemorandumSchema = Joi.object({
 exports.updateMemorandumSchema = Joi.object({
   origin_division_id: Joi.string().trim().optional().messages({
     "string.empty": "Divisi asal memorandum wajib dipilih.",
+  }),
+  storage_id: Joi.string().trim().optional().messages({
+    "string.empty": "Tempat penyimpanan fisik wajib dipilih.",
   }),
   target_division_id: Joi.forbidden().messages({
     "any.unknown": "Divisi tujuan memorandum tidak dapat diubah.",
@@ -193,10 +200,19 @@ exports.updateMemorandumSchema = Joi.object({
   });
 
 exports.redisposeMemorandumSchema = Joi.object({
-  receiver_id: Joi.string().required().messages({
-    "any.required": "Penerima redisposisi wajib dipilih.",
-    "string.empty": "Penerima redisposisi wajib dipilih.",
+  receiver_id: Joi.string().optional().messages({
+    "any.required": "Penerima disposisi wajib dipilih.",
+    "string.empty": "Penerima disposisi wajib dipilih.",
   }),
+  receiver_ids: Joi.array()
+    .items(Joi.string().trim().required())
+    .min(1)
+    .optional()
+    .messages({
+      "array.base": "Penerima disposisi tidak valid.",
+      "array.min": "Penerima disposisi wajib dipilih.",
+      "string.empty": "Penerima disposisi wajib dipilih.",
+    }),
   note: Joi.string().allow("", null).optional(),
   start_date: Joi.date().iso().allow(null).optional().messages({
     "date.base": START_DATE_INVALID_MESSAGE,
@@ -206,7 +222,11 @@ exports.redisposeMemorandumSchema = Joi.object({
     "date.base": DUE_DATE_INVALID_MESSAGE,
     "date.format": DUE_DATE_INVALID_MESSAGE,
   }),
-});
+})
+  .or("receiver_id", "receiver_ids")
+  .messages({
+    "object.missing": "Penerima disposisi wajib dipilih.",
+  });
 
 exports.updateMemorandumDispositionStatusSchema = Joi.object({
   status: Joi.string()

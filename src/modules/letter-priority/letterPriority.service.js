@@ -1,13 +1,12 @@
 const repository = require("./letterPriority.repository");
 const { AppError } = require("../../utils/errors");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 function normalizeName(value) {
   return value.trim().replace(/\s+/g, " ");
 }
 
-exports.getLetterPriorities = async ({ page, limit, search }) => {
-  const skip = (page - 1) * limit;
-
+exports.getLetterPriorities = async ({ pagination, search }) => {
   const where = search
     ? {
         name: {
@@ -17,16 +16,16 @@ exports.getLetterPriorities = async ({ page, limit, search }) => {
       }
     : {};
 
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data,
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 

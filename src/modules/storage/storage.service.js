@@ -1,5 +1,6 @@
 const repository = require("./storage.repository");
 const { AppError } = require("../../utils/errors");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 function serializeStorage(storage) {
   if (!storage) return null;
@@ -34,8 +35,23 @@ function parseCapacity(value) {
   return parsed;
 }
 
-exports.getStorage = async ({ page = 1, limit = 10, search = "" }) => {
-  const skip = (page - 1) * limit;
+async function cleanupEmptyCabinetHierarchy({ cabinetId, officeId }, client) {
+  if (!cabinetId || !officeId) return;
+
+  const remainingRacks = await repository.countRacksByCabinet(cabinetId, client);
+  if (remainingRacks > 0) {
+    return;
+  }
+
+  await repository.deleteCabinet(cabinetId, client);
+
+  const remainingCabinets = await repository.countCabinetsByOffice(officeId, client);
+  if (remainingCabinets === 0) {
+    await repository.deleteOffice(officeId, client);
+  }
+}
+
+exports.getStorage = async ({ pagination, search = "" }) => {
   let where = {};
   
   if (search) {
@@ -49,18 +65,17 @@ exports.getStorage = async ({ page = 1, limit = 10, search = "" }) => {
   }
 
   const [data, total] = await Promise.all([
-    repository.findMany({ where, skip, take: limit }),
+    repository.findMany({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+    }),
     repository.count(where),
   ]);
 
   return {
     data: data.map(serializeStorage),
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 
@@ -120,6 +135,8 @@ exports.updateStorage = async (id, data) => {
 
   return repository.withTransaction(async (tx) => {
     let cabinetId = existingStorage.cabinet_id;
+    const previousCabinetId = existingStorage.cabinet_id;
+    const previousOfficeId = existingStorage.cabinet.office.id;
     
     if (data.office_code || data.office_label || data.code) {
       const officeCode = data.office_code || existingStorage.cabinet.office.code;
@@ -171,6 +188,17 @@ exports.updateStorage = async (id, data) => {
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
 
     const updated = await repository.updateRack(id, updateData, tx);
+
+    if (cabinetId !== previousCabinetId) {
+      await cleanupEmptyCabinetHierarchy(
+        {
+          cabinetId: previousCabinetId,
+          officeId: previousOfficeId,
+        },
+        tx,
+      );
+    }
+
     return serializeStorage(updated);
   });
 };
@@ -183,17 +211,23 @@ exports.deleteStorage = async (id) => {
     throw new AppError("Lokasi arsip tidak dapat dihapus karena masih digunakan oleh dokumen digital.", 400);
   }
 
+  const correspondenceCount =
+    summary._count.incoming_mails +
+    summary._count.outgoing_mails +
+    summary._count.memorandums;
+
+  if (correspondenceCount > 0) {
+    throw new AppError("Lokasi arsip tidak dapat dihapus karena masih digunakan oleh manajemen surat.", 400);
+  }
+
   return repository.withTransaction(async (tx) => {
     await repository.deleteRack(id, tx);
-
-    const remainingRacks = await repository.countRacksByCabinet(summary.cabinet_id, tx);
-    if (remainingRacks === 0) {
-      await repository.deleteCabinet(summary.cabinet_id, tx);
-
-      const remainingCabinets = await repository.countCabinetsByOffice(summary.cabinet.office_id, tx);
-      if (remainingCabinets === 0) {
-        await repository.deleteOffice(summary.cabinet.office_id, tx);
-      }
-    }
+    await cleanupEmptyCabinetHierarchy(
+      {
+        cabinetId: summary.cabinet_id,
+        officeId: summary.cabinet.office_id,
+      },
+      tx,
+    );
   });
 };

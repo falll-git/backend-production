@@ -21,7 +21,7 @@ router.post(
   validate(forgotPasswordSchema),
   controller.forgotPassword,
 );
-router.post("/logout", auth, controller.logout);
+router.post("/logout", controller.logout);
 router.post(
   "/change-password",
   auth,

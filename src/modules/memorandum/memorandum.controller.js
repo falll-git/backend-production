@@ -26,40 +26,6 @@ exports.getAll = async (req, res) => {
   }
 };
 
-exports.getInitialManager = async (req, res) => {
-  try {
-    const result = await service.getInitialManager({
-      divisionId: req.query.target_division_id ?? req.query.division_id,
-    });
-
-    return successResponse(res, result);
-  } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
-  }
-};
-
-exports.getInitialManagers = async (req, res) => {
-  try {
-    const result = await service.getInitialManagers({
-      divisionIds:
-        req.query.target_division_ids ??
-        req.query.target_division_id ??
-        req.query.division_ids ??
-        req.query.division_id,
-    });
-
-    return successResponse(res, result);
-  } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
-  }
-};
-
 exports.getDispositionRecipients = async (req, res) => {
   try {
     const result = await service.getDispositionRecipients({
@@ -78,7 +44,11 @@ exports.getDispositionRecipients = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    const result = await service.getMemorandumById({ req, id: req.params.id });
+    const result = await service.getMemorandumById({
+      req,
+      id: req.params.id,
+      userId: req.user.id,
+    });
     return successResponse(res, result);
   } catch (error) {
     return res.status(resolveStatusCode(error, 404)).json({
@@ -99,7 +69,8 @@ exports.createWithDisposition = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Memorandum beserta disposisi awal ke manajer berhasil dibuat",
+      message:
+        "Memorandum beserta disposisi awal ke penerima disposisi divisi berhasil dibuat",
     });
   } catch (error) {
     return res.status(resolveStatusCode(error, 400)).json({
@@ -155,7 +126,7 @@ exports.redispose = async (req, res) => {
     return res.status(201).json({
       status: true,
       data: result,
-      message: "Redisposisi memorandum berhasil ditambahkan",
+      message: "Disposisi memorandum berhasil ditambahkan",
     });
   } catch (error) {
     return res.status(resolveStatusCode(error, 400)).json({

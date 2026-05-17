@@ -9,6 +9,15 @@ const { seedStorage } = require("./seed/storage.seeder");
 const { seedUsers } = require("./seed/users.seeder");
 const { seedMenus } = require("./seed/menus.seeder");
 const { seedRoleMenus } = require("./seed/role_menus.seeder");
+const {
+  seedWatermarkSettings,
+} = require("./seed/watermark_settings.seeder");
+const {
+  seedStorageUsageConfig,
+} = require("./seed/storage_usage_config.seeder");
+const {
+  seedDebtorLegalParameters,
+} = require("./seed/debtor_legal_parameters.seeder");
 const prisma = require("../src/config/prisma");
 
 async function main() {
@@ -26,6 +35,9 @@ async function main() {
     await seedLetterPriorities();
     await seedDocumentTypes();
     await seedStorage();
+    await seedWatermarkSettings();
+    await seedStorageUsageConfig();
+    await seedDebtorLegalParameters();
     await seedUsers();
     await seedMenus();
     await seedRoleMenus();

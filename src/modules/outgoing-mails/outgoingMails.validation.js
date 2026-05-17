@@ -33,6 +33,10 @@ exports.createOutgoingMailSchema = Joi.object({
     "any.required": "Prioritas surat wajib dipilih.",
     "string.empty": "Prioritas surat wajib dipilih.",
   }),
+  storage_id: Joi.string().trim().required().messages({
+    "any.required": "Tempat penyimpanan fisik wajib dipilih.",
+    "string.empty": "Tempat penyimpanan fisik wajib dipilih.",
+  }),
   delivery_media: Joi.string()
     .trim()
     .lowercase()
@@ -71,6 +75,9 @@ exports.createOutgoingMailSchema = Joi.object({
 exports.updateOutgoingMailSchema = Joi.object({
   letter_prioritie_id: Joi.string().optional().messages({
     "string.empty": "Prioritas surat wajib dipilih.",
+  }),
+  storage_id: Joi.string().trim().optional().messages({
+    "string.empty": "Tempat penyimpanan fisik wajib dipilih.",
   }),
   delivery_media: Joi.string()
     .trim()

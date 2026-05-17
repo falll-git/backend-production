@@ -10,6 +10,35 @@ const {
   normalizeOutgoingStatus,
 } = require("../../utils/persuratan-status");
 const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
+const { AppError } = require("../../utils/errors");
+const {
+  buildOutgoingMailVisibilityWhere,
+  canManageOutgoingMail,
+  canViewOutgoingMail,
+  getPersuratanAccessScope,
+} = require("../../utils/persuratan-access");
+const {
+  PAGINATION_PROFILES,
+  paginateArray,
+  resolvePagination,
+} = require("../../utils/pagination");
+const {
+  resolveActiveStorageId,
+} = require("../../utils/persuratan-storage");
+const {
+  enqueueRecordWatermark,
+} = require("../watermark-settings/watermarkProcessor.service");
+
+async function queueOutgoingMailWatermark(entityId) {
+  try {
+    await enqueueRecordWatermark({
+      module: "outgoing_mail",
+      entityId,
+    });
+  } catch (error) {
+    console.error("Failed to queue outgoing mail watermark:", error);
+  }
+}
 
 function normalizeText(value) {
   if (typeof value !== "string") return value ?? null;
@@ -29,36 +58,6 @@ function normalizeDate(value) {
   return date;
 }
 
-function parsePagination({ page, limit }) {
-  if (!page && !limit) {
-    return { enabled: false, page: 1, limit: 0 };
-  }
-
-  return {
-    enabled: true,
-    page: Math.max(Number(page) || 1, 1),
-    limit: Math.max(Number(limit) || 10, 1),
-  };
-}
-
-function paginateData(data, pagination) {
-  if (!pagination.enabled) {
-    return { data, meta: null };
-  }
-
-  const startIndex = (pagination.page - 1) * pagination.limit;
-  const paginatedData = data.slice(startIndex, startIndex + pagination.limit);
-
-  return {
-    data: paginatedData,
-    meta: {
-      total: data.length,
-      page: pagination.page,
-      lastPage: Math.ceil(data.length / pagination.limit) || 1,
-    },
-  };
-}
-
 function buildWhere({
   search,
   dateFrom,
@@ -76,6 +75,29 @@ function buildWhere({
       { name: { contains: search, mode: "insensitive" } },
       { mail_number: { contains: search, mode: "insensitive" } },
       { address: { contains: search, mode: "insensitive" } },
+      { storage: { is: { name: { contains: search, mode: "insensitive" } } } },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: { code: { contains: search, mode: "insensitive" } },
+            },
+          },
+        },
+      },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: {
+                office: {
+                  is: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
+            },
+          },
+        },
+      },
       ...(deliveryMediaSearch
         ? [{ delivery_media: deliveryMediaSearch }]
         : []),
@@ -142,30 +164,42 @@ function filterByStatus(records, status) {
   });
 }
 
-exports.getAll = async ({ req, query }) => {
-  const where = buildWhere({
-    search: normalizeText(query.search),
-    dateFrom: query.date_from,
-    dateTo: query.date_to,
-    letterPrioritieId: normalizeText(query.letter_prioritie_id),
-    deliveryMedia: normalizeText(query.delivery_media),
-  });
+exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
+  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
+  const where = {
+    AND: [
+      buildWhere({
+        search: normalizeText(query.search),
+        dateFrom: query.date_from,
+        dateTo: query.date_to,
+        letterPrioritieId: normalizeText(query.letter_prioritie_id),
+        deliveryMedia: normalizeText(query.delivery_media),
+      }),
+      buildOutgoingMailVisibilityWhere(scope),
+    ],
+  };
 
   const records = await repository.findMany({ where });
   const serialized = await serializeList(req, records);
   const filtered = filterByStatus(serialized, query.status);
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  return paginateData(
-    filtered,
-    parsePagination({ page: query.page, limit: query.limit }),
-  );
+  return paginateArray(filtered, pagination);
 };
 
-exports.getById = async ({ req, id }) => {
+exports.getById = async ({ req, id, userId }) => {
   const outgoingMail = await repository.findById(id);
 
   if (!outgoingMail) {
     throw new Error("Surat keluar tidak ditemukan.");
+  }
+
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canViewOutgoingMail(outgoingMail, scope)) {
+    throw new AppError("Surat keluar tidak ditemukan.", 404);
   }
 
   return serializeOutgoingMail({
@@ -175,6 +209,7 @@ exports.getById = async ({ req, id }) => {
 };
 
 exports.create = async ({ req, payload, userId }) => {
+  const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({
     entity: "outgoing-mails",
     input: payload.file,
@@ -190,12 +225,14 @@ exports.create = async ({ req, payload, userId }) => {
   try {
     created = await repository.create({
       letter_prioritie_id: payload.letter_prioritie_id,
+      storage_id: storageId,
       delivery_media: normalizeDeliveryMedia(payload.delivery_media),
       name: normalizeText(payload.name),
       send_date: normalizeDate(payload.send_date),
       address: normalizeText(payload.address),
       mail_number: normalizeText(payload.mail_number),
       file: storedFile.storedPath,
+      file_size_bytes: storedFile.sizeBytes,
       status: "ACTIVE",
       created_by: userId,
     });
@@ -204,6 +241,11 @@ exports.create = async ({ req, payload, userId }) => {
       deleteStoredFile(storedFile.storedPath);
     }
     throw mapPersuratanPrismaError(error, "outgoing-mail");
+  }
+
+  if (created?.file) {
+    await queueOutgoingMailWatermark(created.id);
+    created = await repository.findById(created.id);
   }
 
   return serializeOutgoingMail({
@@ -218,6 +260,16 @@ exports.update = async ({ req, id, payload, userId }) => {
   if (!outgoingMail) {
     throw new Error("Surat keluar tidak ditemukan.");
   }
+
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageOutgoingMail(outgoingMail, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk mengubah surat keluar ini.", 403);
+  }
+
+  const nextStorageId =
+    payload.storage_id !== undefined
+      ? await resolveActiveStorageId(payload.storage_id)
+      : null;
 
   const storedFile = persistPersuratanFile({
     entity: "outgoing-mails",
@@ -238,6 +290,9 @@ exports.update = async ({ req, id, payload, userId }) => {
   if (payload.letter_prioritie_id !== undefined) {
     updateData.letter_prioritie_id = payload.letter_prioritie_id;
   }
+  if (payload.storage_id !== undefined) {
+    updateData.storage_id = nextStorageId;
+  }
   if (payload.delivery_media !== undefined) {
     updateData.delivery_media = normalizeDeliveryMedia(payload.delivery_media);
   }
@@ -255,6 +310,8 @@ exports.update = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_size_bytes =
+      storedFile.sizeBytes ?? outgoingMail.file_size_bytes ?? null;
   }
   if (payload.status !== undefined) {
     updateData.status = normalizeOutgoingStatus(payload.status);
@@ -275,6 +332,11 @@ exports.update = async ({ req, id, payload, userId }) => {
     deleteReplacedStoredFile(outgoingMail.file, updated.file);
   }
 
+  if (storedFile.isNewUpload && updated?.file) {
+    await queueOutgoingMailWatermark(updated.id);
+    updated = await repository.findById(updated.id);
+  }
+
   return serializeOutgoingMail({
     req,
     record: updated,
@@ -286,6 +348,11 @@ exports.delete = async (id, userId) => {
 
   if (!outgoingMail) {
     throw new Error("Surat keluar tidak ditemukan.");
+  }
+
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageOutgoingMail(outgoingMail, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk menghapus surat keluar ini.", 403);
   }
 
   const deleted = await repository.delete(id, userId);

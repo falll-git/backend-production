@@ -22,6 +22,9 @@ const READ_CREATE = ["create", "read"];
 const READ_UPDATE = ["read", "update"];
 const READ_CREATE_UPDATE_DELETE = CRUD;
 const REPORT_ALL_FEATURE = "report_all";
+const VIEW_DIVISION_FEATURE = "view_division";
+const MANAGE_ALL_FEATURE = "manage_all";
+const DIVISION_MANAGER_FEATURE = "division_manager";
 const REDISPOSE_FEATURE = "redispose";
 const APPROVE_FEATURE = "approve";
 const REJECT_FEATURE = "reject";
@@ -30,6 +33,9 @@ const RETURN_FEATURE = "return";
 
 const FEATURE_LABELS = {
   [REPORT_ALL_FEATURE]: "Semua Data",
+  [VIEW_DIVISION_FEATURE]: "Data Divisi",
+  [MANAGE_ALL_FEATURE]: "Kelola Semua Data",
+  [DIVISION_MANAGER_FEATURE]: "Penerima Disposisi Divisi",
   [REDISPOSE_FEATURE]: "Redisposisi",
   [APPROVE_FEATURE]: "Setujui",
   [REJECT_FEATURE]: "Tolak",
@@ -39,6 +45,7 @@ const FEATURE_LABELS = {
 
 const MENU_CAPABILITIES = {
   "/dashboard": READ_ONLY,
+  "/dashboard/storage-usage": READ_ONLY,
 
   "/dashboard/arsip-digital/input-dokumen": READ_CREATE,
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan": READ_ONLY,
@@ -100,6 +107,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/prioritas-surat": CRUD,
   "/dashboard/parameter/pihak-ketiga/notaris": CRUD,
   "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi": CRUD,
+  "/dashboard/parameter/pihak-ketiga/kjpp": CRUD,
   "/dashboard/parameter/template-penomoran": CRUD,
   "/dashboard/parameter/checklist-dokumen": CRUD,
   "/dashboard/parameter/produk-pembiayaan": CRUD,
@@ -110,33 +118,141 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/sla-pengingat": CRUD,
   "/dashboard/parameter/aktivitas-marketing": CRUD,
   "/dashboard/parameter/jenis-titipan": CRUD,
+  "/dashboard/parameter/watermark-dokumen": READ_UPDATE,
 };
 
 const MENU_FEATURES = {
+  "/dashboard/arsip-digital/input-dokumen": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/arsip-digital/disposisi/pengajuan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/arsip-digital/disposisi/permintaan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
     APPROVE_FEATURE,
     REJECT_FEATURE,
   ],
+  "/dashboard/arsip-digital/disposisi/historis": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/arsip-digital/peminjaman/request": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/arsip-digital/peminjaman/accept": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
     APPROVE_FEATURE,
     REJECT_FEATURE,
     HANDOVER_FEATURE,
     RETURN_FEATURE,
   ],
+  "/dashboard/arsip-digital/peminjaman/laporan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/arsip-digital/historis/penyimpanan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/arsip-digital/historis/peminjaman": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/manajemen-surat/laporan": [REPORT_ALL_FEATURE],
   "/dashboard/manajemen-surat/cetak-dokumen": [REPORT_ALL_FEATURE],
   "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+    DIVISION_MANAGER_FEATURE,
     REDISPOSE_FEATURE,
+  ],
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
   ],
   "/dashboard/manajemen-surat/kelola-surat/input-memorandum": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+    DIVISION_MANAGER_FEATURE,
     REDISPOSE_FEATURE,
   ],
-  "/dashboard/arsip-digital/laporan": [REPORT_ALL_FEATURE],
+  "/dashboard/arsip-digital/laporan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/informasi-debitur/laporan": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/informasi-debitur/master-debitur": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/informasi-debitur/marketing/action-plan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/informasi-debitur/marketing/hasil-kunjungan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/informasi-debitur/marketing/langkah-penanganan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/informasi-debitur/admin/upload-slik": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/upload-restrik": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/import-debitur": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/import-kolektibilitas": [
+    REPORT_ALL_FEATURE,
+  ],
   "/dashboard/informasi-debitur/laporan/npf": [REPORT_ALL_FEATURE],
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": [
     REPORT_ALL_FEATURE,
   ],
+  "/dashboard/legal/template-dokumen": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/cetak/akad": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/haftsheet": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/surat-peringatan": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/formulir-asuransi": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/keterangan-lunas": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/surat-samsat": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/titipan/asuransi": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/titipan/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/titipan/angsuran": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/progress/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/progress/asuransi": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/progress/klaim": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/upload-ideb": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/laporan": [REPORT_ALL_FEATURE],
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": [REPORT_ALL_FEATURE],
   "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": [REPORT_ALL_FEATURE],
@@ -264,8 +380,10 @@ function serializeMenuAccess(menu) {
 module.exports = {
   APPROVE_FEATURE,
   CAPABILITY_FIELDS,
+  DIVISION_MANAGER_FEATURE,
   FEATURE_LABELS,
   HANDOVER_FEATURE,
+  MANAGE_ALL_FEATURE,
   MENU_CAPABILITIES,
   MENU_FEATURES,
   PERMISSION_FIELDS,
@@ -273,6 +391,7 @@ module.exports = {
   REJECT_FEATURE,
   REPORT_ALL_FEATURE,
   RETURN_FEATURE,
+  VIEW_DIVISION_FEATURE,
   assertMenuFeaturesAllowed,
   assertMenuPermissionAllowed,
   getMenuCapabilities,

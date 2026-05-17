@@ -5,10 +5,6 @@ const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const controller = require("./digitalDocumentAccessRequests.controller");
 const {
-  APPROVE_FEATURE,
-  REJECT_FEATURE,
-} = require("../../utils/menu-access");
-const {
   approveAccessRequestSchema,
   createAccessRequestSchema,
   rejectAccessRequestSchema,
@@ -37,14 +33,14 @@ router.get("/:id", auth, authorize(ACCESS_REQUEST_READ_URLS, "read"), controller
 router.patch(
   "/:id/approve",
   auth,
-  authorize(ACCESS_REQUEST_ACTION_URL, "update", { feature: APPROVE_FEATURE }),
+  authorize(ACCESS_REQUEST_ACTION_URL, "update"),
   validate(approveAccessRequestSchema),
   controller.approve,
 );
 router.patch(
   "/:id/reject",
   auth,
-  authorize(ACCESS_REQUEST_ACTION_URL, "update", { feature: REJECT_FEATURE }),
+  authorize(ACCESS_REQUEST_ACTION_URL, "update"),
   validate(rejectAccessRequestSchema),
   controller.reject,
 );

@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "build": "node --check src/server.js",
+    "build": "node scripts/check-js-syntax.js",
     "prisma:generate": "prisma generate",
     "migrate:status": "prisma migrate status",
     "migrate:deploy": "prisma migrate deploy",
@@ -25,9 +25,11 @@
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.20.0",
     "prisma": "7.6.0",
-    "resend": "^6.12.3"
+    "resend": "^6.12.3",
+    "sharp": "^0.34.5"
   },
   "overrides": {
     "@hono/node-server": "1.19.13"

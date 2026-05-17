@@ -11,15 +11,44 @@ const {
 } = require("../../utils/persuratan-serializer");
 const { mapPersuratanPrismaError } = require("../../utils/persuratan-errors");
 const {
-  resolveActiveDivisionManager,
+  buildTargetDivisionDataFromAssignments,
   resolveActiveDivisionManagers,
 } = require("../../utils/manager-assignment");
 const {
   normalizeMailWorkflowStatus,
 } = require("../../utils/persuratan-status");
 const { serializeRole } = require("../../utils/role-types");
+const { AppError } = require("../../utils/errors");
+const {
+  buildMemorandumVisibilityWhere,
+  canManageMemorandum,
+  canViewMemorandum,
+  getPersuratanAccessScope,
+} = require("../../utils/persuratan-access");
+const {
+  PAGINATION_PROFILES,
+  paginateArray,
+  resolvePagination,
+} = require("../../utils/pagination");
+const {
+  resolveActiveStorageId,
+} = require("../../utils/persuratan-storage");
+const {
+  enqueueRecordWatermark,
+} = require("../watermark-settings/watermarkProcessor.service");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
+
+async function queueMemorandumWatermark(entityId) {
+  try {
+    await enqueueRecordWatermark({
+      module: "memorandum",
+      entityId,
+    });
+  } catch (error) {
+    console.error("Failed to queue memorandum watermark:", error);
+  }
+}
 
 function normalizeText(value) {
   if (typeof value !== "string") return value ?? null;
@@ -111,6 +140,19 @@ function resolveTargetDivisionIds(payload) {
   ]);
 }
 
+function normalizeReceiverIdsInput(payload) {
+  const receiverIds = [
+    ...(Array.isArray(payload.receiver_ids) ? payload.receiver_ids : []),
+    ...(payload.receiver_id ? [payload.receiver_id] : []),
+  ]
+    .map((receiverId) =>
+      typeof receiverId === "string" ? receiverId.trim() : "",
+    )
+    .filter(Boolean);
+
+  return [...new Set(receiverIds)];
+}
+
 function appendAndFilter(where, condition) {
   where.AND = Array.isArray(where.AND) ? where.AND : [];
   where.AND.push(condition);
@@ -139,36 +181,6 @@ function resolveDocumentStatusFromDispositions(dispositions) {
   return hasOverdue ? "OVERDUE" : "IN_PROGRESS";
 }
 
-function parsePagination({ page, limit }) {
-  if (!page && !limit) {
-    return { enabled: false, page: 1, limit: 0 };
-  }
-
-  return {
-    enabled: true,
-    page: Math.max(Number(page) || 1, 1),
-    limit: Math.max(Number(limit) || 10, 1),
-  };
-}
-
-function paginateData(data, pagination) {
-  if (!pagination.enabled) {
-    return { data, meta: null };
-  }
-
-  const startIndex = (pagination.page - 1) * pagination.limit;
-  const paginatedData = data.slice(startIndex, startIndex + pagination.limit);
-
-  return {
-    data: paginatedData,
-    meta: {
-      total: data.length,
-      page: pagination.page,
-      lastPage: Math.ceil(data.length / pagination.limit) || 1,
-    },
-  };
-}
-
 function buildWhere({
   search,
   dateFrom,
@@ -188,6 +200,29 @@ function buildWhere({
       { regarding: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
       { origin_division: { name: { contains: search, mode: "insensitive" } } },
+      { storage: { is: { name: { contains: search, mode: "insensitive" } } } },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: { code: { contains: search, mode: "insensitive" } },
+            },
+          },
+        },
+      },
+      {
+        storage: {
+          is: {
+            cabinet: {
+              is: {
+                office: {
+                  is: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
+            },
+          },
+        },
+      },
       {
         target_divisions: {
           some: {
@@ -291,63 +326,58 @@ function filterByStatus(records, status) {
   });
 }
 
-exports.getMemorandums = async ({ req, query, userId }) => {
+exports.getMemorandums = async ({
+  req,
+  query,
+  userId,
+  scopeOverride = null,
+}) => {
+  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
   const receiverId =
     normalizeText(query.receiver_id) ||
     (String(query.assigned_to_me).toLowerCase() === "true" ? userId : null);
-  const where = buildWhere({
-    search: normalizeText(query.search),
-    dateFrom: query.date_from,
-    dateTo: query.date_to,
-    divisionId: normalizeText(query.division_id),
-    originDivisionId: normalizeText(query.origin_division_id),
-    targetDivisionId: normalizeText(query.target_division_id),
-    receiverId,
-  });
+  const where = {
+    AND: [
+      buildWhere({
+        search: normalizeText(query.search),
+        dateFrom: query.date_from,
+        dateTo: query.date_to,
+        divisionId: normalizeText(query.division_id),
+        originDivisionId: normalizeText(query.origin_division_id),
+        targetDivisionId: normalizeText(query.target_division_id),
+        receiverId,
+      }),
+      buildMemorandumVisibilityWhere(scope),
+    ],
+  };
 
   const records = await repository.findMany({ where });
   const serialized = await serializeList(req, records);
   const filtered = filterByStatus(serialized, query.status);
+  const pagination = resolvePagination(query, {
+    ...PAGINATION_PROFILES.TABLE,
+    allowAll: true,
+  });
 
-  return paginateData(
-    filtered,
-    parsePagination({ page: query.page, limit: query.limit }),
-  );
+  return paginateArray(filtered, pagination);
 };
 
-exports.getMemorandumById = async ({ req, id }) => {
+exports.getMemorandumById = async ({ req, id, userId }) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canViewMemorandum(memorandum, scope)) {
+    throw new AppError("Memorandum tidak ditemukan.", 404);
+  }
+
   return serializeMemorandum({
     req,
     record: memorandum,
   });
-};
-
-exports.getInitialManager = async ({ divisionId }) => {
-  const { division, manager } = await resolveActiveDivisionManager(divisionId);
-
-  return {
-    division,
-    manager: serializeAssignableUser(manager),
-  };
-};
-
-exports.getInitialManagers = async ({ divisionIds }) => {
-  const assignments = await resolveActiveDivisionManagers(
-    normalizeDivisionIdsInput(divisionIds),
-  );
-
-  return {
-    targets: assignments.map(({ division, manager }) => ({
-      division,
-      manager: serializeAssignableUser(manager),
-    })),
-  };
 };
 
 exports.getDispositionRecipients = async ({ query, currentUserId }) => {
@@ -368,6 +398,7 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
   const assignments = await resolveActiveDivisionManagers(
     resolveTargetDivisionIds(payload),
   );
+  const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({
     entity: "memorandums",
     input: payload.file,
@@ -380,6 +411,7 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
 
   const memorandumData = {
     origin_division_id: normalizeText(payload.origin_division_id),
+    storage_id: storageId,
     memo_number: normalizeText(payload.memo_number),
     memo_date: normalizeDate(payload.memo_date),
     received_date: normalizeDate(payload.received_date),
@@ -387,6 +419,7 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     regarding: normalizeText(payload.regarding),
     description: normalizeText(payload.description),
     file: storedFile.storedPath,
+    file_size_bytes: storedFile.sizeBytes,
     status: "IN_PROGRESS",
     created_by: userId,
   };
@@ -400,10 +433,8 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     note: null,
     status: "NEW",
   }));
-  const targetDivisionsData = assignments.map(({ division, manager }) => ({
-    division_id: division.id,
-    manager_id: manager.id,
-  }));
+  const targetDivisionsData =
+    buildTargetDivisionDataFromAssignments(assignments);
 
   let created;
 
@@ -420,6 +451,11 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     throw mapPersuratanPrismaError(error, "memorandum");
   }
 
+  if (created?.file) {
+    await queueMemorandumWatermark(created.id);
+    created = await repository.findById(created.id);
+  }
+
   return serializeMemorandum({
     req,
     record: created,
@@ -434,7 +470,7 @@ exports.redispose = async ({ id, payload, senderId }) => {
   }
 
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
-    throw new Error("Memorandum yang sudah selesai tidak dapat didisposisikan kembali.");
+    throw new Error("Memorandum yang sudah selesai tidak dapat didisposisikan.");
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -446,43 +482,45 @@ exports.redispose = async ({ id, payload, senderId }) => {
 
   if (!currentDisposition) {
     throw new Error(
-      "Hanya pemegang disposisi aktif yang dapat meneruskan redisposisi.",
+      "Hanya pemegang disposisi aktif yang dapat meneruskan disposisi.",
     );
   }
 
-  if (payload.receiver_id === senderId) {
-    throw new Error("Penerima redisposisi tidak boleh diri sendiri.");
+  const receiverIds = normalizeReceiverIdsInput(payload);
+
+  if (receiverIds.length === 0) {
+    throw new Error("Penerima disposisi wajib dipilih.");
   }
 
-  const receiver = await userRepository.findAssignableUserById(
-    payload.receiver_id,
+  if (receiverIds.includes(senderId)) {
+    throw new Error("Penerima disposisi tidak boleh diri sendiri.");
+  }
+
+  const receivers = await userRepository.findAssignableUsersByIds(receiverIds);
+  const foundReceiverIds = new Set(receivers.map((receiver) => receiver.id));
+  const missingReceiverIds = receiverIds.filter(
+    (receiverId) => !foundReceiverIds.has(receiverId),
   );
 
-  if (!receiver) {
+  if (missingReceiverIds.length > 0) {
     throw new Error(
-      "Penerima redisposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
+      "Penerima disposisi harus merupakan pengguna aktif dengan akun teraktivasi.",
     );
   }
 
-  await repository.updateDisposition(currentDisposition.id, {
-    status: "FORWARDED",
-    is_complete: true,
-  });
-
-  const disposition = await repository.createDisposition({
-    memorandums_id: id,
-    sender_id: senderId,
-    receiver_id: payload.receiver_id,
-    parent_disposition_id: currentDisposition.id,
+  const dispositions = await repository.forwardDispositionToReceivers({
+    memorandumId: id,
+    currentDispositionId: currentDisposition.id,
+    senderId,
+    receiverIds,
     note: normalizeText(payload.note),
-    start_date: normalizeOptionalDate(payload.start_date),
-    due_date: normalizeOptionalDate(payload.due_date),
-    status: payload.start_date ? "IN_PROGRESS" : "NEW",
+    startDate: normalizeOptionalDate(payload.start_date),
+    dueDate: normalizeOptionalDate(payload.due_date),
   });
 
-  await repository.update(id, { status: "IN_PROGRESS", updated_by: senderId });
-
-  return serializeMemorandumDisposition(disposition, 1);
+  return dispositions.map((disposition, index) =>
+    serializeMemorandumDisposition(disposition, { sequence: index + 1 }),
+  );
 };
 
 exports.completeMemorandum = async ({ req, memoId, userId }) => {
@@ -492,9 +530,30 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
-  await repository.completeDispositions(memoId);
-  const updated = await repository.update(memoId, {
+  const currentDisposition = await repository.findCurrentDispositionForReceiver({
+    memorandumId: memoId,
+    receiverId: userId,
+  });
+
+  if (!currentDisposition) {
+    throw new AppError(
+      "Hanya penerima disposisi aktif yang dapat menandai memorandum selesai.",
+      403,
+    );
+  }
+
+  await repository.updateDisposition(currentDisposition.id, {
     status: "COMPLETED",
+    is_complete: true,
+    completed_at: new Date(),
+    start_date: currentDisposition.start_date || new Date(),
+  });
+
+  const refreshedMemorandum = await repository.findById(memoId);
+  const updated = await repository.update(memoId, {
+    status: resolveDocumentStatusFromDispositions(
+      refreshedMemorandum?.dispositions || [],
+    ),
     updated_by: userId,
   });
 
@@ -600,9 +659,19 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageMemorandum(memorandum, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk mengubah memorandum ini.", 403);
+  }
+
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
     throw new Error("Memorandum yang sudah selesai tidak dapat diubah.");
   }
+
+  const nextStorageId =
+    payload.storage_id !== undefined
+      ? await resolveActiveStorageId(payload.storage_id)
+      : null;
 
   const storedFile = persistPersuratanFile({
     entity: "memorandums",
@@ -629,6 +698,9 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
   if (payload.origin_division_id !== undefined) {
     updateData.origin_division_id = normalizeText(payload.origin_division_id);
   }
+  if (payload.storage_id !== undefined) {
+    updateData.storage_id = nextStorageId;
+  }
   if (payload.memo_number !== undefined) {
     updateData.memo_number = normalizeText(payload.memo_number);
   }
@@ -649,6 +721,8 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_size_bytes =
+      storedFile.sizeBytes ?? memorandum.file_size_bytes ?? null;
   }
   if (payload.status !== undefined) {
     updateData.status = normalizeMailWorkflowStatus(payload.status);
@@ -669,6 +743,11 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
     deleteReplacedStoredFile(memorandum.file, updated.file);
   }
 
+  if (storedFile.isNewUpload && updated?.file) {
+    await queueMemorandumWatermark(updated.id);
+    updated = await repository.findById(updated.id);
+  }
+
   return serializeMemorandum({
     req,
     record: updated,
@@ -680,6 +759,11 @@ exports.deleteMemorandum = async (id, userId) => {
 
   if (!memorandum) {
     throw new Error("Memorandum tidak ditemukan.");
+  }
+
+  const scope = await getPersuratanAccessScope(userId);
+  if (!canManageMemorandum(memorandum, scope)) {
+    throw new AppError("Anda tidak memiliki akses untuk menghapus memorandum ini.", 403);
   }
 
   const deleted = await repository.delete(id, userId);

@@ -3,6 +3,8 @@ loadEnv();
 
 const express = require("express");
 const cors = require("cors");
+const securityHeaders = require("./middlewares/security-headers.middleware");
+const { authRateLimit } = require("./middlewares/rate-limit.middleware");
 const authRoutes = require("./modules/auth/auth.route");
 const roleRoutes = require("./modules/role/role.route");
 const divisionRoutes = require("./modules/division/division.route");
@@ -20,11 +22,40 @@ const digitalArchiveRoutes = require("./modules/digital-archives/digitalArchives
 const outgoingMailRoutes = require("./modules/outgoing-mails/outgoingMails.route");
 const memorandumRoutes = require("./modules/memorandum/memorandum.route");
 const correspondenceRoutes = require("./modules/correspondence/correspondence.route");
+const watermarkSettingsRoutes = require("./modules/watermark-settings/watermarkSettings.route");
+const storageUsageRoutes = require("./modules/storage-usage/storageUsage.route");
+const branchRoutes = require("./modules/branches/branches.route");
+const financingProductRoutes = require("./modules/financing-products/financingProducts.route");
+const collectibilityLevelRoutes = require("./modules/collectibility-levels/collectibilityLevels.route");
+const contractTypeRoutes = require("./modules/contract-types/contractTypes.route");
+const thirdPartyRoutes = require("./modules/third-parties/thirdParties.route");
+const documentChecklistRoutes = require("./modules/document-checklists/documentChecklists.route");
+const numberingTemplateRoutes = require("./modules/numbering-templates/numberingTemplates.route");
+const institutionProfileRoutes = require("./modules/institution-profile/institutionProfile.route");
+const slaReminderRoutes = require("./modules/sla-reminders/slaReminders.route");
+const marketingActivityTypeRoutes = require("./modules/marketing-activity-types/marketingActivityTypes.route");
+const depositTypeRoutes = require("./modules/deposit-types/depositTypes.route");
+const debtorRoutes = require("./modules/debtors/debtors.route");
+const debtorContractRoutes = require("./modules/debtor-contracts/debtorContracts.route");
+const debtorImportRoutes = require("./modules/debtor-imports/debtorImports.route");
+const debtorMarketingRoutes = require("./modules/debtor-marketing/debtorMarketing.route");
+const debtorWarningLetterRoutes = require("./modules/debtor-warning-letters/debtorWarningLetters.route");
+const debtorReportRoutes = require("./modules/debtor-reports/debtorReports.route");
+const legalRoutes = require("./modules/legal/legal.route");
+const secureFileAccess = require("./middlewares/secure-file-access.middleware");
 const { PUBLIC_PREFIX, STORAGE_ROOT } = require("./utils/persuratan-files");
 const {
   PUBLIC_PREFIX: DIGITAL_ARCHIVE_PUBLIC_PREFIX,
   STORAGE_ROOT: DIGITAL_ARCHIVE_STORAGE_ROOT,
 } = require("./utils/digital-archive-files");
+const {
+  PUBLIC_PREFIX: WATERMARK_PUBLIC_PREFIX,
+  STORAGE_ROOT: WATERMARK_STORAGE_ROOT,
+} = require("./utils/watermark-files");
+const {
+  PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
+  STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
+} = require("./utils/watermarked-files");
 
 function parseCorsOrigins() {
   const raw = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || "";
@@ -36,6 +67,7 @@ function parseCorsOrigins() {
 
 const app = express();
 app.set("trust proxy", 1);
+app.use(securityHeaders);
 
 const allowedCorsOrigins = parseCorsOrigins();
 app.use(
@@ -58,17 +90,46 @@ app.use(
 );
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use(PUBLIC_PREFIX, express.static(STORAGE_ROOT));
-app.use(
-  DIGITAL_ARCHIVE_PUBLIC_PREFIX,
-  express.static(DIGITAL_ARCHIVE_STORAGE_ROOT),
-);
+
+const staticStorageMounts = [
+  {
+    publicPrefix: PUBLIC_PREFIX,
+    storageRoot: STORAGE_ROOT,
+    secure: true,
+  },
+  {
+    publicPrefix: DIGITAL_ARCHIVE_PUBLIC_PREFIX,
+    storageRoot: DIGITAL_ARCHIVE_STORAGE_ROOT,
+    secure: true,
+  },
+  {
+    publicPrefix: WATERMARK_PUBLIC_PREFIX,
+    storageRoot: WATERMARK_STORAGE_ROOT,
+    secure: false,
+  },
+  {
+    publicPrefix: WATERMARKED_PUBLIC_PREFIX,
+    storageRoot: WATERMARKED_STORAGE_ROOT,
+    secure: true,
+  },
+];
+
+for (const mount of staticStorageMounts) {
+  const middlewares = mount.secure
+    ? [secureFileAccess(mount.publicPrefix), express.static(mount.storageRoot)]
+    : [express.static(mount.storageRoot)];
+
+  app.use(mount.publicPrefix, ...middlewares);
+}
 
 app.get("/api/", function (req, res) {
   res.json({
-    message: "Welcome sir, this is great start for you!",
-    data: "Ruang Arsip Apps",
-    version: 1,
+    status: true,
+    message: "Ruang Arsip API aktif.",
+    data: {
+      service: "Ruang Arsip API",
+      version: 1,
+    },
   });
 });
 function healthCheck(req, res) {
@@ -81,7 +142,7 @@ function healthCheck(req, res) {
 
 app.get("/health", healthCheck);
 app.get("/api/health", healthCheck);
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authRateLimit, authRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/divisions", divisionRoutes);
 app.use("/api/letter-priorities", letterPriorityRoutes);
@@ -101,6 +162,26 @@ app.use("/api/digital-archives", digitalArchiveRoutes);
 app.use("/api/outgoing-mails", outgoingMailRoutes);
 app.use("/api/memorandums", memorandumRoutes);
 app.use("/api/correspondence", correspondenceRoutes);
+app.use("/api/watermark-settings", watermarkSettingsRoutes);
+app.use("/api/storage-usage", storageUsageRoutes);
+app.use("/api/branches", branchRoutes);
+app.use("/api/financing-products", financingProductRoutes);
+app.use("/api/collectibility-levels", collectibilityLevelRoutes);
+app.use("/api/contract-types", contractTypeRoutes);
+app.use("/api/third-parties", thirdPartyRoutes);
+app.use("/api/document-checklists", documentChecklistRoutes);
+app.use("/api/numbering-templates", numberingTemplateRoutes);
+app.use("/api/institution-profile", institutionProfileRoutes);
+app.use("/api/sla-reminders", slaReminderRoutes);
+app.use("/api/marketing-activity-types", marketingActivityTypeRoutes);
+app.use("/api/deposit-types", depositTypeRoutes);
+app.use("/api/debtors", debtorRoutes);
+app.use("/api/debtor-contracts", debtorContractRoutes);
+app.use("/api/debtor-imports", debtorImportRoutes);
+app.use("/api/debtor-marketing", debtorMarketingRoutes);
+app.use("/api/debtor-warning-letters", debtorWarningLetterRoutes);
+app.use("/api/debtor-reports", debtorReportRoutes);
+app.use("/api/legal", legalRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

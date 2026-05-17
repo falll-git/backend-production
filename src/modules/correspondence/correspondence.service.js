@@ -1,6 +1,4 @@
-const incomingMailService = require("../incoming-mail/incomingMail.service");
-const outgoingMailService = require("../outgoing-mails/outgoingMails.service");
-const memorandumService = require("../memorandum/memorandum.service");
+const repository = require("./correspondence.repository");
 const { AppError } = require("../../utils/errors");
 const {
   buildReportSummary,
@@ -136,7 +134,7 @@ function stripPagination(query) {
   return {
     ...query,
     page: undefined,
-    limit: undefined,
+    limit: "all",
   };
 }
 
@@ -223,9 +221,9 @@ function buildDocumentScopeMetadata({ kind, canReportAll }) {
     },
     outgoing_mails: {
       kind: "outgoing-mail",
-      available_scopes: ["all"],
-      scope_applies: false,
-      scope_basis: "document_collection",
+      available_scopes: dispositionScopes,
+      scope_applies: true,
+      scope_basis: "created_by_or_division",
     },
     memorandums: {
       kind: "memorandum",
@@ -262,6 +260,13 @@ function buildScopedQuery(query, scope, userId) {
   };
 }
 
+function buildScopeAppliesTo(kind) {
+  if (kind === "incoming-mail") return ["incoming_mails"];
+  if (kind === "outgoing-mail") return ["outgoing_mails"];
+  if (kind === "memorandum") return ["memorandums"];
+  return ["incoming_mails", "outgoing_mails", "memorandums"];
+}
+
 async function resolveReportScope({
   requestUser,
   query,
@@ -271,18 +276,6 @@ async function resolveReportScope({
   const user = await resolveRequestUser(requestUser);
   if (!user) {
     throw new AppError("Sesi pengguna tidak valid.", 401);
-  }
-
-  if (kind === "outgoing-mail") {
-    return {
-      user,
-      scope: "all",
-      requested_scope: hasScopeInput(query.scope)
-        ? normalizeScope(query.scope, "all")
-        : null,
-      available_scopes: ["all"],
-      can_report_all: false,
-    };
   }
 
   const canReportAll = await roleHasFeature(
@@ -329,24 +322,33 @@ exports.getReport = async ({
   const listQuery = stripPagination(query);
   const scopedIncomingQuery = buildScopedQuery(listQuery, scope, userId);
   const scopedMemorandumQuery = buildScopedQuery(listQuery, scope, userId);
+  const serviceScopeOverride =
+    scope === "all" ? { canAccessAllPersuratan: true } : null;
   const incoming =
     kind === "all" || kind === "incoming-mail"
-      ? await incomingMailService.getIncomingMails({
+      ? await repository.findIncomingMails({
           req,
           query: scopedIncomingQuery,
           userId,
+          scopeOverride: serviceScopeOverride,
         })
       : { data: [] };
   const outgoing =
     kind === "all" || kind === "outgoing-mail"
-      ? await outgoingMailService.getAll({ req, query: listQuery })
+      ? await repository.findOutgoingMails({
+          req,
+          query: listQuery,
+          userId,
+          scopeOverride: serviceScopeOverride,
+        })
       : { data: [] };
   const memorandums =
     kind === "all" || kind === "memorandum"
-      ? await memorandumService.getMemorandums({
+      ? await repository.findMemorandums({
           req,
           query: scopedMemorandumQuery,
           userId,
+          scopeOverride: serviceScopeOverride,
         })
       : { data: [] };
 
@@ -372,8 +374,7 @@ exports.getReport = async ({
       available_scopes: scopeAccess.available_scopes,
       can_report_all: scopeAccess.can_report_all,
       my_filter: scope === "my" ? myFilter : null,
-      scope_applies_to:
-        kind === "outgoing-mail" ? [] : ["incoming_mails", "memorandums"],
+      scope_applies_to: buildScopeAppliesTo(kind),
       document_scopes: buildDocumentScopeMetadata({
         kind,
         canReportAll: scopeAccess.can_report_all,

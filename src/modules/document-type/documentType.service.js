@@ -1,5 +1,6 @@
 const repository = require("./documentType.repository");
 const { AppError } = require("../../utils/errors");
+const { buildPaginationMeta } = require("../../utils/pagination");
 
 function normalizeText(value) {
   return value.trim().replace(/\s+/g, " ");
@@ -9,9 +10,7 @@ function normalizeCode(value) {
   return value.trim().toUpperCase();
 }
 
-exports.getDocumentTypes = async ({ page, limit, search }) => {
-  const skip = (page - 1) * limit;
-
+exports.getDocumentTypes = async ({ pagination, search }) => {
   const where = search
     ? {
         OR: [
@@ -31,16 +30,16 @@ exports.getDocumentTypes = async ({ page, limit, search }) => {
       }
     : {};
 
-  const data = await repository.findMany({ where, skip, take: limit });
+  const data = await repository.findMany({
+    where,
+    skip: pagination.skip,
+    take: pagination.take,
+  });
   const total = await repository.count(where);
 
   return {
     data,
-    meta: {
-      total,
-      page,
-      lastPage: Math.ceil(total / limit),
-    },
+    meta: buildPaginationMeta(total, pagination),
   };
 };
 

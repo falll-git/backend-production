@@ -2,6 +2,13 @@ const {
   buildFileUrl,
   deriveDocumentFileName,
 } = require("./digital-archive-files");
+const {
+  buildWatermarkMeta,
+  resolveEffectiveFileUrl,
+} = require("../modules/watermark-settings/watermarkProcessor.service");
+const {
+  appendFileAccessToken,
+} = require("./file-access-token");
 
 const ACCESS_STATUS_LABELS = {
   PENDING: "Menunggu Persetujuan",
@@ -47,7 +54,6 @@ function serializeUserSummary(user) {
       ? {
           id: user.role.id,
           name: user.role.name,
-          type: user.role.type,
         }
       : null,
     division: user.division
@@ -196,8 +202,14 @@ function serializeLoanSummary(loan) {
   };
 }
 
-function serializeDocumentFile(req, file, fallbackBaseName) {
+function serializeDocumentFile(req, file, fallbackBaseName, documentId) {
   if (!file) return null;
+
+  const fileUrl = appendFileAccessToken(req, buildFileUrl(req, file.file_path), {
+    storedPath: file.file_path,
+    module: "digital_archive",
+    entityId: documentId,
+  });
 
   return {
     id: file.id,
@@ -211,7 +223,7 @@ function serializeDocumentFile(req, file, fallbackBaseName) {
     created_at: file.created_at,
     uploaded_by: file.uploaded_by,
     uploader: serializeUserSummary(file.uploader),
-    url: buildFileUrl(req, file.file_path),
+    url: fileUrl,
   };
 }
 
@@ -223,6 +235,20 @@ function serializeDocumentBase(req, document) {
   const primaryFile =
     documentFiles.find((item) => item.is_primary) || documentFiles[0] || null;
   const filePath = document.file || primaryFile?.file_path || null;
+  const originalFileUrl = filePath
+    ? appendFileAccessToken(req, buildFileUrl(req, filePath), {
+        storedPath: filePath,
+        module: "digital_archive",
+        entityId: document.id,
+      })
+    : null;
+  const watermark = buildWatermarkMeta(req, document, "digital_archive");
+  const effectiveFileUrl = resolveEffectiveFileUrl(
+    req,
+    document,
+    originalFileUrl,
+    "digital_archive",
+  );
 
   return {
     id: document.id,
@@ -239,8 +265,6 @@ function serializeDocumentBase(req, document) {
     availability_status_key: availability.key,
     availability_status_label: availability.label,
     is_overdue: availability.is_overdue,
-    document_date: document.document_date,
-    due_date: document.due_date,
     created_at: document.created_at,
     updated_at: document.updated_at,
     deleted_at: document.deleted_at,
@@ -250,16 +274,23 @@ function serializeDocumentBase(req, document) {
           name:
             primaryFile?.file_name ||
             deriveDocumentFileName(filePath, document.document_name),
-          url: buildFileUrl(req, filePath),
+          url: effectiveFileUrl,
+          original_url: originalFileUrl,
           mime_type: primaryFile?.mime_type || null,
           size_bytes: primaryFile?.size_bytes || null,
+          watermark,
         }
       : null,
+    watermark,
     files: documentFiles
-      .map((item) => serializeDocumentFile(req, item, document.document_name))
+      .map((item) =>
+        serializeDocumentFile(req, item, document.document_name, document.id),
+      )
       .filter(Boolean),
     document_files: documentFiles
-      .map((item) => serializeDocumentFile(req, item, document.document_name))
+      .map((item) =>
+        serializeDocumentFile(req, item, document.document_name, document.id),
+      )
       .filter(Boolean),
     document_type: document.document_type
       ? {

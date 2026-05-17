@@ -61,6 +61,9 @@ exports.findDependencySummary = (id, client) => {
       _count: {
         select: {
           digital_documents: true,
+          incoming_mails: true,
+          outgoing_mails: true,
+          memorandums: true,
         },
       },
     },
