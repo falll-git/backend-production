@@ -19,6 +19,15 @@ const STORED_PATH_ROOTS = [
   [WATERMARKED_PUBLIC_PREFIX, WATERMARKED_STORAGE_ROOT],
 ];
 
+function remoteHeadEnabled() {
+  return String(process.env.STORAGE_USAGE_REMOTE_HEAD_ENABLED || "").toLowerCase() === "true";
+}
+
+function remoteHeadTimeoutMs() {
+  const value = Number(process.env.STORAGE_USAGE_REMOTE_HEAD_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : 3000;
+}
+
 function normalizeStoredPath(value) {
   if (typeof value !== "string" || !value.trim()) return null;
 
@@ -75,7 +84,38 @@ function getStoredFileSizeBytes(storedPath) {
   }
 }
 
+async function getRemoteFileSizeBytes(storedPath) {
+  if (!remoteHeadEnabled()) return null;
+  if (typeof storedPath !== "string" || !/^https?:\/\//i.test(storedPath.trim())) return null;
+  if (typeof fetch !== "function") return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), remoteHeadTimeoutMs());
+
+  try {
+    const response = await fetch(storedPath.trim(), {
+      method: "HEAD",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const contentLength = Number(response.headers.get("content-length"));
+    return Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function resolveStoredFileSizeBytes(storedPath) {
+  const localSize = getStoredFileSizeBytes(storedPath);
+  if (localSize && localSize > 0) return localSize;
+  return getRemoteFileSizeBytes(storedPath);
+}
+
 module.exports = {
   getStoredFileSizeBytes,
+  getRemoteFileSizeBytes,
+  resolveStoredFileSizeBytes,
   resolveStoredFilePath,
 };

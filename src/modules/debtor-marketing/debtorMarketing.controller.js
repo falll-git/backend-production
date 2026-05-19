@@ -7,7 +7,12 @@ function status(error, fallback = 400) {
 
 exports.getAll = async (req, res) => {
   try {
-    const result = await service.getAll({ req, kindSlug: req.params.kind, query: req.query });
+    const result = await service.getAll({
+      req,
+      kindSlug: req.params.kind,
+      query: req.query,
+      userId: req.user?.id,
+    });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
@@ -16,7 +21,15 @@ exports.getAll = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    return successResponse(res, await service.getById({ req, kindSlug: req.params.kind, id: req.params.id }));
+    return successResponse(
+      res,
+      await service.getById({
+        req,
+        kindSlug: req.params.kind,
+        id: req.params.id,
+        userId: req.user?.id,
+      }),
+    );
   } catch (error) {
     return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
   }

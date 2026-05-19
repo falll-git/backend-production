@@ -8,7 +8,11 @@ function status(error, fallback = 400) {
 function list(method) {
   return async (req, res) => {
     try {
-      const result = await service[method]({ req, query: req.query });
+      const result = await service[method]({
+        req,
+        query: req.query,
+        userId: req.user?.id,
+      });
       return paginatedResponse(res, result.data, result.meta);
     } catch (error) {
       return res.status(status(error)).json({ status: false, success: false, message: error.message });
@@ -79,6 +83,11 @@ exports.createInsuranceProgress = create("createInsuranceProgress", "Progress as
 exports.updateInsuranceProgress = update("updateInsuranceProgress", "Progress asuransi berhasil diperbarui.");
 exports.deleteInsuranceProgress = remove("legal_insurance_progress", "Progress asuransi berhasil dihapus.");
 
+exports.listKjppProgress = list("listKjppProgress");
+exports.createKjppProgress = create("createKjppProgress", "Progress KJPP berhasil dibuat.");
+exports.updateKjppProgress = update("updateKjppProgress", "Progress KJPP berhasil diperbarui.");
+exports.deleteKjppProgress = remove("legal_kjpp_progress", "Progress KJPP berhasil dihapus.");
+
 exports.listClaims = list("listClaims");
 exports.createClaim = create("createClaim", "Klaim asuransi berhasil dibuat.");
 exports.updateClaim = update("updateClaim", "Klaim asuransi berhasil diperbarui.");
@@ -86,7 +95,10 @@ exports.deleteClaim = remove("legal_claims", "Klaim asuransi berhasil dihapus.")
 
 exports.listDeposits = async (req, res) => {
   try {
-    const result = await service.listDeposits({ query: req.query });
+    const result = await service.listDeposits({
+      query: req.query,
+      userId: req.user?.id,
+    });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
@@ -115,7 +127,10 @@ exports.deleteDeposit = remove("legal_deposits", "Dana titipan berhasil dihapus.
 
 exports.listDepositTransactions = async (req, res) => {
   try {
-    const result = await service.listDepositTransactions({ query: req.query });
+    const result = await service.listDepositTransactions({
+      query: req.query,
+      userId: req.user?.id,
+    });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });

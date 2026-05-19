@@ -22,6 +22,17 @@ exports.getById = async (req, res) => {
   }
 };
 
+exports.getWorkflow = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.getWorkflow({ req, id: req.params.id, userId: req.user?.id }),
+    );
+  } catch (error) {
+    return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const data = await service.create({ payload: req.body, userId: req.user?.id });

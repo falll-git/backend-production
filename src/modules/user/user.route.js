@@ -10,6 +10,7 @@ const {
   reactivateAccessSchema,
   updateUserSchema,
 } = require("./user.validation");
+const { DEBTOR_MENU_URLS } = require("../../utils/menu-access");
 
 const USER_MENU_URL = "/dashboard/users";
 const DIGITAL_DOCUMENT_INPUT_MENU_URL =
@@ -20,6 +21,7 @@ const USER_READ_MENU_URLS = [
   USER_MENU_URL,
   DIGITAL_DOCUMENT_INPUT_MENU_URL,
   DIGITAL_DOCUMENT_LIST_MENU_URL,
+  ...DEBTOR_MENU_URLS,
 ];
 
 router.get("/", auth, authorize(USER_READ_MENU_URLS, "read"), controller.getAll);

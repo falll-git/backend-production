@@ -38,6 +38,8 @@ const {
 } = require("../watermark-settings/watermarkProcessor.service");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
+const MEMORANDUM_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 
 async function queueMemorandumWatermark(entityId) {
   try {
@@ -397,6 +399,7 @@ exports.getDispositionRecipients = async ({ query, currentUserId }) => {
 exports.createMemorandum = async ({ req, payload, userId }) => {
   const assignments = await resolveActiveDivisionManagers(
     resolveTargetDivisionIds(payload),
+    { menuUrls: [MEMORANDUM_MENU_URL] },
   );
   const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({

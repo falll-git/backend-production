@@ -34,6 +34,7 @@ const LEGAL_DATA_SCOPE_URLS = [
   "/dashboard/legal/titipan/angsuran",
   "/dashboard/legal/progress/notaris",
   "/dashboard/legal/progress/asuransi",
+  "/dashboard/legal/progress/kjpp",
   "/dashboard/legal/progress/klaim",
   "/dashboard/legal/upload-ideb",
   "/dashboard/legal/laporan",
@@ -82,24 +83,46 @@ function buildDebtorVisibilityWhere(scope) {
   if (scope?.canViewAll || scope?.canManageAll) return {};
   if (!scope?.userId) return { id: "__no_debtor_access__" };
 
+  const ownClauses = [
+    { created_by: scope.userId },
+    { marketing_user_id: scope.userId },
+    {
+      contracts: {
+        some: {
+          OR: [
+            { created_by: scope.userId },
+            { marketing_user_id: scope.userId },
+          ],
+        },
+      },
+    },
+    {
+      marketing_items: {
+        some: {
+          created_by: scope.userId,
+        },
+      },
+    },
+  ];
+
+  if (!scope.canViewDivision || !scope.divisionId) {
+    return { OR: ownClauses };
+  }
+
   return {
     OR: [
-      { created_by: scope.userId },
-      { marketing_user_id: scope.userId },
+      ...ownClauses,
       {
-        contracts: {
-          some: {
-            OR: [
-              { created_by: scope.userId },
-              { marketing_user_id: scope.userId },
-            ],
-          },
+        marketing_user: {
+          division_id: scope.divisionId,
         },
       },
       {
-        marketing_items: {
+        contracts: {
           some: {
-            created_by: scope.userId,
+            marketing_user: {
+              division_id: scope.divisionId,
+            },
           },
         },
       },
@@ -111,16 +134,33 @@ function buildContractVisibilityWhere(scope) {
   if (scope?.canViewAll || scope?.canManageAll) return {};
   if (!scope?.userId) return { id: "__no_contract_access__" };
 
+  const ownClauses = [
+    { created_by: scope.userId },
+    { marketing_user_id: scope.userId },
+    {
+      debtor: {
+        OR: [{ created_by: scope.userId }, { marketing_user_id: scope.userId }],
+      },
+    },
+  ];
+
+  if (!scope.canViewDivision || !scope.divisionId) {
+    return { OR: ownClauses };
+  }
+
   return {
     OR: [
-      { created_by: scope.userId },
-      { marketing_user_id: scope.userId },
+      ...ownClauses,
+      {
+        marketing_user: {
+          division_id: scope.divisionId,
+        },
+      },
       {
         debtor: {
-          OR: [
-            { created_by: scope.userId },
-            { marketing_user_id: scope.userId },
-          ],
+          marketing_user: {
+            division_id: scope.divisionId,
+          },
         },
       },
     ],

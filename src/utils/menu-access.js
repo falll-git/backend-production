@@ -1,6 +1,11 @@
 const { AppError } = require("./errors");
 
-const PERMISSION_FIELDS = ["can_create", "can_read", "can_update", "can_delete"];
+const PERMISSION_FIELDS = [
+  "can_create",
+  "can_read",
+  "can_update",
+  "can_delete",
+];
 
 const CAPABILITY_FIELDS = {
   create: "can_create",
@@ -80,6 +85,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/informasi-debitur/laporan/npf": READ_ONLY,
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": READ_ONLY,
 
+  "/dashboard/legal": READ_ONLY,
   "/dashboard/legal/template-dokumen": CRUD,
   "/dashboard/legal/cetak/akad": READ_CREATE,
   "/dashboard/legal/cetak/haftsheet": READ_CREATE,
@@ -92,6 +98,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/legal/titipan/angsuran": CRUD,
   "/dashboard/legal/progress/notaris": CRUD,
   "/dashboard/legal/progress/asuransi": CRUD,
+  "/dashboard/legal/progress/kjpp": CRUD,
   "/dashboard/legal/progress/klaim": CRUD,
   "/dashboard/legal/upload-ideb": CRUD,
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": READ_ONLY,
@@ -114,9 +121,6 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/jenis-akad": CRUD,
   "/dashboard/parameter/kolektibilitas": CRUD,
   "/dashboard/parameter/cabang": CRUD,
-  "/dashboard/parameter/profil-lembaga": CRUD,
-  "/dashboard/parameter/sla-pengingat": CRUD,
-  "/dashboard/parameter/aktivitas-marketing": CRUD,
   "/dashboard/parameter/jenis-titipan": CRUD,
   "/dashboard/parameter/watermark-dokumen": READ_UPDATE,
 };
@@ -239,6 +243,7 @@ const MENU_FEATURES = {
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": [
     REPORT_ALL_FEATURE,
   ],
+  "/dashboard/legal": [REPORT_ALL_FEATURE],
   "/dashboard/legal/template-dokumen": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/cetak/akad": [REPORT_ALL_FEATURE],
   "/dashboard/legal/cetak/haftsheet": [REPORT_ALL_FEATURE],
@@ -250,13 +255,24 @@ const MENU_FEATURES = {
   "/dashboard/legal/titipan/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/titipan/angsuran": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/progress/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/progress/asuransi": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/progress/asuransi": [
+    REPORT_ALL_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/progress/kjpp": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/progress/klaim": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/upload-ideb": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/laporan": [REPORT_ALL_FEATURE],
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": [REPORT_ALL_FEATURE],
   "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": [REPORT_ALL_FEATURE],
 };
+
+const DEBTOR_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
+  url.startsWith("/dashboard/informasi-debitur"),
+);
+const LEGAL_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
+  url.startsWith("/dashboard/legal"),
+);
 
 function normalizeCapabilities(capabilities) {
   return new Set(capabilities || READ_ONLY);
@@ -311,9 +327,7 @@ function normalizeFeatures(features) {
 
   return [
     ...new Set(
-      features
-        .map((feature) => String(feature || "").trim())
-        .filter(Boolean),
+      features.map((feature) => String(feature || "").trim()).filter(Boolean),
     ),
   ];
 }
@@ -380,9 +394,11 @@ function serializeMenuAccess(menu) {
 module.exports = {
   APPROVE_FEATURE,
   CAPABILITY_FIELDS,
+  DEBTOR_MENU_URLS,
   DIVISION_MANAGER_FEATURE,
   FEATURE_LABELS,
   HANDOVER_FEATURE,
+  LEGAL_MENU_URLS,
   MANAGE_ALL_FEATURE,
   MENU_CAPABILITIES,
   MENU_FEATURES,

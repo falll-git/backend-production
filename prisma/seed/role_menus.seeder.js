@@ -56,6 +56,7 @@ const URLS = {
   debtorReportNpf: "/dashboard/informasi-debitur/laporan/npf",
   debtorReportMarketingActivity:
     "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+  legalOverview: "/dashboard/legal",
   legalTemplate: "/dashboard/legal/template-dokumen",
   legalPrintAkad: "/dashboard/legal/cetak/akad",
   legalPrintHaftsheet: "/dashboard/legal/cetak/haftsheet",
@@ -68,6 +69,7 @@ const URLS = {
   legalDepositInstallment: "/dashboard/legal/titipan/angsuran",
   legalProgressNotary: "/dashboard/legal/progress/notaris",
   legalProgressInsurance: "/dashboard/legal/progress/asuransi",
+  legalProgressKjpp: "/dashboard/legal/progress/kjpp",
   legalProgressClaim: "/dashboard/legal/progress/klaim",
   legalUploadIdeb: "/dashboard/legal/upload-ideb",
   legalReport: "/dashboard/legal/laporan",
@@ -93,9 +95,6 @@ const URLS = {
   contractType: "/dashboard/parameter/jenis-akad",
   collectibility: "/dashboard/parameter/kolektibilitas",
   branch: "/dashboard/parameter/cabang",
-  institutionProfile: "/dashboard/parameter/profil-lembaga",
-  slaReminder: "/dashboard/parameter/sla-pengingat",
-  marketingActivityType: "/dashboard/parameter/aktivitas-marketing",
   depositType: "/dashboard/parameter/jenis-titipan",
   watermarkSettings: "/dashboard/parameter/watermark-dokumen",
 };
@@ -118,9 +117,6 @@ const EXTENDED_PARAMETER_URLS = [
   URLS.contractType,
   URLS.collectibility,
   URLS.branch,
-  URLS.institutionProfile,
-  URLS.slaReminder,
-  URLS.marketingActivityType,
   URLS.depositType,
 ];
 const DEBTOR_CRUD_URLS = [
@@ -147,6 +143,7 @@ const LEGAL_CRUD_URLS = [
   URLS.legalDepositInstallment,
   URLS.legalProgressNotary,
   URLS.legalProgressInsurance,
+  URLS.legalProgressKjpp,
   URLS.legalProgressClaim,
   URLS.legalUploadIdeb,
 ];
@@ -159,6 +156,7 @@ const LEGAL_PRINT_URLS = [
   URLS.legalPrintSamsat,
 ];
 const LEGAL_REPORT_URLS = [
+  URLS.legalOverview,
   URLS.legalReport,
   URLS.legalReportThirdPartyDocuments,
   URLS.legalReportThirdPartyDepositFunds,

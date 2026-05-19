@@ -33,6 +33,7 @@ const uploadBody = [
       "month",
       "year",
       "coverage_amount",
+      "appraisal_value",
       "claim_amount",
       "approved_amount",
       "disbursed_amount",
@@ -151,6 +152,35 @@ router.delete(
   auth,
   authorize("/dashboard/legal/progress/asuransi", "delete"),
   controller.deleteInsuranceProgress,
+);
+
+router.get(
+  "/progress/kjpp",
+  auth,
+  authorize("/dashboard/legal/progress/kjpp", "read"),
+  controller.listKjppProgress,
+);
+router.post(
+  "/progress/kjpp",
+  auth,
+  authorize("/dashboard/legal/progress/kjpp", "create"),
+  ...uploadBody,
+  validate(validation.kjppProgressSchema),
+  controller.createKjppProgress,
+);
+router.put(
+  "/progress/kjpp/:id",
+  auth,
+  authorize("/dashboard/legal/progress/kjpp", "update"),
+  ...uploadBody,
+  validate(validation.updateKjppProgressSchema),
+  controller.updateKjppProgress,
+);
+router.delete(
+  "/progress/kjpp/:id",
+  auth,
+  authorize("/dashboard/legal/progress/kjpp", "delete"),
+  controller.deleteKjppProgress,
 );
 
 router.get("/claims", auth, authorize("/dashboard/legal/progress/klaim", "read"), controller.listClaims);

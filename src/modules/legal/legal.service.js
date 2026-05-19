@@ -6,6 +6,12 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  LEGAL_DATA_SCOPE_URLS,
+  buildContractVisibilityWhere,
+  buildDebtorVisibilityWhere,
+  getDebtorAccessScope,
+} = require("../../utils/debtor-access");
 
 const LEGAL_TYPES = new Set([
   "AKAD",
@@ -131,10 +137,85 @@ function serializeClaim(req, item) {
   };
 }
 
-async function ensureContract(contractId) {
-  const contract = await repository.findContractById(contractId);
-  if (!contract) throw new AppError("Kontrak tidak ditemukan.", 404);
+function isEmptyObject(value) {
+  return !value || Object.keys(value).length === 0;
+}
+
+async function getLegalAccessScope(userId) {
+  return getDebtorAccessScope(userId, LEGAL_DATA_SCOPE_URLS);
+}
+
+async function buildContractAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  const contractWhere = buildContractVisibilityWhere(scope);
+  return isEmptyObject(contractWhere)
+    ? {}
+    : {
+        contract: {
+          is: contractWhere,
+        },
+      };
+}
+
+async function buildDepositTransactionAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  const contractWhere = buildContractVisibilityWhere(scope);
+  return isEmptyObject(contractWhere)
+    ? {}
+    : {
+        deposit: {
+          is: {
+            contract: {
+              is: contractWhere,
+            },
+          },
+        },
+      };
+}
+
+async function buildIdebAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  if (scope.canViewAll || scope.canManageAll) return {};
+
+  return {
+    OR: [
+      { uploaded_by: scope.userId || "__no_user_access__" },
+      { created_by: scope.userId || "__no_user_access__" },
+      {
+        debtor: {
+          is: buildDebtorVisibilityWhere(scope),
+        },
+      },
+      {
+        contract: {
+          is: buildContractVisibilityWhere(scope),
+        },
+      },
+    ],
+  };
+}
+
+async function ensureContract(contractId, userId, tx) {
+  const scope = await getLegalAccessScope(userId);
+  const contract = await repository.findContractById(
+    contractId,
+    tx,
+    buildContractVisibilityWhere(scope),
+  );
+  if (!contract) throw new AppError("Kontrak tidak ditemukan atau tidak bisa diakses.", 404);
   return contract;
+}
+
+async function ensureDebtor(debtorId, userId, tx) {
+  if (!debtorId) return null;
+  const scope = await getLegalAccessScope(userId);
+  const debtor = await repository.findDebtorById(
+    debtorId,
+    tx,
+    buildDebtorVisibilityWhere(scope),
+  );
+  if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
+  return debtor;
 }
 
 async function ensureThirdParty(thirdPartyId, expectedCategory) {
@@ -336,18 +417,19 @@ async function generateDocumentNumber(documentType, numberingTemplateId, tx) {
   };
 }
 
-exports.listPrints = ({ req, query }) =>
+exports.listPrints = async ({ req, query, userId }) =>
   listModel({
     req,
     modelName: "legal_print_histories",
     query,
     searchFields: ["document_type", "generated_number"],
+    extraWhere: await buildContractAccessWhere(userId),
     serializer: serializePrint,
   });
 
 exports.createPrint = async ({ req, payload, userId }) => {
   const documentType = normalizeUpper(payload.document_type);
-  await ensureContract(payload.contract_id);
+  await ensureContract(payload.contract_id, userId);
   if (payload.template_id && !(await repository.findTemplateById(payload.template_id))) {
     throw new AppError("Template legal tidak ditemukan.", 404);
   }
@@ -396,17 +478,26 @@ exports.createPrint = async ({ req, payload, userId }) => {
   return serializePrint(req, print);
 };
 
-exports.listIdeb = ({ req, query }) =>
+exports.listIdeb = async ({ req, query, userId }) =>
   listModel({
     req,
     modelName: "legal_ideb_uploads",
     query,
     searchFields: ["status", "file_name"],
+    extraWhere: await buildIdebAccessWhere(userId),
     serializer: (request, item) => serializeWithFile(request, item, "ideb"),
   });
 
 exports.createIdeb = async ({ req, payload, userId }) => {
-  if (payload.contract_id) await ensureContract(payload.contract_id);
+  const debtor = payload.debtor_id
+    ? await ensureDebtor(payload.debtor_id, userId)
+    : null;
+  const contract = payload.contract_id
+    ? await ensureContract(payload.contract_id, userId)
+    : null;
+  if (debtor && contract && contract.debtor_id !== debtor.id) {
+    throw new AppError("Kontrak tidak sesuai dengan debitur yang dipilih.", 422);
+  }
   const fileMeta = persistDomainFile({
     entity: "legal/ideb",
     input: payload.file,
@@ -416,7 +507,7 @@ exports.createIdeb = async ({ req, payload, userId }) => {
   return serializeWithFile(
     req,
     await repository.create("legal_ideb_uploads", {
-      debtor_id: normalizeText(payload.debtor_id),
+      debtor_id: debtor?.id || contract?.debtor_id || normalizeText(payload.debtor_id),
       contract_id: normalizeText(payload.contract_id),
       month: payload.month,
       year: payload.year,
@@ -431,7 +522,7 @@ exports.createIdeb = async ({ req, payload, userId }) => {
 };
 
 async function createProgress({ req, modelName, payload, userId, category, entity }) {
-  await ensureContract(payload.contract_id);
+  await ensureContract(payload.contract_id, userId);
   await ensureThirdParty(payload.third_party_id, category);
   const fileMeta = payload.file
     ? persistDomainFile({
@@ -463,7 +554,8 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
   const current = await repository.findById(modelName, id, { deleted_at: null });
   if (!current) throw new AppError("Data progress tidak ditemukan.", 404);
   const next = { ...current, ...payload };
-  await ensureContract(next.contract_id);
+  await ensureContract(current.contract_id, userId);
+  await ensureContract(next.contract_id, userId);
   await ensureThirdParty(next.third_party_id, category);
   const fileMeta =
     payload.file !== undefined && payload.file !== null
@@ -493,12 +585,36 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
   );
 }
 
-exports.listNotaryProgress = ({ req, query }) =>
+async function attachThirdPartyNames(rows) {
+  const ids = [
+    ...new Set(
+      rows
+        .map((row) => row.third_party_id)
+        .filter((id) => typeof id === "string" && id.trim()),
+    ),
+  ];
+  if (ids.length === 0) return rows;
+
+  const thirdParties = await repository.findThirdPartiesByIds(ids);
+  const byId = new Map(thirdParties.map((item) => [item.id, item]));
+
+  return rows.map((row) => {
+    const thirdParty = byId.get(row.third_party_id) || null;
+    return {
+      ...row,
+      third_party: thirdParty,
+      third_party_name: thirdParty?.name || row.third_party_id,
+    };
+  });
+}
+
+exports.listNotaryProgress = async ({ req, query, userId }) =>
   listModel({
     req,
     modelName: "legal_notary_progress",
     query,
     searchFields: ["deed_type", "deed_number", "status", "notes"],
+    extraWhere: await buildContractAccessWhere(userId),
     serializer: (request, item) => serializeWithFile(request, item, item.deed_type),
   });
 exports.createNotaryProgress = (args) =>
@@ -516,12 +632,13 @@ exports.updateNotaryProgress = (args) =>
     entity: "legal/notary-progress",
   });
 
-exports.listInsuranceProgress = ({ req, query }) =>
+exports.listInsuranceProgress = async ({ req, query, userId }) =>
   listModel({
     req,
     modelName: "legal_insurance_progress",
     query,
     searchFields: ["insurance_type", "policy_number", "status", "notes"],
+    extraWhere: await buildContractAccessWhere(userId),
     serializer: (request, item) => serializeWithFile(request, item, item.insurance_type),
   });
 exports.createInsuranceProgress = (args) =>
@@ -539,26 +656,72 @@ exports.updateInsuranceProgress = (args) =>
     entity: "legal/insurance-progress",
   });
 
+exports.listKjppProgress = async ({ req, query, userId }) =>
+  listModel({
+    req,
+    modelName: "legal_kjpp_progress",
+    query,
+    searchFields: [
+      "appraisal_type",
+      "report_number",
+      "collateral_object",
+      "status",
+      "notes",
+    ],
+    extraWhere: await buildContractAccessWhere(userId),
+    serializer: (request, item) => serializeWithFile(request, item, item.appraisal_type),
+  });
+exports.createKjppProgress = (args) =>
+  createProgress({
+    ...args,
+    modelName: "legal_kjpp_progress",
+    category: "KJPP",
+    entity: "legal/kjpp-progress",
+  });
+exports.updateKjppProgress = (args) =>
+  updateProgress({
+    ...args,
+    modelName: "legal_kjpp_progress",
+    category: "KJPP",
+    entity: "legal/kjpp-progress",
+  });
+
 exports.deleteRecord = async ({ modelName, id, userId }) => {
   const current = await repository.findById(modelName, id, { deleted_at: null });
   if (!current) throw new AppError("Data tidak ditemukan.", 404);
+  if (current.contract_id) {
+    await ensureContract(current.contract_id, userId);
+  }
   await repository.update(modelName, id, {
     deleted_at: new Date(),
     deleted_by: userId || null,
   });
 };
 
-exports.listClaims = ({ req, query }) =>
+exports.listClaims = async ({ req, query, userId }) =>
   listModel({
     req,
     modelName: "legal_claims",
     query,
     searchFields: ["policy_number", "claim_type", "status", "notes"],
+    extraWhere: await buildContractAccessWhere(userId),
     serializer: serializeClaim,
   });
 
 exports.createClaim = async ({ req, payload, userId }) => {
-  await ensureContract(payload.contract_id);
+  await ensureContract(payload.contract_id, userId);
+  if (payload.insurance_progress_id) {
+    const progress = await repository.findById(
+      "legal_insurance_progress",
+      payload.insurance_progress_id,
+      { deleted_at: null },
+    );
+    if (!progress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
+    await ensureContract(progress.contract_id, userId);
+    if (progress.contract_id !== payload.contract_id) {
+      throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
+    }
+  }
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: "legal/claims",
@@ -585,6 +748,7 @@ exports.createClaim = async ({ req, payload, userId }) => {
 exports.updateClaim = async ({ req, id, payload, userId }) => {
   const current = await repository.findById("legal_claims", id, { deleted_at: null });
   if (!current) throw new AppError("Klaim tidak ditemukan.", 404);
+  await ensureContract(current.contract_id, userId);
   const fileMeta =
     payload.file !== undefined && payload.file !== null
       ? persistDomainFile({
@@ -597,6 +761,20 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   const data = { ...payload };
   delete data.file;
   if (data.status) data.status = normalizeUpper(data.status);
+  if (data.contract_id) await ensureContract(data.contract_id, userId);
+  if (data.insurance_progress_id) {
+    const progress = await repository.findById(
+      "legal_insurance_progress",
+      data.insurance_progress_id,
+      { deleted_at: null },
+    );
+    if (!progress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
+    await ensureContract(progress.contract_id, userId);
+    const targetContractId = data.contract_id || current.contract_id;
+    if (progress.contract_id !== targetContractId) {
+      throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
+    }
+  }
   if (data.submitted_at) data.submitted_at = new Date(data.submitted_at);
   if (data.disbursed_at !== undefined) {
     data.disbursed_at = data.disbursed_at ? new Date(data.disbursed_at) : null;
@@ -611,17 +789,18 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   );
 };
 
-exports.listDeposits = ({ query }) =>
+exports.listDeposits = async ({ query, userId }) =>
   listModel({
     req: null,
     modelName: "legal_deposits",
     query,
     searchFields: ["type", "status", "notes"],
+    extraWhere: await buildContractAccessWhere(userId),
     serializer: (_request, item) => serializeDeposit(item),
   });
 
 exports.createDeposit = async ({ payload, userId }) => {
-  await ensureContract(payload.contract_id);
+  await ensureContract(payload.contract_id, userId);
   if (payload.third_party_id) await ensureThirdParty(payload.third_party_id);
   const remaining = calculateRemaining(payload);
   return serializeDeposit(
@@ -644,6 +823,7 @@ exports.createDeposit = async ({ payload, userId }) => {
 exports.updateDeposit = async ({ id, payload, userId }) => {
   const current = await repository.findById("legal_deposits", id, { deleted_at: null });
   if (!current) throw new AppError("Dana titipan tidak ditemukan.", 404);
+  await ensureContract(current.contract_id, userId);
   const next = {
     deposit_type_id:
       payload.deposit_type_id !== undefined
@@ -670,30 +850,49 @@ exports.updateDeposit = async ({ id, payload, userId }) => {
     notes: payload.notes !== undefined ? normalizeText(payload.notes) : current.notes,
     updated_by: userId || null,
   };
-  await ensureContract(next.contract_id);
+  await ensureContract(next.contract_id, userId);
   if (next.third_party_id) await ensureThirdParty(next.third_party_id);
   return serializeDeposit(await repository.update("legal_deposits", id, next));
 };
 
-exports.listDepositTransactions = ({ query }) =>
-  listModel({
+exports.listDepositTransactions = async ({ query, userId }) => {
+  const {
+    type,
+    contract_id: contractId,
+    third_party_id: thirdPartyId,
+    ...transactionQuery
+  } = query;
+  const accessWhere = await buildDepositTransactionAccessWhere(userId);
+  const depositWhere = {
+    ...(type ? { type: normalizeUpper(type) } : {}),
+    ...(contractId ? { contract_id: contractId } : {}),
+    ...(thirdPartyId ? { third_party_id: thirdPartyId } : {}),
+    ...(accessWhere.deposit?.is || {}),
+  };
+
+  return listModel({
     req: null,
     modelName: "legal_deposit_transactions",
-    query,
+    query: transactionQuery,
     searchFields: ["action", "notes"],
-    extraWhere: query.deposit_id ? { deposit_id: query.deposit_id } : {},
+    extraWhere: {
+      ...(query.deposit_id ? { deposit_id: query.deposit_id } : {}),
+      ...(isEmptyObject(depositWhere) ? {} : { deposit: { is: depositWhere } }),
+    },
     includeSoftDeleteFilter: false,
     serializer: (_request, item) => ({
       ...item,
       amount: number(item.amount),
     }),
   });
+};
 
 exports.createDepositTransaction = async ({ payload, userId }) => {
   const deposit = await repository.findById("legal_deposits", payload.deposit_id, {
     deleted_at: null,
   });
   if (!deposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
+  await ensureContract(deposit.contract_id, userId);
   const action = normalizeUpper(payload.action);
   const amountValue = number(payload.amount);
 
@@ -743,6 +942,7 @@ exports.getSummaryReport = async () => {
     ideb,
     notary,
     insurance,
+    kjpp,
     claims,
     deposits,
   ] = await Promise.all([
@@ -751,20 +951,26 @@ exports.getSummaryReport = async () => {
     repository.countWhere("legal_ideb_uploads", { deleted_at: null }),
     repository.countWhere("legal_notary_progress", { deleted_at: null }),
     repository.countWhere("legal_insurance_progress", { deleted_at: null }),
+    repository.countWhere("legal_kjpp_progress", { deleted_at: null }),
     repository.countWhere("legal_claims", { deleted_at: null }),
     repository.countWhere("legal_deposits", { deleted_at: null }),
   ]);
-  return { templates, prints, ideb, notary, insurance, claims, deposits };
+  return { templates, prints, ideb, notary, insurance, kjpp, claims, deposits };
 };
 
 exports.getThirdPartyDocumentsReport = async () => {
-  const [notary, insurance, claims] = await Promise.all([
+  const [notary, insurance, kjpp, claims] = await Promise.all([
     repository.group("legal_notary_progress", {
       by: ["third_party_id", "status"],
       where: { deleted_at: null },
       _count: { id: true },
     }),
     repository.group("legal_insurance_progress", {
+      by: ["third_party_id", "status"],
+      where: { deleted_at: null },
+      _count: { id: true },
+    }),
+    repository.group("legal_kjpp_progress", {
       by: ["third_party_id", "status"],
       where: { deleted_at: null },
       _count: { id: true },
@@ -776,7 +982,12 @@ exports.getThirdPartyDocumentsReport = async () => {
       _sum: { claim_amount: true, disbursed_amount: true },
     }),
   ]);
-  return { notary, insurance, claims };
+  return {
+    notary: await attachThirdPartyNames(notary),
+    insurance: await attachThirdPartyNames(insurance),
+    kjpp: await attachThirdPartyNames(kjpp),
+    claims,
+  };
 };
 
 exports.getThirdPartyDepositFundsReport = async () => {

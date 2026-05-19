@@ -16,6 +16,18 @@ function parseDate(value, endOfDay = false) {
   return date;
 }
 
+function calculateRemainingMonths(value) {
+  if (!value) return 0;
+  const dueDate = new Date(value);
+  if (Number.isNaN(dueDate.getTime())) return 0;
+  const today = new Date();
+  if (dueDate <= today) return 0;
+  const yearDiff = dueDate.getFullYear() - today.getFullYear();
+  const monthDiff = dueDate.getMonth() - today.getMonth();
+  const baseMonths = yearDiff * 12 + monthDiff;
+  return Math.max(baseMonths + (dueDate.getDate() > today.getDate() ? 1 : 0), 0);
+}
+
 exports.getSummary = async () => {
   const [totalDebtors, activeDebtors, activeContracts, closedContracts] =
     await Promise.all([
@@ -49,6 +61,7 @@ exports.getNpf = async (query = {}) => {
     }),
   ]);
   const breakdownByKol = new Map();
+  const details = [];
   let numerator = 0;
   let denominator = 0;
 
@@ -76,6 +89,22 @@ exports.getNpf = async (query = {}) => {
 
     denominator += outstanding;
     if (isNpf) numerator += outstanding;
+
+    details.push({
+      debtor_id: contract.debtor?.id ?? null,
+      debtor_number: contract.debtor?.debtor_number ?? null,
+      debtor_name: contract.debtor?.name ?? "-",
+      contract_id: contract.id,
+      contract_number: contract.no_kontrak,
+      level: latestKol?.level ?? null,
+      code: latestKol?.code ?? null,
+      name: latestKol?.name ?? "Belum ada kolektibilitas",
+      outstanding,
+      outstanding_pokok: number(contract.outstanding_pokok),
+      outstanding_margin: number(contract.outstanding_margin),
+      remaining_months: calculateRemainingMonths(contract.tanggal_jatuh_tempo),
+      is_npf: isNpf,
+    });
   }
 
   const trendByPeriod = new Map();
@@ -113,6 +142,7 @@ exports.getNpf = async (query = {}) => {
       if (b.level === null) return -1;
       return a.level - b.level;
     }),
+    details,
     trend,
   };
 };

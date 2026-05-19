@@ -15,20 +15,15 @@ const {
 const {
   createDebtorContractSchema,
 } = require("../debtor-contracts/debtorContracts.validation");
+const { DEBTOR_MENU_URLS, LEGAL_MENU_URLS } = require("../../utils/menu-access");
 
 const router = express.Router();
-const READ_URLS = [
-  "/dashboard/informasi-debitur",
-  "/dashboard/informasi-debitur/master-debitur",
-  "/dashboard/informasi-debitur/laporan",
-  "/dashboard/informasi-debitur/laporan/npf",
-  "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
-  "/dashboard/legal/laporan",
-];
+const READ_URLS = [...DEBTOR_MENU_URLS, ...LEGAL_MENU_URLS];
 const WRITE_URL = "/dashboard/informasi-debitur/master-debitur";
 
 router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);
 router.post("/", auth, authorize(WRITE_URL, "create"), validate(createDebtorSchema), controller.create);
+router.get("/:id/workflow", auth, authorize(READ_URLS, "read"), controller.getWorkflow);
 router.get("/:id/contracts", auth, authorize(READ_URLS, "read"), controller.getContracts);
 router.post(
   "/:id/contracts",
