@@ -2,6 +2,7 @@ const repository = require("./debtorContracts.repository");
 const { AppError } = require("../../utils/errors");
 const {
   buildContractVisibilityWhere,
+  buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
 const {
@@ -184,6 +185,16 @@ function compactUndefined(data) {
   );
 }
 
+async function ensureDebtorAccessible(debtorId, userId) {
+  if (!debtorId) return;
+  const scope = await getDebtorAccessScope(userId);
+  const debtor = await repository.findDebtorByIdWithWhere(
+    debtorId,
+    buildDebtorVisibilityWhere(scope),
+  );
+  if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
+}
+
 async function ensureReferences(payload) {
   if (payload.debtor_id && !(await repository.findDebtorById(payload.debtor_id))) {
     throw new AppError("Debitur tidak ditemukan.", 404);
@@ -238,6 +249,7 @@ exports.getById = async ({ id, userId }) => {
 exports.create = async ({ payload, userId }) => {
   const normalized = normalizePayload(payload);
   await ensureReferences(normalized);
+  await ensureDebtorAccessible(normalized.debtor_id, userId);
   try {
     return serializeContract(
       await repository.create({
@@ -257,6 +269,7 @@ exports.update = async ({ id, payload, userId }) => {
   await exports.getById({ id, userId });
   const normalized = compactUndefined(normalizePayload(payload));
   await ensureReferences(normalized);
+  await ensureDebtorAccessible(normalized.debtor_id, userId);
   try {
     return serializeContract(
       await repository.update(id, {

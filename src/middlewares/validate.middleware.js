@@ -1,8 +1,9 @@
 module.exports = (schema, options = {}) => (req, res, next) => {
-  const { error, value } = schema.validate(req.body, {
+  const { source = "body", ...joiOptions } = options;
+  const { error, value } = schema.validate(req[source], {
     abortEarly: false,
     stripUnknown: true,
-    ...options,
+    ...joiOptions,
   });
 
   if (error) {
@@ -13,6 +14,11 @@ module.exports = (schema, options = {}) => (req, res, next) => {
     });
   }
 
-  req.body = value;
+  Object.defineProperty(req, source, {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
   next();
 };

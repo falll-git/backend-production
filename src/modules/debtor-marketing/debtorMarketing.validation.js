@@ -12,7 +12,9 @@ const fileSchema = Joi.object({
 const payload = {
   debtor_id: uuid.required(),
   contract_id: optionalUuid.optional(),
-  marketing_activity_type_id: optionalUuid.optional(),
+  timeline_id: optionalUuid.optional(),
+  timeline_group_id: Joi.string().trim().max(100).allow("", null).optional(),
+  related_activity_id: optionalUuid.optional(),
   activity_date: Joi.date().allow(null).optional(),
   target_date: Joi.date().allow(null).optional(),
   status: Joi.string().trim().max(50).default("PENDING"),

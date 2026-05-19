@@ -17,7 +17,23 @@ const INCLUDE = {
       status: true,
     },
   },
-  activity_type: true,
+  timeline: true,
+  related_activity: {
+    select: {
+      id: true,
+      activity_kind: true,
+      debtor_id: true,
+      contract_id: true,
+      timeline_id: true,
+      timeline_group_id: true,
+      activity_date: true,
+      target_date: true,
+      status: true,
+      action_plan: true,
+      visit_result: true,
+      handling_step: true,
+    },
+  },
 };
 
 function findMany({ where, skip, take, orderBy }) {
@@ -60,23 +76,54 @@ function findDebtorById(id) {
   return prisma.digital_debtors.findFirst({ where: { id, deleted_at: null } });
 }
 
+function findDebtorByIdWithWhere(id, where = {}) {
+  return prisma.digital_debtors.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+      ...where,
+    },
+  });
+}
+
 function findContractById(id) {
   return prisma.debtor_contracts.findFirst({ where: { id, deleted_at: null } });
 }
 
-function findActivityTypeById(id) {
-  return prisma.marketing_activity_types.findFirst({
-    where: { id, is_active: true, deleted_at: null },
+function findTimelineById(id) {
+  return prisma.debtor_marketing_timelines.findFirst({
+    where: { id, deleted_at: null },
+  });
+}
+
+function findTimelineByGroupKey(groupKey) {
+  return prisma.debtor_marketing_timelines.findFirst({
+    where: { group_key: groupKey, deleted_at: null },
+  });
+}
+
+function createTimeline(data) {
+  return prisma.debtor_marketing_timelines.create({ data });
+}
+
+function updateTimeline(id, data) {
+  return prisma.debtor_marketing_timelines.update({
+    where: { id },
+    data,
   });
 }
 
 module.exports = {
   count,
   create,
-  findActivityTypeById,
+  createTimeline,
   findById,
   findContractById,
   findDebtorById,
+  findDebtorByIdWithWhere,
   findMany,
+  findTimelineByGroupKey,
+  findTimelineById,
   update,
+  updateTimeline,
 };

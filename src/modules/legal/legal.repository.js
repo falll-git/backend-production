@@ -30,16 +30,26 @@ function client(tx) {
 
 exports.transaction = (callback) => prisma.$transaction(callback);
 
-exports.findContractById = (id, tx) =>
+exports.findContractById = (id, tx, extraWhere = {}) =>
   client(tx).debtor_contracts.findFirst({
     where: {
       id,
       deleted_at: null,
+      ...extraWhere,
     },
     include: {
       debtor: true,
       product: true,
       akad_type: true,
+    },
+  });
+
+exports.findDebtorById = (id, tx, extraWhere = {}) =>
+  client(tx).digital_debtors.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+      ...extraWhere,
     },
   });
 
@@ -50,6 +60,15 @@ exports.findThirdPartyById = (id, tx) =>
       is_active: true,
       deleted_at: null,
     },
+  });
+
+exports.findThirdPartiesByIds = (ids, tx) =>
+  client(tx).third_parties.findMany({
+    where: {
+      id: { in: ids },
+      deleted_at: null,
+    },
+    select: THIRD_PARTY_SELECT,
   });
 
 exports.findTemplateById = (id, tx) =>
@@ -113,6 +132,7 @@ function includeFor(modelName) {
       };
     case "legal_notary_progress":
     case "legal_insurance_progress":
+    case "legal_kjpp_progress":
       return {
         contract: {
           select: CONTRACT_SELECT,

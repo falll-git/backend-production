@@ -7,15 +7,10 @@ const {
   createDebtorContractSchema,
   updateDebtorContractSchema,
 } = require("./debtorContracts.validation");
+const { DEBTOR_MENU_URLS, LEGAL_MENU_URLS } = require("../../utils/menu-access");
 
 const router = express.Router();
-const READ_URLS = [
-  "/dashboard/informasi-debitur",
-  "/dashboard/informasi-debitur/master-debitur",
-  "/dashboard/informasi-debitur/laporan",
-  "/dashboard/informasi-debitur/laporan/npf",
-  "/dashboard/legal/laporan",
-];
+const READ_URLS = [...DEBTOR_MENU_URLS, ...LEGAL_MENU_URLS];
 const WRITE_URL = "/dashboard/informasi-debitur/master-debitur";
 
 router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);

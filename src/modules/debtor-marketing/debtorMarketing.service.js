@@ -1,4 +1,5 @@
 const repository = require("./debtorMarketing.repository");
+const { randomUUID } = require("crypto");
 const { AppError } = require("../../utils/errors");
 const {
   PAGINATION_PROFILES,
@@ -6,6 +7,10 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  buildDebtorVisibilityWhere,
+  getDebtorAccessScope,
+} = require("../../utils/debtor-access");
 
 const KIND_BY_SLUG = {
   "action-plans": "ACTION_PLAN",
@@ -42,7 +47,9 @@ function serialize(req, item) {
     activity_kind: item.activity_kind,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
-    marketing_activity_type_id: item.marketing_activity_type_id,
+    timeline_id: item.timeline_id,
+    timeline_group_id: item.timeline_group_id,
+    related_activity_id: item.related_activity_id,
     activity_date: item.activity_date,
     target_date: item.target_date,
     status: item.status,
@@ -60,15 +67,20 @@ function serialize(req, item) {
     }),
     debtor: item.debtor,
     contract: item.contract,
-    activity_type: item.activity_type,
+    timeline: item.timeline || null,
+    related_activity: item.related_activity || null,
     created_by: item.created_by,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
 }
 
-function buildWhere(kind, query) {
+function buildWhere(kind, query, scope = null) {
   const clauses = [{ activity_kind: kind }, { deleted_at: null }];
+  const debtorVisibilityWhere = scope ? buildDebtorVisibilityWhere(scope) : {};
+  if (Object.keys(debtorVisibilityWhere).length > 0) {
+    clauses.push({ debtor: debtorVisibilityWhere });
+  }
   if (query.debtor_id) clauses.push({ debtor_id: query.debtor_id });
   if (query.contract_id) clauses.push({ contract_id: query.contract_id });
   if (query.status) clauses.push({ status: normalizeUpper(query.status) });
@@ -96,10 +108,18 @@ function normalizePayload(payload, current = {}) {
       payload.contract_id !== undefined
         ? normalizeText(payload.contract_id)
         : current.contract_id,
-    marketing_activity_type_id:
-      payload.marketing_activity_type_id !== undefined
-        ? normalizeText(payload.marketing_activity_type_id)
-        : current.marketing_activity_type_id,
+    timeline_id:
+      payload.timeline_id !== undefined
+        ? normalizeText(payload.timeline_id)
+        : current.timeline_id,
+    timeline_group_id:
+      payload.timeline_group_id !== undefined
+        ? normalizeText(payload.timeline_group_id)
+        : current.timeline_group_id,
+    related_activity_id:
+      payload.related_activity_id !== undefined
+        ? normalizeText(payload.related_activity_id)
+        : current.related_activity_id,
     activity_date:
       payload.activity_date !== undefined
         ? payload.activity_date
@@ -152,12 +172,99 @@ async function ensureReferences(data) {
     }
   }
 
-  if (
-    data.marketing_activity_type_id &&
-    !(await repository.findActivityTypeById(data.marketing_activity_type_id))
-  ) {
-    throw new AppError("Jenis aktivitas marketing tidak ditemukan atau tidak aktif.", 404);
+}
+
+function timelineTitle(kind, data) {
+  if (kind === "ACTION_PLAN") return data.action_plan || data.notes || "Action Plan";
+  if (kind === "VISIT_RESULT") return data.visit_result || data.notes || "Hasil Kunjungan";
+  if (kind === "HANDLING_STEP") return data.handling_step || data.notes || "Langkah Penanganan";
+  return "Timeline Marketing";
+}
+
+function isCompletedStatus(status) {
+  return ["SELESAI", "DONE", "COMPLETED", "CLOSED"].includes(
+    String(status || "").toUpperCase(),
+  );
+}
+
+function validateTimelineOwnership(timeline, data) {
+  if (!timeline || timeline.debtor_id !== data.debtor_id) {
+    throw new AppError("Timeline marketing tidak sesuai dengan debitur.", 422);
   }
+  if (data.contract_id && timeline.contract_id && timeline.contract_id !== data.contract_id) {
+    throw new AppError("Timeline marketing tidak sesuai dengan kontrak debitur.", 422);
+  }
+}
+
+async function resolveTimeline({ kind, data, userId, currentId = null }) {
+  if (data.related_activity_id) {
+    if (currentId && data.related_activity_id === currentId) {
+      throw new AppError("Aktivitas tidak bisa direlasikan ke dirinya sendiri.", 422);
+    }
+    const related = await repository.findById(data.related_activity_id, {
+      deleted_at: null,
+    });
+    if (!related) throw new AppError("Aktivitas marketing terkait tidak ditemukan.", 404);
+    if (related.debtor_id !== data.debtor_id) {
+      throw new AppError("Aktivitas marketing terkait tidak sesuai dengan debitur.", 422);
+    }
+    if (data.contract_id && related.contract_id && related.contract_id !== data.contract_id) {
+      throw new AppError("Aktivitas marketing terkait tidak sesuai dengan kontrak.", 422);
+    }
+    if (related.timeline) {
+      validateTimelineOwnership(related.timeline, data);
+      return related.timeline;
+    }
+  }
+
+  if (data.timeline_id) {
+    const timeline = await repository.findTimelineById(data.timeline_id);
+    validateTimelineOwnership(timeline, data);
+    return timeline;
+  }
+
+  if (data.timeline_group_id) {
+    const timeline = await repository.findTimelineByGroupKey(data.timeline_group_id);
+    if (timeline) {
+      validateTimelineOwnership(timeline, data);
+      return timeline;
+    }
+  }
+
+  return repository.createTimeline({
+    group_key: data.timeline_group_id || randomUUID(),
+    debtor_id: data.debtor_id,
+    contract_id: data.contract_id || null,
+    title: timelineTitle(kind, data),
+    status: "OPEN",
+    started_at: data.activity_date || data.target_date || new Date(),
+    created_by: userId || null,
+  });
+}
+
+async function syncTimelineState(timeline, kind, data, userId) {
+  if (!timeline) return;
+  const update = {
+    updated_by: userId || null,
+  };
+
+  if (kind === "HANDLING_STEP" && isCompletedStatus(data.status)) {
+    update.status = "CLOSED";
+    update.completed_at = data.activity_date || data.target_date || new Date();
+  }
+
+  if (Object.keys(update).length > 1) {
+    await repository.updateTimeline(timeline.id, update);
+  }
+}
+
+async function ensureDebtorAccessible(debtorId, userId) {
+  const scope = await getDebtorAccessScope(userId);
+  const debtor = await repository.findDebtorByIdWithWhere(
+    debtorId,
+    buildDebtorVisibilityWhere(scope),
+  );
+  if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
 }
 
 function ensureKindPayload(kind, data) {
@@ -167,10 +274,11 @@ function ensureKindPayload(kind, data) {
   }
 }
 
-exports.getAll = async ({ req, kindSlug, query }) => {
+exports.getAll = async ({ req, kindSlug, query, userId }) => {
   const kind = getKind(kindSlug);
+  const scope = await getDebtorAccessScope(userId);
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
-  const where = buildWhere(kind, query);
+  const where = buildWhere(kind, query, scope);
   const [data, total] = await Promise.all([
     repository.findMany({
       where,
@@ -187,11 +295,16 @@ exports.getAll = async ({ req, kindSlug, query }) => {
   };
 };
 
-exports.getById = async ({ req, kindSlug, id }) => {
+exports.getById = async ({ req, kindSlug, id, userId }) => {
   const kind = getKind(kindSlug);
+  const scope = await getDebtorAccessScope(userId);
+  const debtorVisibilityWhere = buildDebtorVisibilityWhere(scope);
   const item = await repository.findById(id, {
     activity_kind: kind,
     deleted_at: null,
+    ...(Object.keys(debtorVisibilityWhere).length > 0
+      ? { debtor: debtorVisibilityWhere }
+      : {}),
   });
   if (!item) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
   return serialize(req, item);
@@ -202,6 +315,8 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
   const data = normalizePayload(payload);
   ensureKindPayload(kind, data);
   await ensureReferences(data);
+  await ensureDebtorAccessible(data.debtor_id, userId);
+  const timeline = await resolveTimeline({ kind, data, userId });
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: `debtor-marketing/${kind.toLowerCase()}`,
@@ -210,27 +325,40 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
       })
     : null;
 
-  return serialize(
-    req,
-    await repository.create({
-      ...data,
-      ...(fileMeta || {}),
-      activity_kind: kind,
-      created_by: userId || null,
-    }),
-  );
+  const created = await repository.create({
+    ...data,
+    timeline_id: timeline.id,
+    timeline_group_id: timeline.group_key || timeline.id,
+    ...(fileMeta || {}),
+    activity_kind: kind,
+    created_by: userId || null,
+  });
+  await syncTimelineState(timeline, kind, data, userId);
+  return serialize(req, created);
 };
 
 exports.update = async ({ req, kindSlug, id, payload, userId }) => {
+  const scope = await getDebtorAccessScope(userId);
+  const debtorVisibilityWhere = buildDebtorVisibilityWhere(scope);
   const current = await repository.findById(id, {
     activity_kind: getKind(kindSlug),
     deleted_at: null,
+    ...(Object.keys(debtorVisibilityWhere).length > 0
+      ? { debtor: debtorVisibilityWhere }
+      : {}),
   });
   if (!current) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
 
   const data = normalizePayload(payload, current);
   ensureKindPayload(current.activity_kind, data);
   await ensureReferences(data);
+  await ensureDebtorAccessible(data.debtor_id, userId);
+  const timeline = await resolveTimeline({
+    kind: current.activity_kind,
+    data,
+    userId,
+    currentId: current.id,
+  });
   const fileMeta =
     payload.file !== undefined && payload.file !== null
       ? persistDomainFile({
@@ -241,18 +369,19 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
         })
       : null;
 
-  return serialize(
-    req,
-    await repository.update(id, {
-      ...data,
-      ...(fileMeta || {}),
-      updated_by: userId || null,
-    }),
-  );
+  const updated = await repository.update(id, {
+    ...data,
+    timeline_id: timeline.id,
+    timeline_group_id: timeline.group_key || timeline.id,
+    ...(fileMeta || {}),
+    updated_by: userId || null,
+  });
+  await syncTimelineState(timeline, current.activity_kind, data, userId);
+  return serialize(req, updated);
 };
 
 exports.delete = async ({ kindSlug, id, userId }) => {
-  await exports.getById({ req: null, kindSlug, id });
+  await exports.getById({ req: null, kindSlug, id, userId });
   await repository.update(id, {
     deleted_at: new Date(),
     deleted_by: userId || null,

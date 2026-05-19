@@ -1,5 +1,5 @@
 const repository = require("./storageUsage.repository");
-const { getStoredFileSizeBytes } = require("../../utils/storage-usage-files");
+const { resolveStoredFileSizeBytes } = require("../../utils/storage-usage-files");
 
 const DEFAULT_FREE_QUOTA_GB = 500;
 const DEFAULT_OVERAGE_PRICE_PER_GB = 0.0023;
@@ -56,20 +56,20 @@ function toIsoDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-function resolveSizeBytes(sizeBytes, storedPath) {
+async function resolveSizeBytes(sizeBytes, storedPath) {
   const parsed = toFiniteNumber(sizeBytes, NaN);
   if (Number.isFinite(parsed) && parsed >= 0) return Math.round(parsed);
 
-  const fallbackSize = getStoredFileSizeBytes(storedPath);
+  const fallbackSize = await resolveStoredFileSizeBytes(storedPath);
   return fallbackSize && fallbackSize > 0 ? fallbackSize : 0;
 }
 
-function addUsageEntry(entries, seenPaths, payload) {
+async function addUsageEntry(entries, seenPaths, payload) {
   const storedPath =
     typeof payload.storedPath === "string" && payload.storedPath.trim()
       ? payload.storedPath.trim()
       : null;
-  const sizeBytes = resolveSizeBytes(payload.sizeBytes, storedPath);
+  const sizeBytes = await resolveSizeBytes(payload.sizeBytes, storedPath);
   if (sizeBytes <= 0) return;
 
   const dedupeKey = storedPath || `${payload.moduleKey}:${entries.length}`;
@@ -91,8 +91,8 @@ function addUsageEntry(entries, seenPaths, payload) {
   });
 }
 
-function addWatermarkEntry(entries, seenPaths, record) {
-  addUsageEntry(entries, seenPaths, {
+async function addWatermarkEntry(entries, seenPaths, record) {
+  await addUsageEntry(entries, seenPaths, {
     moduleKey: "watermarked_files",
     moduleLabel: MODULE_LABELS.watermarked_files,
     storedPath: record.watermark_file,
@@ -128,7 +128,7 @@ async function collectUsageEntries() {
   for (const record of digitalDocuments) {
     if (record.document_files.length > 0) {
       for (const file of record.document_files) {
-        addUsageEntry(entries, seenPaths, {
+        await addUsageEntry(entries, seenPaths, {
           moduleKey: "digital_archive",
           moduleLabel: MODULE_LABELS.digital_archive,
           storedPath: file.file_path,
@@ -137,7 +137,7 @@ async function collectUsageEntries() {
         });
       }
     } else {
-      addUsageEntry(entries, seenPaths, {
+      await addUsageEntry(entries, seenPaths, {
         moduleKey: "digital_archive",
         moduleLabel: MODULE_LABELS.digital_archive,
         storedPath: record.file,
@@ -146,40 +146,40 @@ async function collectUsageEntries() {
       });
     }
 
-    addWatermarkEntry(entries, seenPaths, record);
+    await addWatermarkEntry(entries, seenPaths, record);
   }
 
   for (const record of incomingMails) {
-    addUsageEntry(entries, seenPaths, {
+    await addUsageEntry(entries, seenPaths, {
       moduleKey: "incoming_mail",
       moduleLabel: MODULE_LABELS.incoming_mail,
       storedPath: record.file,
       sizeBytes: record.file_size_bytes,
       createdAt: record.created_at,
     });
-    addWatermarkEntry(entries, seenPaths, record);
+    await addWatermarkEntry(entries, seenPaths, record);
   }
 
   for (const record of outgoingMails) {
-    addUsageEntry(entries, seenPaths, {
+    await addUsageEntry(entries, seenPaths, {
       moduleKey: "outgoing_mail",
       moduleLabel: MODULE_LABELS.outgoing_mail,
       storedPath: record.file,
       sizeBytes: record.file_size_bytes,
       createdAt: record.created_at,
     });
-    addWatermarkEntry(entries, seenPaths, record);
+    await addWatermarkEntry(entries, seenPaths, record);
   }
 
   for (const record of memorandums) {
-    addUsageEntry(entries, seenPaths, {
+    await addUsageEntry(entries, seenPaths, {
       moduleKey: "memorandum",
       moduleLabel: MODULE_LABELS.memorandum,
       storedPath: record.file,
       sizeBytes: record.file_size_bytes,
       createdAt: record.created_at,
     });
-    addWatermarkEntry(entries, seenPaths, record);
+    await addWatermarkEntry(entries, seenPaths, record);
   }
 
   return entries;
@@ -299,6 +299,7 @@ exports.getSummary = async ({ query = {} } = {}) => {
       free_quota_bytes: freeQuotaBytes,
       overage_price_per_gb: pricePerGb,
       currency: config.currency || DEFAULT_CURRENCY,
+      source: process.env.STORAGE_USAGE_SOURCE || "database_file_size",
     },
     usage: {
       used_bytes: usedBytes,

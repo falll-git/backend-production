@@ -531,12 +531,13 @@ model digital_debtors {
   marketing_user users?              @relation("DebtorMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
   documents      digital_documents[]
 
-  contracts        debtor_contracts[]
-  debtor_documents debtor_documents[]
-  import_records   debtor_external_records[]
-  marketing_items  debtor_marketing_activities[]
-  warning_letters  debtor_warning_letters[]
-  legal_ideb       legal_ideb_uploads[]
+  contracts           debtor_contracts[]
+  debtor_documents    debtor_documents[]
+  import_records      debtor_external_records[]
+  marketing_items     debtor_marketing_activities[]
+  marketing_timelines debtor_marketing_timelines[]
+  warning_letters     debtor_warning_letters[]
+  legal_ideb          legal_ideb_uploads[]
 
   @@index([name])
   @@index([financing_number])
@@ -900,6 +901,7 @@ model third_parties {
 
   notary_progress    legal_notary_progress[]
   insurance_progress legal_insurance_progress[]
+  kjpp_progress      legal_kjpp_progress[]
   deposits           legal_deposits[]
 
   @@unique([category, name])
@@ -958,76 +960,6 @@ model numbering_templates {
   @@index([deleted_at])
 }
 
-model institution_profiles {
-  id              String    @id @default(uuid())
-  code            String    @unique
-  name            String
-  legal_name      String?
-  address         String?
-  phone           String?
-  email           String?
-  tax_number      String?
-  license_number  String?
-  logo_file_path  String?
-  logo_file_name  String?
-  logo_mime_type  String?
-  logo_size_bytes Int?
-  is_active       Boolean   @default(true)
-  created_by      String?
-  updated_by      String?
-  deleted_by      String?
-  deleted_at      DateTime?
-  created_at      DateTime  @default(now())
-  updated_at      DateTime  @updatedAt
-
-  @@index([is_active])
-  @@index([deleted_at])
-}
-
-model sla_reminder_configs {
-  id                   String    @id @default(uuid())
-  code                 String    @unique
-  name                 String
-  module               String
-  event_key            String
-  due_days             Int
-  reminder_days_before Int       @default(0)
-  escalation_days      Int?
-  description          String?
-  is_active            Boolean   @default(true)
-  created_by           String?
-  updated_by           String?
-  deleted_by           String?
-  deleted_at           DateTime?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
-
-  @@index([module, event_key])
-  @@index([is_active])
-  @@index([deleted_at])
-}
-
-model marketing_activity_types {
-  id          String    @id @default(uuid())
-  code        String    @unique
-  name        String
-  category    String?
-  description String?
-  is_active   Boolean   @default(true)
-  created_by  String?
-  updated_by  String?
-  deleted_by  String?
-  deleted_at  DateTime?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-
-  marketing_items debtor_marketing_activities[]
-
-  @@index([category])
-  @@index([is_active])
-  @@index([deleted_at])
-}
-
 model deposit_types {
   id          String    @id @default(uuid())
   code        String    @unique
@@ -1075,22 +1007,24 @@ model debtor_contracts {
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
 
-  debtor             digital_debtors               @relation(fields: [debtor_id], references: [id])
-  product            financing_products            @relation(fields: [product_id], references: [id])
-  akad_type          contract_types                @relation(fields: [akad_type_id], references: [id])
-  branch             branches?                     @relation(fields: [branch_id], references: [id], onDelete: SetNull)
-  marketing_user     users?                        @relation("ContractMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
-  collectibilities   debtor_collectibilities[]
-  documents          debtor_documents[]
-  import_records     debtor_external_records[]
-  marketing_items    debtor_marketing_activities[]
-  warning_letters    debtor_warning_letters[]
-  legal_prints       legal_print_histories[]
-  legal_ideb         legal_ideb_uploads[]
-  notary_progress    legal_notary_progress[]
-  insurance_progress legal_insurance_progress[]
-  claims             legal_claims[]
-  deposits           legal_deposits[]
+  debtor              digital_debtors               @relation(fields: [debtor_id], references: [id])
+  product             financing_products            @relation(fields: [product_id], references: [id])
+  akad_type           contract_types                @relation(fields: [akad_type_id], references: [id])
+  branch              branches?                     @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  marketing_user      users?                        @relation("ContractMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
+  collectibilities    debtor_collectibilities[]
+  documents           debtor_documents[]
+  import_records      debtor_external_records[]
+  marketing_items     debtor_marketing_activities[]
+  marketing_timelines debtor_marketing_timelines[]
+  warning_letters     debtor_warning_letters[]
+  legal_prints        legal_print_histories[]
+  legal_ideb          legal_ideb_uploads[]
+  notary_progress     legal_notary_progress[]
+  insurance_progress  legal_insurance_progress[]
+  kjpp_progress       legal_kjpp_progress[]
+  claims              legal_claims[]
+  deposits            legal_deposits[]
 
   @@index([debtor_id])
   @@index([product_id])
@@ -1220,12 +1154,41 @@ model debtor_documents {
   @@index([deleted_at])
 }
 
+model debtor_marketing_timelines {
+  id           String    @id @default(uuid())
+  group_key    String?   @unique
+  debtor_id    String
+  contract_id  String?
+  title        String?
+  status       String    @default("OPEN")
+  started_at   DateTime?
+  completed_at DateTime?
+  created_by   String?
+  updated_by   String?
+  deleted_by   String?
+  deleted_at   DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  debtor     digital_debtors               @relation(fields: [debtor_id], references: [id])
+  contract   debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  activities debtor_marketing_activities[]
+
+  @@index([debtor_id])
+  @@index([contract_id])
+  @@index([status])
+  @@index([started_at])
+  @@index([deleted_at])
+}
+
 model debtor_marketing_activities {
   id                         String    @id @default(uuid())
   activity_kind              String
   debtor_id                  String
   contract_id                String?
-  marketing_activity_type_id String?
+  timeline_id                String?
+  timeline_group_id          String?
+  related_activity_id        String?
   activity_date              DateTime?
   target_date                DateTime?
   status                     String    @default("PENDING")
@@ -1248,14 +1211,18 @@ model debtor_marketing_activities {
   created_at                 DateTime  @default(now())
   updated_at                 DateTime  @updatedAt
 
-  debtor        digital_debtors           @relation(fields: [debtor_id], references: [id])
-  contract      debtor_contracts?         @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  activity_type marketing_activity_types? @relation(fields: [marketing_activity_type_id], references: [id], onDelete: SetNull)
+  debtor             digital_debtors               @relation(fields: [debtor_id], references: [id])
+  contract           debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  timeline           debtor_marketing_timelines?   @relation(fields: [timeline_id], references: [id], onDelete: SetNull)
+  related_activity   debtor_marketing_activities?  @relation("DebtorMarketingActivityRelated", fields: [related_activity_id], references: [id], onDelete: SetNull)
+  related_activities debtor_marketing_activities[] @relation("DebtorMarketingActivityRelated")
 
   @@index([activity_kind, status])
   @@index([debtor_id])
   @@index([contract_id])
-  @@index([marketing_activity_type_id])
+  @@index([timeline_id])
+  @@index([timeline_group_id])
+  @@index([related_activity_id])
   @@index([activity_date])
   @@index([deleted_at])
 }
@@ -1442,6 +1409,40 @@ model legal_insurance_progress {
   @@index([contract_id])
   @@index([third_party_id])
   @@index([policy_number])
+  @@index([status])
+  @@index([deleted_at])
+}
+
+model legal_kjpp_progress {
+  id                     String    @id @default(uuid())
+  contract_id            String
+  third_party_id         String
+  appraisal_type         String
+  received_at            DateTime
+  estimated_completed_at DateTime?
+  completed_at           DateTime?
+  status                 String    @default("PROSES")
+  report_number          String?
+  collateral_object      String?
+  appraisal_value        Decimal?  @db.Decimal(18, 2)
+  notes                  String?
+  file_path              String?
+  file_name              String?
+  mime_type              String?
+  size_bytes             Int?
+  checksum               String?
+  created_by             String?
+  updated_by             String?
+  deleted_by             String?
+  deleted_at             DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+
+  @@index([contract_id])
+  @@index([third_party_id])
   @@index([status])
   @@index([deleted_at])
 }

@@ -69,6 +69,21 @@ exports.insuranceProgressSchema = Joi.object({
   file: fileSchema.optional(),
 });
 
+exports.kjppProgressSchema = Joi.object({
+  contract_id: uuid.required(),
+  third_party_id: uuid.required(),
+  appraisal_type: Joi.string().trim().min(1).max(100).required(),
+  received_at: Joi.date().required(),
+  estimated_completed_at: Joi.date().allow(null).optional(),
+  completed_at: Joi.date().allow(null).optional(),
+  status: Joi.string().valid("PROSES", "SELESAI", "BERMASALAH").default("PROSES"),
+  report_number: Joi.string().trim().allow("", null).optional(),
+  collateral_object: Joi.string().trim().allow("", null).optional(),
+  appraisal_value: amount.allow(null).optional(),
+  notes: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
+});
+
 exports.claimSchema = Joi.object({
   contract_id: uuid.required(),
   insurance_progress_id: optionalUuid.optional(),
@@ -121,5 +136,6 @@ function makeUpdate(schema) {
 exports.updateTemplateSchema = makeUpdate(exports.templateSchema);
 exports.updateNotaryProgressSchema = makeUpdate(exports.notaryProgressSchema);
 exports.updateInsuranceProgressSchema = makeUpdate(exports.insuranceProgressSchema);
+exports.updateKjppProgressSchema = makeUpdate(exports.kjppProgressSchema);
 exports.updateClaimSchema = makeUpdate(exports.claimSchema);
 exports.updateDepositSchema = makeUpdate(exports.depositSchema);

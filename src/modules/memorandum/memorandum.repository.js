@@ -89,7 +89,7 @@ exports.createWithInitialReceivers = async (
   receiversData,
   targetDivisionsData = [],
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const memorandum = await prisma.$transaction(async (tx) => {
     const memorandum = await tx.memorandums.create({
       data,
     });
@@ -116,8 +116,10 @@ exports.createWithInitialReceivers = async (
       })),
     });
 
-    return loadById(memorandum.id, tx);
+    return memorandum;
   });
+
+  return loadById(memorandum.id);
 };
 
 exports.createDisposition = (data) => {
@@ -180,7 +182,7 @@ exports.forwardDispositionToReceivers = async ({
   startDate,
   dueDate,
 }) => {
-  return prisma.$transaction(async (tx) => {
+  const createdDispositionIds = await prisma.$transaction(async (tx) => {
     await tx.memorandum_dispositions.update({
       where: { id: currentDispositionId },
       data: {
@@ -189,27 +191,22 @@ exports.forwardDispositionToReceivers = async ({
       },
     });
 
-    const createdDispositions = [];
+    const createdIds = [];
 
     for (const receiverId of receiverIds) {
-      createdDispositions.push(
-        await tx.memorandum_dispositions.create({
-          data: {
-            memorandums_id: memorandumId,
-            sender_id: senderId,
-            receiver_id: receiverId,
-            parent_disposition_id: currentDispositionId,
-            note,
-            start_date: startDate,
-            due_date: dueDate,
-            status: startDate ? "IN_PROGRESS" : "NEW",
-          },
-          include: {
-            receiver: { select: userSummarySelect },
-            sender: { select: userSummarySelect },
-          },
-        }),
-      );
+      const created = await tx.memorandum_dispositions.create({
+        data: {
+          memorandums_id: memorandumId,
+          sender_id: senderId,
+          receiver_id: receiverId,
+          parent_disposition_id: currentDispositionId,
+          note,
+          start_date: startDate,
+          due_date: dueDate,
+          status: startDate ? "IN_PROGRESS" : "NEW",
+        },
+      });
+      createdIds.push(created.id);
     }
 
     await tx.memorandums.update({
@@ -217,8 +214,22 @@ exports.forwardDispositionToReceivers = async ({
       data: { status: "IN_PROGRESS", updated_by: senderId },
     });
 
-    return createdDispositions;
+    return createdIds;
   });
+
+  const createdDispositions = [];
+  for (const dispositionId of createdDispositionIds) {
+    const disposition = await prisma.memorandum_dispositions.findUnique({
+      where: { id: dispositionId },
+      include: {
+        receiver: { select: userSummarySelect },
+        sender: { select: userSummarySelect },
+      },
+    });
+    if (disposition) createdDispositions.push(disposition);
+  }
+
+  return createdDispositions;
 };
 
 exports.update = async (id, data) => {

@@ -167,51 +167,6 @@ async function seedDebtorLegalParameters() {
     },
   ]);
 
-  await createMissing("sla_reminder_configs", [
-    {
-      code: "NOTARY_PROGRESS",
-      name: "SLA Progress Notaris",
-      module: "LEGAL",
-      event_key: "NOTARY_PROGRESS",
-      due_days: 14,
-      reminder_days_before: 3,
-      escalation_days: 2,
-      is_active: true,
-    },
-    {
-      code: "INSURANCE_PROGRESS",
-      name: "SLA Progress Asuransi",
-      module: "LEGAL",
-      event_key: "INSURANCE_PROGRESS",
-      due_days: 7,
-      reminder_days_before: 2,
-      escalation_days: 2,
-      is_active: true,
-    },
-  ]);
-
-  await createMissing("marketing_activity_types", [
-    { code: "ACTION_PLAN", name: "Action Plan", category: "ACTION_PLAN", is_active: true },
-    {
-      code: "VISIT_RESULT",
-      name: "Hasil Kunjungan",
-      category: "VISIT_RESULT",
-      is_active: true,
-    },
-    {
-      code: "HANDLING_STEP",
-      name: "Langkah Penanganan",
-      category: "HANDLING_STEP",
-      is_active: true,
-    },
-    {
-      code: "WARNING_LETTER",
-      name: "Surat Peringatan",
-      category: "WARNING_LETTER",
-      is_active: true,
-    },
-  ]);
-
   await createMissing("deposit_types", [
     { code: "NOTARIS", name: "Titipan Notaris", category: "NOTARIS", is_active: true },
     { code: "ASURANSI", name: "Titipan Asuransi", category: "ASURANSI", is_active: true },

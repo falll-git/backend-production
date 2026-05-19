@@ -298,6 +298,7 @@ const menuTree = [
   },
   {
     name: "Manajemen Legal",
+    url: "/dashboard/legal",
     icon: "lucide lucide-scale",
     order: 5,
     children: [
@@ -393,10 +394,16 @@ const menuTree = [
             order: 2,
           },
           {
+            name: "Progress KJPP",
+            url: "/dashboard/legal/progress/kjpp",
+            icon: "lucide lucide-building-2",
+            order: 3,
+          },
+          {
             name: "Tracking Claim Asuransi",
             url: "/dashboard/legal/progress/klaim",
             icon: "lucide lucide-alert-circle",
-            order: 3,
+            order: 4,
           },
         ],
       },
@@ -480,95 +487,70 @@ const menuTree = [
         order: 7,
       },
       {
-        name: "Setup Pihak Ketiga",
-        icon: "lucide lucide-building-2",
+        name: "Setup Notaris",
+        url: "/dashboard/parameter/pihak-ketiga/notaris",
+        icon: "lucide lucide-scale",
         order: 8,
-        children: [
-          {
-            name: "Setup Notaris",
-            url: "/dashboard/parameter/pihak-ketiga/notaris",
-            icon: "lucide lucide-scale",
-            order: 1,
-          },
-          {
-            name: "Setup Perusahaan Asuransi",
-            url: "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
-            icon: "lucide lucide-shield",
-            order: 2,
-          },
-          {
-            name: "Setup KJPP",
-            url: "/dashboard/parameter/pihak-ketiga/kjpp",
-            icon: "lucide lucide-building-2",
-            order: 3,
-          },
-        ],
+      },
+      {
+        name: "Setup Perusahaan Asuransi",
+        url: "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
+        icon: "lucide lucide-shield",
+        order: 9,
+      },
+      {
+        name: "Setup KJPP",
+        url: "/dashboard/parameter/pihak-ketiga/kjpp",
+        icon: "lucide lucide-building-2",
+        order: 10,
       },
       {
         name: "Setup Template Penomoran",
         url: "/dashboard/parameter/template-penomoran",
         icon: "lucide lucide-hash",
-        order: 9,
+        order: 11,
       },
       {
         name: "Setup Checklist Dokumen",
         url: "/dashboard/parameter/checklist-dokumen",
         icon: "lucide lucide-list-checks",
-        order: 10,
+        order: 12,
       },
       {
         name: "Setup Produk Pembiayaan",
         url: "/dashboard/parameter/produk-pembiayaan",
         icon: "lucide lucide-package",
-        order: 11,
+        order: 13,
       },
       {
         name: "Setup Jenis Akad",
         url: "/dashboard/parameter/jenis-akad",
         icon: "lucide lucide-file-signature",
-        order: 12,
+        order: 14,
       },
       {
         name: "Setup Kolektibilitas",
         url: "/dashboard/parameter/kolektibilitas",
         icon: "lucide lucide-list-ordered",
-        order: 13,
+        order: 15,
       },
       {
         name: "Setup Cabang",
         url: "/dashboard/parameter/cabang",
         icon: "lucide lucide-building",
-        order: 14,
-      },
-      {
-        name: "Setup Profil Lembaga",
-        url: "/dashboard/parameter/profil-lembaga",
-        icon: "lucide lucide-landmark",
-        order: 15,
-      },
-      {
-        name: "Setup SLA & Pengingat",
-        url: "/dashboard/parameter/sla-pengingat",
-        icon: "lucide lucide-bell-ring",
         order: 16,
-      },
-      {
-        name: "Setup Aktivitas Marketing",
-        url: "/dashboard/parameter/aktivitas-marketing",
-        icon: "lucide lucide-clipboard-check",
-        order: 17,
       },
       {
         name: "Setup Jenis Titipan",
         url: "/dashboard/parameter/jenis-titipan",
         icon: "lucide lucide-wallet",
-        order: 18,
+        order: 17,
       },
       {
         name: "Setup Watermark Dokumen",
         url: "/dashboard/parameter/watermark-dokumen",
         icon: "lucide lucide-stamp",
-        order: 19,
+        order: 18,
       },
     ],
   },
@@ -582,6 +564,9 @@ const LEGACY_MENU_URLS = [
   "/dashboard/laporan/npf",
   "/dashboard/laporan/aktivitas-marketing",
   "/dashboard/parameter/template-dokumen-legal",
+  "/dashboard/parameter/aktivitas-marketing",
+  "/dashboard/parameter/profil-lembaga",
+  "/dashboard/parameter/sla-pengingat",
   "/dashboard/arsip-digital/report",
   "/dashboard/arsip-digital/reports",
   "/dashboard/arsip-digital/laporan-arsip-digital",
@@ -593,6 +578,7 @@ const LEGACY_EMPTY_MENU_NAMES = [
   "Input Progress",
   "Laporan",
   "Master Pihak Ketiga",
+  "Setup Pihak Ketiga",
 ];
 
 async function seedMenus() {
@@ -601,14 +587,20 @@ async function seedMenus() {
   async function upsertMenus(nodes, parentId = null, parentName = null) {
     for (const node of nodes) {
       const url = node.url || "";
-      const existing = url
-        ? await prisma.menus.findFirst({ where: { url } })
-        : await prisma.menus.findFirst({
-            where: {
-              name: node.name,
-              parent_id: parentId,
-            },
-          });
+      let existing = null;
+
+      if (url) {
+        existing = await prisma.menus.findFirst({ where: { url } });
+      }
+
+      if (!existing) {
+        existing = await prisma.menus.findFirst({
+          where: {
+            name: node.name,
+            parent_id: parentId,
+          },
+        });
+      }
       const data = {
         name: node.name,
         url,

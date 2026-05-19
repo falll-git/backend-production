@@ -7,7 +7,10 @@ const DISPOSITION_MANAGER_MENU_URLS = [
   "/dashboard/manajemen-surat/kelola-surat/input-memorandum",
 ];
 
-async function resolveActiveDivisionManagersForDivision(divisionId) {
+async function resolveActiveDivisionManagersForDivision(
+  divisionId,
+  menuUrls = DISPOSITION_MANAGER_MENU_URLS,
+) {
   const normalizedDivisionId =
     typeof divisionId === "string" ? divisionId.trim() : "";
 
@@ -23,7 +26,7 @@ async function resolveActiveDivisionManagersForDivision(divisionId) {
 
   const managers = await userRepository.findActiveUsersByDivisionRoleFeature({
     divisionId: normalizedDivisionId,
-    menuUrls: DISPOSITION_MANAGER_MENU_URLS,
+    menuUrls,
     feature: DIVISION_MANAGER_FEATURE,
   });
 
@@ -51,7 +54,10 @@ function normalizeDivisionIds(divisionIds) {
   ];
 }
 
-async function resolveActiveDivisionManagerGroups(divisionIds) {
+async function resolveActiveDivisionManagerGroups(
+  divisionIds,
+  menuUrls = DISPOSITION_MANAGER_MENU_URLS,
+) {
   const normalizedDivisionIds = [
     ...normalizeDivisionIds(divisionIds),
   ];
@@ -63,14 +69,19 @@ async function resolveActiveDivisionManagerGroups(divisionIds) {
   const groups = [];
 
   for (const divisionId of normalizedDivisionIds) {
-    groups.push(await resolveActiveDivisionManagersForDivision(divisionId));
+    groups.push(
+      await resolveActiveDivisionManagersForDivision(divisionId, menuUrls),
+    );
   }
 
   return groups;
 }
 
-async function resolveActiveDivisionManagers(divisionIds) {
-  const groups = await resolveActiveDivisionManagerGroups(divisionIds);
+async function resolveActiveDivisionManagers(divisionIds, options = {}) {
+  const groups = await resolveActiveDivisionManagerGroups(
+    divisionIds,
+    options.menuUrls ?? DISPOSITION_MANAGER_MENU_URLS,
+  );
   const assignments = [];
 
   for (const { division, managers } of groups) {

@@ -78,6 +78,16 @@ function findDebtorById(id) {
   });
 }
 
+function findDebtorByIdWithWhere(id, where = {}) {
+  return prisma.digital_debtors.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+      ...where,
+    },
+  });
+}
+
 function findProductById(id) {
   return prisma.financing_products.findFirst({
     where: {
@@ -125,6 +135,7 @@ module.exports = {
   findById,
   findContractTypeById,
   findDebtorById,
+  findDebtorByIdWithWhere,
   findMany,
   findProductById,
   update,

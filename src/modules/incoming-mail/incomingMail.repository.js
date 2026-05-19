@@ -86,7 +86,7 @@ exports.createWithDisposition = async (
   dispositionsData,
   targetDivisionsData = [],
 ) => {
-  return prisma.$transaction(async (tx) => {
+  const incomingMail = await prisma.$transaction(async (tx) => {
     const incomingMail = await tx.incoming_mails.create({
       data,
     });
@@ -107,8 +107,10 @@ exports.createWithDisposition = async (
       })),
     });
 
-    return loadById(incomingMail.id, tx);
+    return incomingMail;
   });
+
+  return loadById(incomingMail.id);
 };
 
 exports.update = async (id, data) => {
@@ -194,7 +196,7 @@ exports.forwardDispositionToReceivers = async ({
   startDate,
   dueDate,
 }) => {
-  return prisma.$transaction(async (tx) => {
+  const createdDispositionIds = await prisma.$transaction(async (tx) => {
     await tx.incoming_mail_dispositions.update({
       where: { id: currentDispositionId },
       data: {
@@ -203,27 +205,22 @@ exports.forwardDispositionToReceivers = async ({
       },
     });
 
-    const createdDispositions = [];
+    const createdIds = [];
 
     for (const receiverId of receiverIds) {
-      createdDispositions.push(
-        await tx.incoming_mail_dispositions.create({
-          data: {
-            incoming_mails_id: incomingMailId,
-            sender_id: senderId,
-            receiver_id: receiverId,
-            parent_disposition_id: currentDispositionId,
-            note,
-            start_date: startDate,
-            due_date: dueDate,
-            status: startDate ? "IN_PROGRESS" : "NEW",
-          },
-          include: {
-            sender: { select: userSummarySelect },
-            receiver: { select: userSummarySelect },
-          },
-        }),
-      );
+      const created = await tx.incoming_mail_dispositions.create({
+        data: {
+          incoming_mails_id: incomingMailId,
+          sender_id: senderId,
+          receiver_id: receiverId,
+          parent_disposition_id: currentDispositionId,
+          note,
+          start_date: startDate,
+          due_date: dueDate,
+          status: startDate ? "IN_PROGRESS" : "NEW",
+        },
+      });
+      createdIds.push(created.id);
     }
 
     await tx.incoming_mails.update({
@@ -231,8 +228,22 @@ exports.forwardDispositionToReceivers = async ({
       data: { status: "IN_PROGRESS", updated_by: senderId },
     });
 
-    return createdDispositions;
+    return createdIds;
   });
+
+  const createdDispositions = [];
+  for (const dispositionId of createdDispositionIds) {
+    const disposition = await prisma.incoming_mail_dispositions.findUnique({
+      where: { id: dispositionId },
+      include: {
+        sender: { select: userSummarySelect },
+        receiver: { select: userSummarySelect },
+      },
+    });
+    if (disposition) createdDispositions.push(disposition);
+  }
+
+  return createdDispositions;
 };
 
 exports.completeDispositions = (incomingMailId) => {
