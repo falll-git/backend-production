@@ -68,8 +68,8 @@ function buildAuthUserPayload(user) {
   };
 }
 
-function buildJwtPayload(user) {
-  return {
+function buildJwtPayload(user, sessionId = null) {
+  const payload = {
     id: user.id,
     email: user.email,
     username: user.username,
@@ -82,6 +82,12 @@ function buildJwtPayload(user) {
       division_name: user.division?.name,
     },
   };
+
+  if (sessionId) {
+    payload.session_id = sessionId;
+  }
+
+  return payload;
 }
 
 function ensureUserCanAuthenticate(user) {
@@ -142,24 +148,28 @@ function getRefreshTokenExpiryDate(refreshToken) {
 }
 
 async function issueRefreshToken(user, oldRefreshTokenId = null) {
+  const refreshTokenId = crypto.randomUUID();
   const refreshToken = generateRefreshToken({
     ...buildJwtPayload(user),
-    jti: crypto.randomUUID(),
+    jti: refreshTokenId,
   });
   const expiresAt = getRefreshTokenExpiryDate(refreshToken);
   const now = new Date();
 
-  const updatedUser = await repository.rotateRefreshToken({
-    oldRefreshTokenId,
-    userId: user.id,
-    refreshTokenHash: hashToken(refreshToken),
-    expiresAt,
-    now,
-  });
+  const { user: updatedUser, refreshTokenId: sessionId } =
+    await repository.rotateRefreshToken({
+      oldRefreshTokenId,
+      refreshTokenId,
+      userId: user.id,
+      refreshTokenHash: hashToken(refreshToken),
+      expiresAt,
+      now,
+    });
 
   return {
     refreshToken,
     expiresAt,
+    sessionId,
     user: updatedUser,
   };
 }
@@ -193,8 +203,10 @@ exports.login = async (payload) => {
   const match = await comparePassword(payload.password, user.password);
   if (!match) throw new AppError("Username atau password tidak sesuai.", 401);
 
-  const token = generateAccessToken(buildJwtPayload(user));
   const refresh = await issueRefreshToken(user);
+  const token = generateAccessToken(
+    buildJwtPayload(refresh.user, refresh.sessionId),
+  );
 
   return {
     data: buildAuthUserPayload(refresh.user),
@@ -230,10 +242,16 @@ exports.refreshToken = async (token) => {
     throw new AppError("Sesi login tidak valid.", 401);
   }
 
+  if (decoded.jti !== oldRefreshTokenId) {
+    throw new AppError("Sesi login tidak valid.", 401);
+  }
+
   ensureUserCanAuthenticate(user);
 
-  const newAccessToken = generateAccessToken(buildJwtPayload(user));
   const refresh = await issueRefreshToken(user, oldRefreshTokenId);
+  const newAccessToken = generateAccessToken(
+    buildJwtPayload(refresh.user, refresh.sessionId),
+  );
 
   return {
     token: newAccessToken,

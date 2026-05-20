@@ -63,6 +63,10 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.outgoing_mails.findMany(query);
 };
 
+exports.count = (where) => {
+  return prisma.outgoing_mails.count({ where });
+};
+
 exports.findById = (id) => {
   return prisma.outgoing_mails.findFirst({
     where: { id, deleted_at: null },

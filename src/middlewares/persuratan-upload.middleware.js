@@ -1,6 +1,13 @@
 const multer = require("multer");
+const {
+  DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+  DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+} = require("../utils/upload-limits");
+const {
+  attachUploadTempCleanup,
+  buildDiskUploadStorage,
+} = require("../utils/upload-temp-files");
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
   "application/msword",
@@ -33,9 +40,9 @@ function getFileExtension(fileName) {
 }
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: buildDiskUploadStorage(multer),
   limits: {
-    fileSize: MAX_FILE_SIZE_BYTES,
+    fileSize: DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   },
   fileFilter(req, file, callback) {
     const extension = getFileExtension(file.originalname);
@@ -65,7 +72,7 @@ function uploadPersuratanFile(fieldName = "file") {
           if (error.code === "LIMIT_FILE_SIZE") {
             return res.status(413).json({
               status: false,
-              message: "Ukuran dokumen maksimal 10 MB.",
+              message: `Ukuran dokumen maksimal ${DOCUMENT_UPLOAD_MAX_SIZE_LABEL}.`,
             });
           }
 
@@ -85,10 +92,12 @@ function uploadPersuratanFile(fieldName = "file") {
       }
 
       if (req.file) {
+        attachUploadTempCleanup(res, req.file.path);
         req.body.file = {
-          buffer: req.file.buffer,
+          temp_path: req.file.path,
           name: req.file.originalname,
           mime_type: req.file.mimetype,
+          size_bytes: req.file.size,
         };
       }
 

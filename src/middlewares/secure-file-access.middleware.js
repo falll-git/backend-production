@@ -19,6 +19,8 @@ const {
   userHasAnyMenuRead,
 } = require("../utils/debtor-access");
 
+const WATERMARK_SUPPORTED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "png"]);
+
 function normalizeRequestedPath(req, publicPrefix) {
   return `${publicPrefix}${req.path || ""}`;
 }
@@ -32,6 +34,45 @@ function filePathMatchesRecord(record, storedPath) {
     ? record.document_files
     : [];
   return documentFiles.some((item) => item.file_path === storedPath);
+}
+
+function getStoredPathExtension(storedPath) {
+  if (typeof storedPath !== "string" || !storedPath.trim()) return "";
+
+  const normalized = storedPath.trim().split("?")[0].split("#")[0];
+  const fileName = normalized.split(/[\\/]/).filter(Boolean).pop() || "";
+  const parts = fileName.toLowerCase().split(".");
+
+  return parts.length > 1 ? parts.pop() || "" : "";
+}
+
+async function isWatermarkTargetEnabled(module) {
+  const settings = await prisma.watermark_settings.findFirst({
+    orderBy: {
+      created_at: "asc",
+    },
+    select: {
+      is_enabled: true,
+      target_modules: true,
+    },
+  });
+
+  return Boolean(
+    settings?.is_enabled &&
+      Array.isArray(settings.target_modules) &&
+      settings.target_modules.includes(module),
+  );
+}
+
+async function blocksOriginalWatermarkTarget({ module, record, storedPath }) {
+  if (!record || record.watermark_file === storedPath) return false;
+  if (record.file !== storedPath) return false;
+
+  const extension = getStoredPathExtension(storedPath);
+  if (!WATERMARK_SUPPORTED_EXTENSIONS.has(extension)) return false;
+  if (!(await isWatermarkTargetEnabled(module))) return false;
+
+  return true;
 }
 
 async function isUserActive(userId) {
@@ -69,6 +110,15 @@ async function canAccessDigitalArchiveFile(payload) {
   });
 
   if (!filePathMatchesRecord(record, payload.path)) return false;
+  if (
+    await blocksOriginalWatermarkTarget({
+      module: "digital_archive",
+      record,
+      storedPath: payload.path,
+    })
+  ) {
+    return false;
+  }
 
   const scope = await getDigitalArchiveAccessScope(payload.user_id);
   return canScopeAccessDocument(record, scope);
@@ -87,6 +137,15 @@ async function canAccessIncomingMailFile(payload) {
   });
 
   if (!filePathMatchesRecord(record, payload.path)) return false;
+  if (
+    await blocksOriginalWatermarkTarget({
+      module: "incoming_mail",
+      record,
+      storedPath: payload.path,
+    })
+  ) {
+    return false;
+  }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
   return canViewIncomingMail(record, scope);
@@ -108,6 +167,15 @@ async function canAccessOutgoingMailFile(payload) {
   });
 
   if (!filePathMatchesRecord(record, payload.path)) return false;
+  if (
+    await blocksOriginalWatermarkTarget({
+      module: "outgoing_mail",
+      record,
+      storedPath: payload.path,
+    })
+  ) {
+    return false;
+  }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
   return canViewOutgoingMail(record, scope);
@@ -126,6 +194,15 @@ async function canAccessMemorandumFile(payload) {
   });
 
   if (!filePathMatchesRecord(record, payload.path)) return false;
+  if (
+    await blocksOriginalWatermarkTarget({
+      module: "memorandum",
+      record,
+      storedPath: payload.path,
+    })
+  ) {
+    return false;
+  }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
   return canViewMemorandum(record, scope);

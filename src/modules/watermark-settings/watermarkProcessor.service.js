@@ -28,6 +28,12 @@ const {
   PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
   STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
 } = require("../../utils/watermarked-files");
+const { toSizeBytesBigInt } = require("../../utils/size-bytes");
+
+const DEFAULT_WATERMARK_MAX_PROCESS_SIZE_BYTES = 512 * 1024 * 1024;
+const WATERMARK_MAX_PROCESS_SIZE_BYTES =
+  Number(process.env.WATERMARK_MAX_PROCESS_SIZE_BYTES) ||
+  DEFAULT_WATERMARK_MAX_PROCESS_SIZE_BYTES;
 
 const MODULE_CONFIG = {
   digital_archive: {
@@ -188,6 +194,19 @@ function resolveStoredFilePath(storedPath) {
   }
 
   return null;
+}
+
+function getFileSizeBytes(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatSizeMb(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
 }
 
 function buildWatermarkedFileUrl(req, storedPath, { module, entityId } = {}) {
@@ -596,11 +615,27 @@ async function createWatermarkedFile({ module, record, settings }) {
   const sourcePath = resolveStoredFilePath(record.file);
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     const error = new Error("File sumber watermark tidak ditemukan.");
-    error.code = "FAILED";
+    error.code = "UNSUPPORTED";
     throw error;
   }
 
   const sourceExtension = getFileExtension(record.file || sourcePath);
+  const sourceSizeBytes = getFileSizeBytes(sourcePath);
+  if (
+    sourceSizeBytes &&
+    sourceSizeBytes > WATERMARK_MAX_PROCESS_SIZE_BYTES
+  ) {
+    const error = new Error(
+      `File terlalu besar untuk watermark otomatis (${formatSizeMb(
+        sourceSizeBytes,
+      )}). Batas proses watermark saat ini ${formatSizeMb(
+        WATERMARK_MAX_PROCESS_SIZE_BYTES,
+      )}.`,
+    );
+    error.code = "UNSUPPORTED";
+    throw error;
+  }
+
   const sourceBuffer = fs.readFileSync(sourcePath);
 
   if (isPdf(sourceExtension)) {
@@ -731,9 +766,9 @@ async function processPendingRecord({ module, entityId }) {
       },
       data: {
         watermark_status: "APPLIED",
-      watermark_file: watermarkedPath.storedPath,
-      watermark_file_size_bytes: watermarkedPath.sizeBytes,
-      watermark_source_path: record.file,
+        watermark_file: watermarkedPath.storedPath,
+        watermark_file_size_bytes: toSizeBytesBigInt(watermarkedPath.sizeBytes),
+        watermark_source_path: record.file,
         watermark_settings_hash: settingsHash,
         watermark_error_message: null,
         watermark_applied_at: new Date(),
@@ -784,15 +819,23 @@ async function findNextPendingRecord() {
 async function runWatermarkWorker() {
   if (isWorkerRunning) return;
   isWorkerRunning = true;
+  let hitBatchLimit = true;
 
   try {
     for (let index = 0; index < 100; index += 1) {
       const pendingRecord = await findNextPendingRecord();
-      if (!pendingRecord) break;
+      if (!pendingRecord) {
+        hitBatchLimit = false;
+        break;
+      }
       await processPendingRecord(pendingRecord);
     }
   } finally {
     isWorkerRunning = false;
+  }
+
+  if (hitBatchLimit) {
+    kickWatermarkWorker();
   }
 }
 

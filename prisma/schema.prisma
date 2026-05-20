@@ -379,10 +379,10 @@ model incoming_mails {
   regarding                 String
   description               String?
   file                      String?
-  file_size_bytes           Int?
+  file_size_bytes           BigInt?
   watermark_status          watermark_statuses     @default(SKIPPED)
   watermark_file            String?
-  watermark_file_size_bytes Int?
+  watermark_file_size_bytes BigInt?
   watermark_source_path     String?
   watermark_settings_hash   String?
   watermark_error_message   String?
@@ -469,7 +469,7 @@ model digital_documents {
   file                      String?
   watermark_status          watermark_statuses             @default(SKIPPED)
   watermark_file            String?
-  watermark_file_size_bytes Int?
+  watermark_file_size_bytes BigInt?
   watermark_source_path     String?
   watermark_settings_hash   String?
   watermark_error_message   String?
@@ -567,7 +567,7 @@ model document_files {
   file_path   String
   file_name   String?
   mime_type   String?
-  size_bytes  Int?
+  size_bytes  BigInt?
   checksum    String?
   is_primary  Boolean   @default(false)
   uploaded_by String?
@@ -681,10 +681,10 @@ model outgoing_mails {
   address                   String
   mail_number               String                       @unique
   file                      String?
-  file_size_bytes           Int?
+  file_size_bytes           BigInt?
   watermark_status          watermark_statuses           @default(SKIPPED)
   watermark_file            String?
-  watermark_file_size_bytes Int?
+  watermark_file_size_bytes BigInt?
   watermark_source_path     String?
   watermark_settings_hash   String?
   watermark_error_message   String?
@@ -721,10 +721,10 @@ model memorandums {
   regarding                 String
   description               String?
   file                      String?
-  file_size_bytes           Int?
+  file_size_bytes           BigInt?
   watermark_status          watermark_statuses     @default(SKIPPED)
   watermark_file            String?
-  watermark_file_size_bytes Int?
+  watermark_file_size_bytes BigInt?
   watermark_source_path     String?
   watermark_settings_hash   String?
   watermark_error_message   String?

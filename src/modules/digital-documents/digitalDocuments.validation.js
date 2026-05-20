@@ -3,10 +3,14 @@ const Joi = require("joi");
 const uuid = Joi.string().uuid();
 const optionalUuid = uuid.allow(null, "");
 const uploadedFileSchema = Joi.object({
-  buffer: Joi.any().required(),
+  buffer: Joi.any().optional(),
+  temp_path: Joi.string().trim().optional(),
   name: Joi.string().trim().required(),
   mime_type: Joi.string().trim().required(),
-}).unknown(true);
+  size_bytes: Joi.number().integer().min(0).optional(),
+})
+  .or("buffer", "temp_path")
+  .unknown(true);
 
 const fileInputSchema = Joi.alternatives().try(
   Joi.string().trim().min(1),

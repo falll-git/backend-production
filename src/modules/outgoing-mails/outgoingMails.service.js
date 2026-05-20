@@ -19,6 +19,7 @@ const {
 } = require("../../utils/persuratan-access");
 const {
   PAGINATION_PROFILES,
+  buildPaginationMeta,
   paginateArray,
   resolvePagination,
 } = require("../../utils/pagination");
@@ -28,6 +29,7 @@ const {
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
+const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
 async function queueOutgoingMailWatermark(entityId) {
   try {
@@ -164,6 +166,14 @@ function filterByStatus(records, status) {
   });
 }
 
+function hasSpecificStatusFilter(status) {
+  const normalized = String(status ?? "")
+    .trim()
+    .toUpperCase();
+
+  return Boolean(normalized && !["ALL", "SEMUA"].includes(normalized));
+}
+
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getPersuratanAccessScope(userId));
   const where = {
@@ -179,13 +189,30 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
     ],
   };
 
-  const records = await repository.findMany({ where });
-  const serialized = await serializeList(req, records);
-  const filtered = filterByStatus(serialized, query.status);
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
     allowAll: true,
   });
+
+  if (pagination.enabled && !hasSpecificStatusFilter(query.status)) {
+    const [records, total] = await Promise.all([
+      repository.findMany({
+        where,
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+      repository.count(where),
+    ]);
+
+    return {
+      data: await serializeList(req, records),
+      meta: buildPaginationMeta(total, pagination),
+    };
+  }
+
+  const records = await repository.findMany({ where });
+  const serialized = await serializeList(req, records);
+  const filtered = filterByStatus(serialized, query.status);
 
   return paginateArray(filtered, pagination);
 };
@@ -232,7 +259,7 @@ exports.create = async ({ req, payload, userId }) => {
       address: normalizeText(payload.address),
       mail_number: normalizeText(payload.mail_number),
       file: storedFile.storedPath,
-      file_size_bytes: storedFile.sizeBytes,
+      file_size_bytes: toSizeBytesBigInt(storedFile.sizeBytes),
       status: "ACTIVE",
       created_by: userId,
     });
@@ -310,8 +337,9 @@ exports.update = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
-    updateData.file_size_bytes =
-      storedFile.sizeBytes ?? outgoingMail.file_size_bytes ?? null;
+    updateData.file_size_bytes = toSizeBytesBigInt(
+      storedFile.sizeBytes ?? outgoingMail.file_size_bytes ?? null,
+    );
   }
   if (payload.status !== undefined) {
     updateData.status = normalizeOutgoingStatus(payload.status);

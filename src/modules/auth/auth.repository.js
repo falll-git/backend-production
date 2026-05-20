@@ -196,6 +196,7 @@ exports.revokeActiveRefreshTokenByHash = (
 
 exports.rotateRefreshToken = ({
   oldRefreshTokenId,
+  refreshTokenId,
   userId,
   refreshTokenHash,
   expiresAt,
@@ -210,6 +211,7 @@ exports.rotateRefreshToken = ({
 
     await exports.createRefreshToken(
       {
+        id: refreshTokenId,
         user_id: userId,
         token_hash: refreshTokenHash,
         expires_at: expiresAt,
@@ -217,10 +219,15 @@ exports.rotateRefreshToken = ({
       tx,
     );
 
-    return tx.users.findUnique({
+    const user = await tx.users.findUnique({
       where: { id: userId },
       select: authUserSelect,
     });
+
+    return {
+      user,
+      refreshTokenId,
+    };
   });
 };
 

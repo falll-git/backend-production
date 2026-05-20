@@ -48,6 +48,20 @@ function findById(id) {
   });
 }
 
+function findManyByIds(ids) {
+  return prisma.digital_document_access_requests.findMany({
+    where: {
+      id: {
+        in: ids,
+      },
+    },
+    orderBy: {
+      created_at: "desc",
+    },
+    include: getAccessRequestInclude(),
+  });
+}
+
 function findPendingByDocumentAndRequester(
   documentId,
   requesterId,
@@ -96,6 +110,7 @@ module.exports = {
   findActiveApprovedByDocumentAndRequester,
   findById,
   findMany,
+  findManyByIds,
   findPendingByDocumentAndRequester,
   getAccessRequestInclude,
   update,

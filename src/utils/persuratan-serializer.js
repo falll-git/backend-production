@@ -10,6 +10,7 @@ const {
 const {
   appendFileAccessToken,
 } = require("./file-access-token");
+const { toSizeBytesNumber } = require("./size-bytes");
 const {
   getDeliveryMediaLabel,
   getOutgoingStatusCode,
@@ -571,6 +572,10 @@ async function serializeIncomingMail({ req, record }) {
 
   return {
     ...record,
+    file_size_bytes: toSizeBytesNumber(record.file_size_bytes),
+    watermark_file_size_bytes: toSizeBytesNumber(
+      record.watermark_file_size_bytes,
+    ),
     letter_prioritie: record.letter_prioritie
       ? { ...record.letter_prioritie }
       : null,
@@ -617,6 +622,10 @@ async function serializeOutgoingMail({ req, record }) {
 
   return {
     ...record,
+    file_size_bytes: toSizeBytesNumber(record.file_size_bytes),
+    watermark_file_size_bytes: toSizeBytesNumber(
+      record.watermark_file_size_bytes,
+    ),
     delivery_media: getDeliveryMediaLabel(record.delivery_media),
     delivery_media_key: record.delivery_media,
     creator: serializeUser(record.creator),
@@ -678,6 +687,10 @@ async function serializeMemorandum({ req, record }) {
 
   return {
     ...record,
+    file_size_bytes: toSizeBytesNumber(record.file_size_bytes),
+    watermark_file_size_bytes: toSizeBytesNumber(
+      record.watermark_file_size_bytes,
+    ),
     origin_division: originDivision,
     origin_division_id: record.origin_division_id ?? null,
     origin_division_name: originDivision?.name ?? null,

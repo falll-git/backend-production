@@ -425,13 +425,7 @@ exports.create = async ({ req, payload, userId }) => {
     }
   });
 
-  const items = [];
-  for (const createdId of createdIds) {
-    const item = await repository.findById(createdId);
-    if (item) {
-      items.push(item);
-    }
-  }
+  const items = await repository.findManyByIds(createdIds);
 
   return {
     count: items.length,
