@@ -5,6 +5,7 @@ const {
   buildDocumentVisibilityWhere,
 } = require("../../utils/digital-archive-access");
 const {
+  deleteStoredFile,
   persistDigitalArchiveFile,
 } = require("../../utils/digital-archive-files");
 const {
@@ -20,6 +21,10 @@ const {
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
+const {
+  toSizeBytesBigInt,
+  toSizeBytesNumber,
+} = require("../../utils/size-bytes");
 
 async function queueDigitalDocumentWatermark(documentId) {
   try {
@@ -86,19 +91,24 @@ function buildDocumentFilePayload({
 }) {
   if (!storedFile?.storedPath) return null;
 
-  const sizeBytes =
-    originalInput &&
-    typeof originalInput === "object" &&
-    Buffer.isBuffer(originalInput.buffer)
-      ? originalInput.buffer.length
-      : null;
+  let sizeBytes = storedFile.sizeBytes ?? null;
+  if (sizeBytes === null && originalInput && typeof originalInput === "object") {
+    const inputSize = toSizeBytesNumber(
+      originalInput.size_bytes || originalInput.sizeBytes,
+    );
+    if (inputSize && inputSize > 0) {
+      sizeBytes = inputSize;
+    } else if (Buffer.isBuffer(originalInput.buffer)) {
+      sizeBytes = originalInput.buffer.length;
+    }
+  }
 
   return {
     document_id: documentId,
     file_path: storedFile.storedPath,
     file_name: storedFile.fileName || null,
     mime_type: storedFile.mimeType || null,
-    size_bytes: sizeBytes,
+    size_bytes: toSizeBytesBigInt(sizeBytes),
     is_primary: true,
     uploaded_by: uploadedBy,
   };
@@ -632,60 +642,67 @@ async function createDocumentWithGeneratedNumber({
     fallbackBaseName: normalizedName,
   });
 
-  for (let offset = 0; offset < 10; offset += 1) {
-    const documentNumber = await generateDocumentNumber(
-      documentType,
-      client,
-      offset,
-    );
-
-    try {
-      const created = await repository.create(
-        {
-          storage_id: storage.id,
-          document_type_id: documentType.id,
-          document_number: documentNumber,
-          document_name: normalizedName,
-          description,
-          file: storedFile.storedPath,
-          owner_user_id: ownership.owner_user_id,
-          owner_division_id: ownership.owner_division_id,
-          debtor_id: debtorId,
-          is_restricted: Boolean(payload.is_restricted),
-          access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
-          created_by: userId,
-        },
+  try {
+    for (let offset = 0; offset < 10; offset += 1) {
+      const documentNumber = await generateDocumentNumber(
+        documentType,
         client,
+        offset,
       );
 
-      const documentFilePayload = buildDocumentFilePayload({
-        documentId: created.id,
-        storedFile,
-        originalInput: payload.file,
-        uploadedBy: userId,
-      });
+      try {
+        const created = await repository.create(
+          {
+            storage_id: storage.id,
+            document_type_id: documentType.id,
+            document_number: documentNumber,
+            document_name: normalizedName,
+            description,
+            file: storedFile.storedPath,
+            owner_user_id: ownership.owner_user_id,
+            owner_division_id: ownership.owner_division_id,
+            debtor_id: debtorId,
+            is_restricted: Boolean(payload.is_restricted),
+            access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
+            created_by: userId,
+          },
+          client,
+        );
 
-      if (documentFilePayload) {
-        await repository.createDocumentFile(documentFilePayload, client);
+        const documentFilePayload = buildDocumentFilePayload({
+          documentId: created.id,
+          storedFile,
+          originalInput: payload.file,
+          uploadedBy: userId,
+        });
+
+        if (documentFilePayload) {
+          await repository.createDocumentFile(documentFilePayload, client);
+        }
+
+        await repository.replaceRelatedUsers(
+          created.id,
+          ownership.related_user_ids || [],
+          client,
+        );
+
+        return created;
+      } catch (error) {
+        if (isPrismaUniqueError(error)) {
+          continue;
+        }
+
+        throw error;
       }
-
-      await repository.replaceRelatedUsers(
-        created.id,
-        ownership.related_user_ids || [],
-        client,
-      );
-
-      return created;
-    } catch (error) {
-      if (isPrismaUniqueError(error)) {
-        continue;
-      }
-
-      throw error;
     }
-  }
 
-  throw new AppError("Gagal membuat nomor dokumen otomatis", 500);
+    throw new AppError("Gagal membuat nomor dokumen otomatis", 500);
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw error;
+  }
 }
 
 async function ensureSupportingData({ storageId, documentTypeId }, client) {

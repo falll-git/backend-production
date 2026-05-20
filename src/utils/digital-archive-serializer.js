@@ -9,6 +9,7 @@ const {
 const {
   appendFileAccessToken,
 } = require("./file-access-token");
+const { toSizeBytesNumber } = require("./size-bytes");
 
 const ACCESS_STATUS_LABELS = {
   PENDING: "Menunggu Persetujuan",
@@ -218,7 +219,7 @@ function serializeDocumentFile(req, file, fallbackBaseName, documentId) {
       file.file_name ||
       deriveDocumentFileName(file.file_path, fallbackBaseName),
     mime_type: file.mime_type,
-    size_bytes: file.size_bytes,
+    size_bytes: toSizeBytesNumber(file.size_bytes),
     is_primary: file.is_primary,
     created_at: file.created_at,
     uploaded_by: file.uploaded_by,
@@ -277,7 +278,7 @@ function serializeDocumentBase(req, document) {
           url: effectiveFileUrl,
           original_url: originalFileUrl,
           mime_type: primaryFile?.mime_type || null,
-          size_bytes: primaryFile?.size_bytes || null,
+          size_bytes: toSizeBytesNumber(primaryFile?.size_bytes),
           watermark,
         }
       : null,

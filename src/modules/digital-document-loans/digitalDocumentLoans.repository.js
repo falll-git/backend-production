@@ -54,6 +54,20 @@ function findById(id) {
   });
 }
 
+function findManyByIds(ids) {
+  return prisma.digital_document_loans.findMany({
+    where: {
+      id: {
+        in: ids,
+      },
+    },
+    orderBy: {
+      created_at: "desc",
+    },
+    include: getLoanInclude(),
+  });
+}
+
 function findActiveByDocumentId(documentId, client = prisma) {
   return client.digital_document_loans.findFirst({
     where: {
@@ -82,6 +96,7 @@ module.exports = {
   findActiveByDocumentId,
   findById,
   findMany,
+  findManyByIds,
   getLoanInclude,
   update,
   withTransaction,

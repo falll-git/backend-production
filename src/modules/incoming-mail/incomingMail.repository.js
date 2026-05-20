@@ -74,6 +74,10 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.incoming_mails.findMany(query);
 };
 
+exports.count = (where) => {
+  return prisma.incoming_mails.count({ where });
+};
+
 exports.findById = (id) => {
   return prisma.incoming_mails.findFirst({
     where: { id, deleted_at: null },
@@ -231,19 +235,18 @@ exports.forwardDispositionToReceivers = async ({
     return createdIds;
   });
 
-  const createdDispositions = [];
-  for (const dispositionId of createdDispositionIds) {
-    const disposition = await prisma.incoming_mail_dispositions.findUnique({
-      where: { id: dispositionId },
-      include: {
-        sender: { select: userSummarySelect },
-        receiver: { select: userSummarySelect },
+  return prisma.incoming_mail_dispositions.findMany({
+    where: {
+      id: {
+        in: createdDispositionIds,
       },
-    });
-    if (disposition) createdDispositions.push(disposition);
-  }
-
-  return createdDispositions;
+    },
+    orderBy: [{ disposed_at: "asc" }, { id: "asc" }],
+    include: {
+      sender: { select: userSummarySelect },
+      receiver: { select: userSummarySelect },
+    },
+  });
 };
 
 exports.completeDispositions = (incomingMailId) => {

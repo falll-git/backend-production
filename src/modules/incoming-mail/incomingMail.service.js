@@ -27,6 +27,7 @@ const {
 } = require("../../utils/persuratan-access");
 const {
   PAGINATION_PROFILES,
+  buildPaginationMeta,
   paginateArray,
   resolvePagination,
 } = require("../../utils/pagination");
@@ -36,6 +37,7 @@ const {
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
+const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 const INCOMING_MAIL_MENU_URL =
@@ -304,6 +306,14 @@ function filterByStatus(records, status) {
   });
 }
 
+function hasSpecificStatusFilter(status) {
+  const normalized = String(status ?? "")
+    .trim()
+    .toUpperCase();
+
+  return Boolean(normalized && !["ALL", "SEMUA"].includes(normalized));
+}
+
 function buildIncomingMailData(payload, filePath, fileSizeBytes, status) {
   return {
     letter_prioritie_id: payload.letter_prioritie_id,
@@ -315,7 +325,7 @@ function buildIncomingMailData(payload, filePath, fileSizeBytes, status) {
     address: normalizeText(payload.address),
     mail_number: normalizeText(payload.mail_number),
     file: filePath,
-    file_size_bytes: fileSizeBytes,
+    file_size_bytes: toSizeBytesBigInt(fileSizeBytes),
     status,
     created_by: payload.created_by ?? null,
   };
@@ -345,13 +355,30 @@ exports.getIncomingMails = async ({
     ],
   };
 
-  const records = await repository.findMany({ where });
-  const serialized = await serializeList(req, records);
-  const filtered = filterByStatus(serialized, query.status);
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
     allowAll: true,
   });
+
+  if (pagination.enabled && !hasSpecificStatusFilter(query.status)) {
+    const [records, total] = await Promise.all([
+      repository.findMany({
+        where,
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+      repository.count(where),
+    ]);
+
+    return {
+      data: await serializeList(req, records),
+      meta: buildPaginationMeta(total, pagination),
+    };
+  }
+
+  const records = await repository.findMany({ where });
+  const serialized = await serializeList(req, records);
+  const filtered = filterByStatus(serialized, query.status);
 
   return paginateArray(filtered, pagination);
 };
@@ -715,8 +742,9 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
-    updateData.file_size_bytes =
-      storedFile.sizeBytes ?? incomingMail.file_size_bytes ?? null;
+    updateData.file_size_bytes = toSizeBytesBigInt(
+      storedFile.sizeBytes ?? incomingMail.file_size_bytes ?? null,
+    );
   }
   if (payload.status !== undefined) {
     updateData.status = normalizeMailWorkflowStatus(payload.status);

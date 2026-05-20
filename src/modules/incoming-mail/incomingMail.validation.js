@@ -8,9 +8,8 @@ const FILE_REQUIRED_MESSAGE = "Dokumen wajib diunggah.";
 const REQUIRED_CHANGE_MESSAGE = "Tidak ada data yang diperbarui.";
 
 const uploadedFileSchema = Joi.object({
-  buffer: Joi.any().required().messages({
-    "any.required": FILE_REQUIRED_MESSAGE,
-  }),
+  buffer: Joi.any().optional(),
+  temp_path: Joi.string().trim().optional(),
   name: Joi.string().trim().required().messages({
     "any.required": "Nama dokumen tidak terbaca.",
     "string.empty": "Nama dokumen tidak terbaca.",
@@ -19,7 +18,13 @@ const uploadedFileSchema = Joi.object({
     "any.required": "Tipe dokumen tidak terbaca.",
     "string.empty": "Tipe dokumen tidak terbaca.",
   }),
-}).unknown(true);
+  size_bytes: Joi.number().integer().min(0).optional(),
+})
+  .or("buffer", "temp_path")
+  .unknown(true)
+  .messages({
+    "object.missing": FILE_REQUIRED_MESSAGE,
+  });
 
 const fileInputSchema = Joi.alternatives()
   .try(Joi.string().trim().allow("", null), uploadedFileSchema)

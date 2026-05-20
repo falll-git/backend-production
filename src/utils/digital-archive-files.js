@@ -1,6 +1,10 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const {
+  cleanupUploadTempFileSync,
+  isUploadTempPath,
+} = require("./upload-temp-files");
 
 const UPLOAD_ROOT = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -129,6 +133,45 @@ function deleteStoredFile(storedPath) {
   } catch {}
 }
 
+function getStoredFileSizeBytes(storedPath) {
+  const resolvedPath = resolveStoredFilePath(storedPath);
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return null;
+
+  try {
+    const stat = fs.statSync(resolvedPath);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+function getLocalFileSizeBytes(filePath) {
+  if (typeof filePath !== "string" || !filePath.trim()) return null;
+
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+function moveUploadedFile(sourcePath, absolutePath) {
+  try {
+    fs.renameSync(sourcePath, absolutePath);
+  } catch (error) {
+    if (error?.code !== "EXDEV") {
+      throw error;
+    }
+
+    try {
+      fs.copyFileSync(sourcePath, absolutePath);
+    } finally {
+      cleanupUploadTempFileSync(sourcePath);
+    }
+  }
+}
+
 function deriveDocumentFileName(storedPath, fallbackBaseName = "dokumen") {
   const safeFallback = sanitizeFileNameBase(fallbackBaseName) || "dokumen";
 
@@ -184,14 +227,21 @@ function parseRequestFileInput(input) {
       buffer: null,
       fileName: null,
       mimeType: inferMimeTypeFromFileName(storedPath),
+      sizeBytes: getStoredFileSizeBytes(storedPath),
+      sourcePath: null,
+      isNewUpload: false,
     };
   }
 
   if (typeof input === "object" && input !== null && !Array.isArray(input)) {
-    if (Buffer.isBuffer(input.buffer)) {
+    const tempPath =
+      input.temp_path || input.tempPath || input.local_path || input.localPath;
+
+    if (typeof tempPath === "string" && isUploadTempPath(tempPath)) {
       return {
         storedPath: null,
-        buffer: input.buffer,
+        buffer: null,
+        sourcePath: tempPath,
         fileName:
           input.file_name ||
           input.fileName ||
@@ -205,6 +255,39 @@ function parseRequestFileInput(input) {
           input.type ||
           input.mimetype ||
           null,
+        sizeBytes:
+          input.size_bytes ||
+          input.sizeBytes ||
+          input.size ||
+          getLocalFileSizeBytes(tempPath),
+        isNewUpload: true,
+      };
+    }
+
+    if (Buffer.isBuffer(input.buffer)) {
+      return {
+        storedPath: null,
+        buffer: input.buffer,
+        sourcePath: null,
+        fileName:
+          input.file_name ||
+          input.fileName ||
+          input.name ||
+          input.originalname ||
+          input.filename ||
+          null,
+        mimeType:
+          input.mime_type ||
+          input.mimeType ||
+          input.type ||
+          input.mimetype ||
+          null,
+        sizeBytes:
+          input.size_bytes ||
+          input.sizeBytes ||
+          input.size ||
+          input.buffer.length,
+        isNewUpload: true,
       };
     }
 
@@ -216,8 +299,11 @@ function parseRequestFileInput(input) {
       return {
         storedPath,
         buffer: null,
+        sourcePath: null,
         fileName: null,
         mimeType: inferMimeTypeFromFileName(storedPath),
+        sizeBytes: getStoredFileSizeBytes(storedPath),
+        isNewUpload: false,
       };
     }
   }
@@ -225,7 +311,15 @@ function parseRequestFileInput(input) {
   return null;
 }
 
-function persistFile({ entity, buffer, fileName, mimeType, fallbackBaseName }) {
+function persistFile({
+  entity,
+  buffer,
+  sourcePath,
+  sizeBytes,
+  fileName,
+  mimeType,
+  fallbackBaseName,
+}) {
   const now = new Date();
   const year = String(now.getFullYear());
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -241,7 +335,21 @@ function persistFile({ entity, buffer, fileName, mimeType, fallbackBaseName }) {
     .toString("hex")}-${safeBaseName}.${extension}`;
   const absolutePath = path.join(targetDirectory, storedFileName);
 
-  fs.writeFileSync(absolutePath, buffer);
+  if (sourcePath) {
+    moveUploadedFile(sourcePath, absolutePath);
+  } else {
+    fs.writeFileSync(absolutePath, buffer);
+  }
+
+  const storedSizeBytes =
+    sizeBytes ||
+    (() => {
+      try {
+        return fs.statSync(absolutePath).size;
+      } catch {
+        return null;
+      }
+    })();
 
   return {
     storedPath: `${PUBLIC_PREFIX}/${entity}/${year}/${month}/${storedFileName}`,
@@ -250,6 +358,7 @@ function persistFile({ entity, buffer, fileName, mimeType, fallbackBaseName }) {
         ? fileName.trim()
         : storedFileName,
     mimeType: resolvedMimeType,
+    sizeBytes: storedSizeBytes,
   };
 }
 
@@ -267,6 +376,8 @@ function persistDigitalArchiveFile({
         ? deriveDocumentFileName(previousPath, fallbackBaseName)
         : null,
       mimeType: null,
+      sizeBytes: getStoredFileSizeBytes(previousPath),
+      isNewUpload: false,
     };
   }
 
@@ -275,12 +386,16 @@ function persistDigitalArchiveFile({
       storedPath: parsed.storedPath,
       fileName: deriveDocumentFileName(parsed.storedPath, fallbackBaseName),
       mimeType: parsed.mimeType,
+      sizeBytes: parsed.sizeBytes,
+      isNewUpload: false,
     };
   }
 
   const stored = persistFile({
     entity,
     buffer: parsed.buffer,
+    sourcePath: parsed.sourcePath,
+    sizeBytes: parsed.sizeBytes,
     fileName: parsed.fileName,
     mimeType: parsed.mimeType,
     fallbackBaseName,
@@ -294,7 +409,10 @@ function persistDigitalArchiveFile({
     deleteStoredFile(previousPath);
   }
 
-  return stored;
+  return {
+    ...stored,
+    isNewUpload: true,
+  };
 }
 
 module.exports = {
@@ -304,5 +422,6 @@ module.exports = {
   buildFileUrl,
   deleteStoredFile,
   deriveDocumentFileName,
+  getStoredFileSizeBytes,
   persistDigitalArchiveFile,
 };

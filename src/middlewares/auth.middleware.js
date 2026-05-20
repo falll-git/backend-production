@@ -15,18 +15,35 @@ module.exports = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await prisma.users.findUnique({
+    if (!decoded.session_id) {
+      return res.status(401).json({
+        status: false,
+        message: "Sesi login tidak valid.",
+      });
+    }
+
+    const activeSession = await prisma.refresh_tokens.findFirst({
       where: {
-        id: decoded.id,
+        id: decoded.session_id,
+        user_id: decoded.id,
+        revoked_at: null,
+        expires_at: {
+          gt: new Date(),
+        },
       },
       select: {
-        id: true,
-        is_active: true,
-        password_set_at: true,
+        user: {
+          select: {
+            id: true,
+            is_active: true,
+            password_set_at: true,
+          },
+        },
       },
     });
+    const user = activeSession?.user || null;
 
-    if (!user) {
+    if (!user || user.id !== decoded.id) {
       return res.status(401).json({
         status: false,
         message: "Token akses tidak valid.",

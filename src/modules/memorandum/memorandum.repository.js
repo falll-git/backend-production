@@ -77,6 +77,10 @@ exports.findMany = ({ where, skip, take }) => {
   return prisma.memorandums.findMany(query);
 };
 
+exports.count = (where) => {
+  return prisma.memorandums.count({ where });
+};
+
 exports.findById = (id) => {
   return prisma.memorandums.findFirst({
     where: { id, deleted_at: null },
@@ -217,19 +221,18 @@ exports.forwardDispositionToReceivers = async ({
     return createdIds;
   });
 
-  const createdDispositions = [];
-  for (const dispositionId of createdDispositionIds) {
-    const disposition = await prisma.memorandum_dispositions.findUnique({
-      where: { id: dispositionId },
-      include: {
-        receiver: { select: userSummarySelect },
-        sender: { select: userSummarySelect },
+  return prisma.memorandum_dispositions.findMany({
+    where: {
+      id: {
+        in: createdDispositionIds,
       },
-    });
-    if (disposition) createdDispositions.push(disposition);
-  }
-
-  return createdDispositions;
+    },
+    orderBy: [{ disposed_at: "asc" }, { id: "asc" }],
+    include: {
+      receiver: { select: userSummarySelect },
+      sender: { select: userSummarySelect },
+    },
+  });
 };
 
 exports.update = async (id, data) => {
