@@ -117,6 +117,71 @@ function buildUserSearchWhere(search) {
     : {};
 }
 
+function countDependencySummary(dependencySummary) {
+  return Object.values(dependencySummary?._count || {}).reduce(
+    (total, count) => total + Number(count || 0),
+    0,
+  );
+}
+
+function buildDeleteImpact(user, actorId, dependencySummary) {
+  const dependencyCount = countDependencySummary(dependencySummary);
+  const isSelf = user.id === actorId;
+  const hasActivity = dependencyCount > 0;
+  const canDelete = !isSelf && !hasActivity;
+  const requiresAccessClosure = hasActivity && user.is_active;
+
+  if (isSelf) {
+    return {
+      can_delete: false,
+      has_activity: hasActivity,
+      dependency_count: dependencyCount,
+      requires_access_closure: false,
+      can_close_access: false,
+      reason: "SELF_ACCOUNT",
+      message: "Anda tidak dapat menghapus akun sendiri.",
+    };
+  }
+
+  if (requiresAccessClosure) {
+    return {
+      can_delete: false,
+      has_activity: true,
+      dependency_count: dependencyCount,
+      requires_access_closure: true,
+      can_close_access: true,
+      reason: "HAS_ACTIVITY_ACTIVE",
+      message:
+        "Pengguna ini sudah memiliki riwayat aktivitas. Tutup akses pengguna agar tidak bisa login dan tidak muncul pada proses baru.",
+    };
+  }
+
+  if (hasActivity) {
+    return {
+      can_delete: false,
+      has_activity: true,
+      dependency_count: dependencyCount,
+      requires_access_closure: false,
+      can_close_access: false,
+      reason: "HAS_ACTIVITY_INACTIVE",
+      message:
+        "Pengguna ini sudah memiliki riwayat aktivitas dan aksesnya sudah ditutup. Data tetap disimpan untuk audit dan laporan.",
+    };
+  }
+
+  return {
+    can_delete: canDelete,
+    has_activity: false,
+    dependency_count: dependencyCount,
+    requires_access_closure: false,
+    can_close_access: false,
+    reason: canDelete ? null : "UNKNOWN",
+    message: canDelete
+      ? "Pengguna ini belum memiliki riwayat aktivitas dan bisa dihapus permanen."
+      : "Pengguna tidak dapat dihapus.",
+  };
+}
+
 function buildInvitePayload(token, expiresAt) {
   return {
     type: "INVITE",
@@ -527,6 +592,17 @@ exports.reactivateAccess = async (id, actorId, payload) => {
   return serializeUser(updatedUser);
 };
 
+exports.getDeleteImpact = async (id, actorId) => {
+  const user = await repository.findById(id);
+
+  if (!user) {
+    throw new AppError("Pengguna tidak ditemukan.", 404);
+  }
+
+  const dependencySummary = await repository.findDependencySummary(id);
+  return buildDeleteImpact(user, actorId, dependencySummary);
+};
+
 exports.deleteUser = async (id, actorId) => {
   const user = await repository.findById(id);
 
@@ -539,13 +615,11 @@ exports.deleteUser = async (id, actorId) => {
   }
 
   const dependencySummary = await repository.findDependencySummary(id);
-  const totalDependencies = Object.values(
-    dependencySummary?._count || {},
-  ).reduce((total, count) => total + Number(count || 0), 0);
+  const deleteImpact = buildDeleteImpact(user, actorId, dependencySummary);
 
-  if (totalDependencies > 0) {
+  if (!deleteImpact.can_delete) {
     throw new AppError(
-      "Pengguna ini sudah memiliki riwayat aktivitas, sehingga tidak dapat dihapus. Tutup akses pengguna untuk menutup akses tanpa menghapus riwayat data.",
+      deleteImpact.message,
       409,
     );
   }

@@ -445,7 +445,6 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     memo_number: normalizeText(payload.memo_number),
     memo_date: normalizeDate(payload.memo_date),
     received_date: normalizeDate(payload.received_date),
-    due_date: normalizeOptionalDate(payload.due_date),
     regarding: normalizeText(payload.regarding),
     description: normalizeText(payload.description),
     file: storedFile.storedPath,
@@ -459,7 +458,7 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     sender_id: userId,
     parent_disposition_id: null,
     start_date: null,
-    due_date: normalizeOptionalDate(payload.due_date),
+    due_date: null,
     note: null,
     status: "NEW",
   }));
@@ -739,9 +738,6 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
   }
   if (payload.received_date !== undefined) {
     updateData.received_date = normalizeDate(payload.received_date);
-  }
-  if (payload.due_date !== undefined) {
-    updateData.due_date = normalizeOptionalDate(payload.due_date);
   }
   if (payload.regarding !== undefined) {
     updateData.regarding = normalizeText(payload.regarding);

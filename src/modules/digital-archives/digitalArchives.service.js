@@ -503,49 +503,44 @@ function mapOwnerUserGroupedCount(rows, ownerLookup, divisionLookup) {
 }
 
 async function buildDocumentBreakdowns(documentWhere) {
-  const [typeGroups, divisionGroups, ownerGroups, accessLevelGroups] =
-    await Promise.all([
-      repository.groupDigitalDocuments({
-        by: ["document_type_id"],
-        where: documentWhere,
-        _count: {
-          _all: true,
-        },
-      }),
-      repository.groupDigitalDocuments({
-        by: ["owner_division_id"],
-        where: documentWhere,
-        _count: {
-          _all: true,
-        },
-      }),
-      repository.groupDigitalDocuments({
-        by: ["owner_user_id", "owner_division_id"],
-        where: documentWhere,
-        _count: {
-          _all: true,
-        },
-      }),
-      repository.groupDigitalDocuments({
-        by: ["access_level"],
-        where: documentWhere,
-        _count: {
-          _all: true,
-        },
-      }),
-    ]);
+  const typeGroups = await repository.groupDigitalDocuments({
+    by: ["document_type_id"],
+    where: documentWhere,
+    _count: {
+      _all: true,
+    },
+  });
+  const divisionGroups = await repository.groupDigitalDocuments({
+    by: ["owner_division_id"],
+    where: documentWhere,
+    _count: {
+      _all: true,
+    },
+  });
+  const ownerGroups = await repository.groupDigitalDocuments({
+    by: ["owner_user_id", "owner_division_id"],
+    where: documentWhere,
+    _count: {
+      _all: true,
+    },
+  });
+  const accessLevelGroups = await repository.groupDigitalDocuments({
+    by: ["access_level"],
+    where: documentWhere,
+    _count: {
+      _all: true,
+    },
+  });
 
-  const [documentTypes, divisions, owners] = await Promise.all([
-    repository.findDocumentTypesByIds(
-      typeGroups.map((item) => item.document_type_id).filter(Boolean),
-    ),
-    repository.findDivisionsByIds(
-      divisionGroups.map((item) => item.owner_division_id).filter(Boolean),
-    ),
-    repository.findUsersByIds(
-      ownerGroups.map((item) => item.owner_user_id).filter(Boolean),
-    ),
-  ]);
+  const documentTypes = await repository.findDocumentTypesByIds(
+    typeGroups.map((item) => item.document_type_id).filter(Boolean),
+  );
+  const divisions = await repository.findDivisionsByIds(
+    divisionGroups.map((item) => item.owner_division_id).filter(Boolean),
+  );
+  const owners = await repository.findUsersByIds(
+    ownerGroups.map((item) => item.owner_user_id).filter(Boolean),
+  );
 
   return {
     by_document_type: mapGroupedCount(
@@ -757,80 +752,60 @@ exports.getReportSummary = async ({ userId }) => {
       document: documentWhere,
     });
 
-  const [
-    totalDocuments,
-    restrictedDocuments,
-    debtorDocuments,
-    dueSoonLoans,
-    pendingAccessRequests,
-    activeAccessRequests,
-    expiringAccessRequests,
-    expiredAccessRequests,
-    rejectedAccessRequests,
-    pendingLoans,
-    approvedLoans,
-    handedOverLoans,
-    borrowedLoans,
-    returnedLoans,
-    rejectedLoans,
-    overdueLoans,
-    documentBreakdowns,
-  ] = await Promise.all([
-    documentCount(),
-    documentCount({ is_restricted: true }),
-    documentCount({
-      debtor_id: {
-        not: null,
-      },
-    }),
-    repository.countLoans({
-      status: {
-        in: ["HANDED_OVER", "BORROWED"],
-      },
-      requested_due_date: {
-        gte: now,
-        lte: nextThirtyDays,
-      },
-      document: documentWhere,
-    }),
-    accessCount({ status: "PENDING" }),
-    accessCount({
-      status: "APPROVED",
-      expires_at: {
-        gte: now,
-      },
-    }),
-    accessCount({
-      status: "APPROVED",
-      expires_at: {
-        gte: now,
-        lte: nextThirtyDays,
-      },
-    }),
-    accessCount({
-      status: "APPROVED",
-      expires_at: {
-        lt: now,
-      },
-    }),
-    accessCount({ status: "REJECTED" }),
-    loanCount("PENDING"),
-    loanCount("APPROVED"),
-    loanCount("HANDED_OVER"),
-    loanCount("BORROWED"),
-    loanCount("RETURNED"),
-    loanCount("REJECTED"),
-    repository.countLoans({
-      status: {
-        in: ["HANDED_OVER", "BORROWED"],
-      },
-      requested_due_date: {
-        lt: now,
-      },
-      document: documentWhere,
-    }),
-    buildDocumentBreakdowns(documentWhere),
-  ]);
+  const totalDocuments = await documentCount();
+  const restrictedDocuments = await documentCount({ is_restricted: true });
+  const debtorDocuments = await documentCount({
+    debtor_id: {
+      not: null,
+    },
+  });
+  const dueSoonLoans = await repository.countLoans({
+    status: {
+      in: ["HANDED_OVER", "BORROWED"],
+    },
+    requested_due_date: {
+      gte: now,
+      lte: nextThirtyDays,
+    },
+    document: documentWhere,
+  });
+  const pendingAccessRequests = await accessCount({ status: "PENDING" });
+  const activeAccessRequests = await accessCount({
+    status: "APPROVED",
+    expires_at: {
+      gte: now,
+    },
+  });
+  const expiringAccessRequests = await accessCount({
+    status: "APPROVED",
+    expires_at: {
+      gte: now,
+      lte: nextThirtyDays,
+    },
+  });
+  const expiredAccessRequests = await accessCount({
+    status: "APPROVED",
+    expires_at: {
+      lt: now,
+    },
+  });
+  const rejectedAccessRequests = await accessCount({ status: "REJECTED" });
+  const pendingLoans = await loanCount("PENDING");
+  const approvedLoans = await loanCount("APPROVED");
+  const handedOverLoans = await loanCount("HANDED_OVER");
+  const borrowedLoans = await loanCount("BORROWED");
+  const returnedLoans = await loanCount("RETURNED");
+  const rejectedLoans = await loanCount("REJECTED");
+  const overdueLoans = await repository.countLoans({
+    status: {
+      in: ["HANDED_OVER", "BORROWED"],
+    },
+    requested_due_date: {
+      lt: now,
+    },
+    document: documentWhere,
+  });
+  const documentBreakdowns = await buildDocumentBreakdowns(documentWhere);
   const activeLoans = handedOverLoans + borrowedLoans;
   const reportScope = buildReportScope(scope);
 

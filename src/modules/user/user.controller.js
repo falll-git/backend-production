@@ -84,6 +84,18 @@ exports.delete = async (req, res) => {
   }
 };
 
+exports.getDeleteImpact = async (req, res) => {
+  try {
+    const result = await service.getDeleteImpact(req.params.id, req.user.id);
+    successResponse(res, result);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 400)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
 exports.getMe = async (req, res) => {
   try {
     const userId = req.user.id;

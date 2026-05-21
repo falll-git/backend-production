@@ -63,11 +63,13 @@ async function getDebtorAccessScope(userId, urls = DEBTOR_DATA_SCOPE_URLS) {
     },
   });
   const roleId = user?.role_id || null;
-  const [canViewAll, canViewDivision, canManageAll] = await Promise.all([
-    roleHasFeature(roleId, urls, REPORT_ALL_FEATURE),
-    roleHasFeature(roleId, urls, VIEW_DIVISION_FEATURE),
-    roleHasFeature(roleId, urls, MANAGE_ALL_FEATURE),
-  ]);
+  const canViewAll = await roleHasFeature(roleId, urls, REPORT_ALL_FEATURE);
+  const canViewDivision = await roleHasFeature(
+    roleId,
+    urls,
+    VIEW_DIVISION_FEATURE,
+  );
+  const canManageAll = await roleHasFeature(roleId, urls, MANAGE_ALL_FEATURE);
 
   return {
     userId: user?.id || null,

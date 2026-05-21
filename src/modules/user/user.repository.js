@@ -397,6 +397,8 @@ exports.findDependencySummary = (id) => {
           handed_over_digital_document_loans: true,
           returned_digital_document_loans: true,
           digital_document_activity_logs: true,
+          marketing_debtors: true,
+          marketing_contracts: true,
           created_outgoing_mails: true,
           updated_outgoing_mails: true,
           deleted_outgoing_mails: true,

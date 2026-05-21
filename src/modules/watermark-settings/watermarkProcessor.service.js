@@ -24,6 +24,7 @@ const {
 const {
   appendFileAccessToken,
 } = require("../../utils/file-access-token");
+const { buildPublicUrl } = require("../../utils/public-url");
 const {
   PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
   STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
@@ -211,17 +212,7 @@ function formatSizeMb(bytes) {
 
 function buildWatermarkedFileUrl(req, storedPath, { module, entityId } = {}) {
   if (typeof storedPath !== "string" || !storedPath.trim()) return null;
-  if (/^https?:\/\//i.test(storedPath)) return storedPath;
-  if (!storedPath.startsWith("/")) return storedPath;
-
-  const origin =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.API_BASE_URL ||
-    process.env.APP_BASE_URL ||
-    process.env.PUBLIC_ASSET_BASE_URL ||
-    (req ? `${req.protocol}://${req.get("host")}` : "");
-
-  const fileUrl = origin ? new URL(storedPath, origin).toString() : storedPath;
+  const fileUrl = buildPublicUrl(req, storedPath);
   return appendFileAccessToken(req, fileUrl, {
     storedPath,
     module,

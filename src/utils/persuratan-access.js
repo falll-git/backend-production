@@ -58,15 +58,21 @@ async function getPersuratanAccessScope(userId) {
   });
 
   const roleId = user?.role_id ?? null;
-  const [
-    canAccessAllPersuratan,
-    canAccessDivisionPersuratan,
-    canManageAllPersuratan,
-  ] = await Promise.all([
-    roleHasFeature(roleId, PERSURATAN_DATA_SCOPE_URLS, REPORT_ALL_FEATURE),
-    roleHasFeature(roleId, PERSURATAN_DATA_SCOPE_URLS, VIEW_DIVISION_FEATURE),
-    roleHasFeature(roleId, PERSURATAN_DATA_SCOPE_URLS, MANAGE_ALL_FEATURE),
-  ]);
+  const canAccessAllPersuratan = await roleHasFeature(
+    roleId,
+    PERSURATAN_DATA_SCOPE_URLS,
+    REPORT_ALL_FEATURE,
+  );
+  const canAccessDivisionPersuratan = await roleHasFeature(
+    roleId,
+    PERSURATAN_DATA_SCOPE_URLS,
+    VIEW_DIVISION_FEATURE,
+  );
+  const canManageAllPersuratan = await roleHasFeature(
+    roleId,
+    PERSURATAN_DATA_SCOPE_URLS,
+    MANAGE_ALL_FEATURE,
+  );
 
   return {
     userId: user?.id ?? null,

@@ -1,6 +1,23 @@
 const service = require("./digitalDocuments.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
 
+function sendError(res, error) {
+  if (error?.statusCode || error?.status) {
+    return res.status(error.statusCode || error.status).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+
+  console.error("Digital document request failed:", error);
+  return res.status(500).json({
+    status: false,
+    success: false,
+    message: "Gagal memproses dokumen digital.",
+  });
+}
+
 exports.getAll = async (req, res) => {
   try {
     const result = await service.getAll({
@@ -15,11 +32,7 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -33,11 +46,7 @@ exports.getById = async (req, res) => {
 
     return successResponse(res, result);
   } catch (error) {
-    return res.status(error.statusCode || 404).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -55,11 +64,7 @@ exports.getRequestable = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -73,11 +78,7 @@ exports.getActivityLogs = async (req, res) => {
 
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -96,11 +97,7 @@ exports.create = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -120,11 +117,7 @@ exports.update = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -137,10 +130,6 @@ exports.delete = async (req, res) => {
 
     return successResponse(res, null, "Dokumen digital berhasil dihapus");
   } catch (error) {
-    return res.status(error.statusCode || 400).json({
-      status: false,
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };

@@ -186,12 +186,15 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || err.status || 500;
+  if (statusCode >= 500) {
+    console.error("Unhandled request error:", err);
+  }
+
   res.status(statusCode).json({
     status: false,
-    message:
-      process.env.NODE_ENV === "production" && statusCode === 500
-        ? "Internal server error"
-        : err.message || "Internal server error",
+    message: statusCode >= 500
+      ? "Internal server error"
+      : err.message || "Internal server error",
   });
 });
 

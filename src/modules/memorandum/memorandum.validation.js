@@ -4,7 +4,7 @@ const MEMO_DATE_REQUIRED_MESSAGE = "Tanggal memorandum wajib diisi.";
 const MEMO_DATE_INVALID_MESSAGE = "Format tanggal memorandum tidak valid.";
 const RECEIVED_DATE_REQUIRED_MESSAGE = "Tanggal diterima wajib diisi.";
 const RECEIVED_DATE_INVALID_MESSAGE = "Format tanggal diterima tidak valid.";
-const DUE_DATE_INVALID_MESSAGE = "Format tanggal batas memorandum tidak valid.";
+const DUE_DATE_INVALID_MESSAGE = "Format tanggal batas disposisi tidak valid.";
 const START_DATE_INVALID_MESSAGE = "Format tanggal mulai disposisi tidak valid.";
 const FILE_REQUIRED_MESSAGE = "Dokumen wajib diunggah.";
 const REQUIRED_CHANGE_MESSAGE = "Tidak ada data yang diperbarui.";
@@ -122,10 +122,6 @@ exports.createMemorandumSchema = Joi.object({
     "date.base": RECEIVED_DATE_INVALID_MESSAGE,
     "date.format": RECEIVED_DATE_INVALID_MESSAGE,
   }),
-  due_date: Joi.date().iso().allow(null).optional().messages({
-    "date.base": DUE_DATE_INVALID_MESSAGE,
-    "date.format": DUE_DATE_INVALID_MESSAGE,
-  }),
   regarding: Joi.string().trim().required().messages({
     "any.required": "Perihal memorandum wajib diisi.",
     "string.empty": "Perihal memorandum wajib diisi.",
@@ -175,10 +171,6 @@ exports.updateMemorandumSchema = Joi.object({
   received_date: Joi.date().iso().optional().messages({
     "date.base": RECEIVED_DATE_INVALID_MESSAGE,
     "date.format": RECEIVED_DATE_INVALID_MESSAGE,
-  }),
-  due_date: Joi.date().iso().allow(null).optional().messages({
-    "date.base": DUE_DATE_INVALID_MESSAGE,
-    "date.format": DUE_DATE_INVALID_MESSAGE,
   }),
   regarding: Joi.string().trim().optional().messages({
     "string.empty": "Perihal memorandum wajib diisi.",
