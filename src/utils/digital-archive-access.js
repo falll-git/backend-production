@@ -60,15 +60,21 @@ async function getDigitalArchiveAccessScope(userId) {
     },
   });
   const roleId = user?.role_id ?? null;
-  const [
-    canViewAllDocuments,
-    canAccessDivisionDocuments,
-    canManageAllDocuments,
-  ] = await Promise.all([
-    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, REPORT_ALL_FEATURE),
-    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, VIEW_DIVISION_FEATURE),
-    roleHasFeature(roleId, DIGITAL_ARCHIVE_DATA_SCOPE_URLS, MANAGE_ALL_FEATURE),
-  ]);
+  const canViewAllDocuments = await roleHasFeature(
+    roleId,
+    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+    REPORT_ALL_FEATURE,
+  );
+  const canAccessDivisionDocuments = await roleHasFeature(
+    roleId,
+    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+    VIEW_DIVISION_FEATURE,
+  );
+  const canManageAllDocuments = await roleHasFeature(
+    roleId,
+    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+    MANAGE_ALL_FEATURE,
+  );
 
   return {
     userId: user?.id ?? null,

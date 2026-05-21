@@ -53,6 +53,12 @@ router.post(
   validate(reactivateAccessSchema),
   controller.reactivateAccess,
 );
+router.get(
+  "/:id/delete-impact",
+  auth,
+  authorize(USER_MENU_URL, "delete"),
+  controller.getDeleteImpact,
+);
 router.get("/:id", auth, authorize(USER_MENU_URL, "read"), controller.getById);
 router.put(
   "/:id",

@@ -717,7 +717,6 @@ model memorandums {
   memo_number               String                 @unique
   memo_date                 DateTime
   received_date             DateTime
-  due_date                  DateTime?
   regarding                 String
   description               String?
   file                      String?

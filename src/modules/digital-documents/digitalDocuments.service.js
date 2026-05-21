@@ -459,6 +459,22 @@ function isPrismaUniqueError(error) {
   return error && error.code === "P2002";
 }
 
+function getPrismaUniqueTargets(error) {
+  const target = error?.meta?.target;
+  if (Array.isArray(target)) return target.map(String);
+  if (typeof target === "string") return [target];
+  return [];
+}
+
+function isDocumentNumberUniqueError(error) {
+  return (
+    isPrismaUniqueError(error) &&
+    getPrismaUniqueTargets(error).some((target) =>
+      target.toLowerCase().includes("document_number"),
+    )
+  );
+}
+
 function getDebtorPayload(payload) {
   const nested =
     payload.debtor && typeof payload.debtor === "object" ? payload.debtor : {};
@@ -633,76 +649,53 @@ async function createDocumentWithGeneratedNumber({
   ownership,
   debtorId,
   userId,
+  storedFile,
+  documentNumberOffset = 0,
 }) {
   const normalizedName = normalizeDocumentName(payload.document_name);
   const description = normalizeText(payload.description);
-  const storedFile = persistDigitalArchiveFile({
-    entity: "documents",
-    input: payload.file,
-    fallbackBaseName: normalizedName,
+
+  const documentNumber = await generateDocumentNumber(
+    documentType,
+    client,
+    documentNumberOffset,
+  );
+  const created = await repository.create(
+    {
+      storage_id: storage.id,
+      document_type_id: documentType.id,
+      document_number: documentNumber,
+      document_name: normalizedName,
+      description,
+      file: storedFile.storedPath,
+      owner_user_id: ownership.owner_user_id,
+      owner_division_id: ownership.owner_division_id,
+      debtor_id: debtorId,
+      is_restricted: Boolean(payload.is_restricted),
+      access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
+      created_by: userId,
+    },
+    client,
+  );
+
+  const documentFilePayload = buildDocumentFilePayload({
+    documentId: created.id,
+    storedFile,
+    originalInput: payload.file,
+    uploadedBy: userId,
   });
 
-  try {
-    for (let offset = 0; offset < 10; offset += 1) {
-      const documentNumber = await generateDocumentNumber(
-        documentType,
-        client,
-        offset,
-      );
-
-      try {
-        const created = await repository.create(
-          {
-            storage_id: storage.id,
-            document_type_id: documentType.id,
-            document_number: documentNumber,
-            document_name: normalizedName,
-            description,
-            file: storedFile.storedPath,
-            owner_user_id: ownership.owner_user_id,
-            owner_division_id: ownership.owner_division_id,
-            debtor_id: debtorId,
-            is_restricted: Boolean(payload.is_restricted),
-            access_level: payload.is_restricted ? "RESTRICT" : "NON_RESTRICT",
-            created_by: userId,
-          },
-          client,
-        );
-
-        const documentFilePayload = buildDocumentFilePayload({
-          documentId: created.id,
-          storedFile,
-          originalInput: payload.file,
-          uploadedBy: userId,
-        });
-
-        if (documentFilePayload) {
-          await repository.createDocumentFile(documentFilePayload, client);
-        }
-
-        await repository.replaceRelatedUsers(
-          created.id,
-          ownership.related_user_ids || [],
-          client,
-        );
-
-        return created;
-      } catch (error) {
-        if (isPrismaUniqueError(error)) {
-          continue;
-        }
-
-        throw error;
-      }
-    }
-
-    throw new AppError("Gagal membuat nomor dokumen otomatis", 500);
-  } catch (error) {
-    if (storedFile.isNewUpload) {
-      deleteStoredFile(storedFile.storedPath);
-    }
-    throw error;
+  if (documentFilePayload) {
+    await repository.createDocumentFile(documentFilePayload, client);
   }
+
+  await repository.replaceRelatedUsers(
+    created.id,
+    ownership.related_user_ids || [],
+    client,
+  );
+
+  return created;
 }
 
 async function ensureSupportingData({ storageId, documentTypeId }, client) {
@@ -879,49 +872,80 @@ exports.create = async ({ req, payload, userId }) => {
     throw new AppError("User tidak dikenali", 401);
   }
 
-  const created = await repository.withTransaction(async (client) => {
-    const { storage, documentType } = await ensureSupportingData(
-      {
-        storageId: payload.storage_id,
-        documentTypeId: payload.document_type_id,
-      },
-      client,
-    );
-    const ownership = await resolveOwnershipData({
-      payload,
-      current: null,
-      userId,
-      client,
-    });
-    const debtorId = await resolveDebtorId({
-      payload,
-      current: null,
-      client,
-    });
-
-    const document = await createDocumentWithGeneratedNumber({
-      client,
-      payload,
-      storage,
-      documentType,
-      ownership,
-      debtorId,
-      userId,
-    });
-
-    await repository.createActivityLog(
-      {
-        document_id: document.id,
-        actor_id: userId,
-        action: "CREATED",
-        to_storage_id: document.storage_id,
-        description: "Dokumen digital dibuat",
-      },
-      client,
-    );
-
-    return document;
+  const { storage, documentType } = await ensureSupportingData({
+    storageId: payload.storage_id,
+    documentTypeId: payload.document_type_id,
   });
+  const normalizedName = normalizeDocumentName(payload.document_name);
+  const storedFile = persistDigitalArchiveFile({
+    entity: "documents",
+    input: payload.file,
+    fallbackBaseName: normalizedName,
+  });
+
+  let created = null;
+  try {
+    for (let offset = 0; offset < 10; offset += 1) {
+      try {
+        created = await repository.withTransaction(async (client) => {
+          const ownership = await resolveOwnershipData({
+            payload,
+            current: null,
+            userId,
+            client,
+          });
+          const debtorId = await resolveDebtorId({
+            payload,
+            current: null,
+            client,
+          });
+
+          const document = await createDocumentWithGeneratedNumber({
+            client,
+            payload: {
+              ...payload,
+              document_name: normalizedName,
+            },
+            storage,
+            documentType,
+            ownership,
+            debtorId,
+            userId,
+            storedFile,
+            documentNumberOffset: offset,
+          });
+
+          await repository.createActivityLog(
+            {
+              document_id: document.id,
+              actor_id: userId,
+              action: "CREATED",
+              to_storage_id: document.storage_id,
+              description: "Dokumen digital dibuat",
+            },
+            client,
+          );
+
+          return document;
+        });
+        break;
+      } catch (error) {
+        if (isDocumentNumberUniqueError(error) && offset < 9) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!created) {
+      throw new AppError("Gagal membuat nomor dokumen otomatis", 500);
+    }
+  } catch (error) {
+    if (storedFile.isNewUpload) {
+      deleteStoredFile(storedFile.storedPath);
+    }
+    throw error;
+  }
 
   const freshDocument = await repository.findById(created.id, {
     deleted_at: null,
@@ -961,9 +985,31 @@ exports.update = async ({ req, id, payload, userId }) => {
     throw new AppError("Anda tidak memiliki akses untuk mengubah dokumen ini", 403);
   }
 
+  let prevalidatedStorage = current.storage;
+  let prevalidatedDocumentType = current.document_type;
+
+  if (payload.storage_id && payload.storage_id !== current.storage_id) {
+    prevalidatedStorage = await repository.findStorageById(payload.storage_id);
+    if (!prevalidatedStorage) {
+      throw new AppError("Tempat penyimpanan tidak ditemukan", 404);
+    }
+  }
+
+  if (
+    payload.document_type_id &&
+    payload.document_type_id !== current.document_type_id
+  ) {
+    prevalidatedDocumentType = await repository.findDocumentTypeById(
+      payload.document_type_id,
+    );
+    if (!prevalidatedDocumentType) {
+      throw new AppError("Jenis dokumen tidak ditemukan", 404);
+    }
+  }
+
   const updated = await repository.withTransaction(async (client) => {
-    let nextStorage = current.storage;
-    let nextDocumentType = current.document_type;
+    const nextStorage = prevalidatedStorage;
+    const nextDocumentType = prevalidatedDocumentType;
     const ownership = await resolveOwnershipData({
       payload,
       current,
@@ -975,29 +1021,6 @@ exports.update = async ({ req, id, payload, userId }) => {
       current,
       client,
     });
-
-    if (payload.storage_id && payload.storage_id !== current.storage_id) {
-      nextStorage = await repository.findStorageById(
-        payload.storage_id,
-        client,
-      );
-      if (!nextStorage) {
-        throw new AppError("Tempat penyimpanan tidak ditemukan", 404);
-      }
-    }
-
-    if (
-      payload.document_type_id &&
-      payload.document_type_id !== current.document_type_id
-    ) {
-      nextDocumentType = await repository.findDocumentTypeById(
-        payload.document_type_id,
-        client,
-      );
-      if (!nextDocumentType) {
-        throw new AppError("Jenis dokumen tidak ditemukan", 404);
-      }
-    }
 
     const filePayload =
       payload.file !== undefined && payload.file !== null

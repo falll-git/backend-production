@@ -716,7 +716,6 @@ async function serializeMemorandum({ req, record }) {
     dispositions,
     memo_date: toIsoDateTime(record.memo_date),
     received_date: toIsoDateTime(record.received_date),
-    due_date: toIsoDateTime(record.due_date),
     created_at: toIsoDateTime(record.created_at),
     updated_at: toIsoDateTime(record.updated_at),
     deleted_at: toIsoDateTime(record.deleted_at),

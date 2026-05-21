@@ -5,6 +5,7 @@ const {
   cleanupUploadTempFileSync,
   isUploadTempPath,
 } = require("./upload-temp-files");
+const { buildPublicUrl } = require("./public-url");
 
 const UPLOAD_ROOT = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -210,26 +211,7 @@ function deriveDocumentFileName(storedPath, fallbackBaseName = "dokumen") {
 }
 
 function buildFileUrl(req, storedPath) {
-  if (typeof storedPath !== "string" || !storedPath.trim()) return null;
-
-  if (/^https?:\/\//i.test(storedPath)) {
-    return storedPath;
-  }
-
-  if (!storedPath.startsWith("/")) {
-    return storedPath;
-  }
-
-  const origin =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.API_BASE_URL ||
-    process.env.APP_BASE_URL ||
-    process.env.PUBLIC_ASSET_BASE_URL ||
-    (req ? `${req.protocol}://${req.get("host")}` : "");
-
-  if (!origin) return storedPath;
-
-  return new URL(storedPath, origin).toString();
+  return buildPublicUrl(req, storedPath);
 }
 
 function parseRequestFileInput(input) {

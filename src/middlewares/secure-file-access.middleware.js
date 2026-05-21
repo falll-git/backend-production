@@ -209,14 +209,8 @@ async function canAccessMemorandumFile(payload) {
 }
 
 async function debtorFileExists(payload) {
-  const [
-    debtorDocument,
-    importJob,
-    externalRecord,
-    marketingActivity,
-    warningLetter,
-  ] = await Promise.all([
-    prisma.debtor_documents.findFirst({
+  const checks = [
+    () => prisma.debtor_documents.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -224,7 +218,7 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.debtor_import_jobs.findFirst({
+    () => prisma.debtor_import_jobs.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -232,7 +226,7 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.debtor_external_records.findFirst({
+    () => prisma.debtor_external_records.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -240,7 +234,7 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.debtor_marketing_activities.findFirst({
+    () => prisma.debtor_marketing_activities.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -248,7 +242,7 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.debtor_warning_letters.findFirst({
+    () => prisma.debtor_warning_letters.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -256,27 +250,18 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
-  ]);
+  ];
 
-  return Boolean(
-    debtorDocument ||
-      importJob ||
-      externalRecord ||
-      marketingActivity ||
-      warningLetter,
-  );
+  for (const check of checks) {
+    if (await check()) return true;
+  }
+
+  return false;
 }
 
 async function legalFileExists(payload) {
-  const [
-    template,
-    printHistory,
-    idebUpload,
-    notaryProgress,
-    insuranceProgress,
-    claim,
-  ] = await Promise.all([
-    prisma.legal_document_templates.findFirst({
+  const checks = [
+    () => prisma.legal_document_templates.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -284,7 +269,7 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.legal_print_histories.findFirst({
+    () => prisma.legal_print_histories.findFirst({
       where: {
         id: payload.entity_id,
         generated_file_path: payload.path,
@@ -292,7 +277,7 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.legal_ideb_uploads.findFirst({
+    () => prisma.legal_ideb_uploads.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -300,7 +285,7 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.legal_notary_progress.findFirst({
+    () => prisma.legal_notary_progress.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -308,7 +293,7 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.legal_insurance_progress.findFirst({
+    () => prisma.legal_insurance_progress.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -316,7 +301,7 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    prisma.legal_claims.findFirst({
+    () => prisma.legal_claims.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -324,16 +309,13 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-  ]);
+  ];
 
-  return Boolean(
-    template ||
-      printHistory ||
-      idebUpload ||
-      notaryProgress ||
-      insuranceProgress ||
-      claim,
-  );
+  for (const check of checks) {
+    if (await check()) return true;
+  }
+
+  return false;
 }
 
 async function canAccessDebtorInformationFile(payload) {
@@ -382,7 +364,17 @@ function secureFileAccess(publicPrefix) {
       });
     }
 
-    const allowed = await canAccessFile(payload);
+    let allowed = false;
+    try {
+      allowed = await canAccessFile(payload);
+    } catch (error) {
+      console.error("Secure file access validation failed:", error);
+      return res.status(500).json({
+        status: false,
+        message: "Gagal memvalidasi akses file.",
+      });
+    }
+
     if (!allowed) {
       return res.status(403).json({
         status: false,
