@@ -314,7 +314,7 @@ function hasSpecificStatusFilter(status) {
   return Boolean(normalized && !["ALL", "SEMUA"].includes(normalized));
 }
 
-function buildIncomingMailData(payload, filePath, fileSizeBytes, status) {
+function buildIncomingMailData(payload, filePath, fileName, fileSizeBytes, status) {
   return {
     letter_prioritie_id: payload.letter_prioritie_id,
     storage_id: payload.storage_id,
@@ -325,6 +325,7 @@ function buildIncomingMailData(payload, filePath, fileSizeBytes, status) {
     address: normalizeText(payload.address),
     mail_number: normalizeText(payload.mail_number),
     file: filePath,
+    file_name: fileName,
     file_size_bytes: toSizeBytesBigInt(fileSizeBytes),
     status,
     created_by: payload.created_by ?? null,
@@ -439,6 +440,7 @@ exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
       created_by: senderId,
     },
     storedFile.storedPath,
+    storedFile.fileName,
     storedFile.sizeBytes,
     "IN_PROGRESS",
   );
@@ -742,6 +744,7 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_name = storedFile.fileName;
     updateData.file_size_bytes = toSizeBytesBigInt(
       storedFile.sizeBytes ?? incomingMail.file_size_bytes ?? null,
     );

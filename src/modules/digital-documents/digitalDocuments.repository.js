@@ -154,13 +154,15 @@ function findByDocumentNumber(documentNumber) {
   });
 }
 
-function countByDocumentNumberPrefix(prefix, client = prisma) {
-  return client.digital_documents.count({
+function findDocumentNumbersByPrefix(prefix, client = prisma) {
+  return client.digital_documents.findMany({
     where: {
-      deleted_at: null,
       document_number: {
         startsWith: prefix,
       },
+    },
+    select: {
+      document_number: true,
     },
   });
 }
@@ -423,11 +425,11 @@ module.exports = {
   countLoansByDocumentId,
   countPendingAccessRequestsByDocumentId,
   countActivityLogsByDocumentId,
-  countByDocumentNumberPrefix,
   findActivityLogsByDocumentId,
   findActiveLoanConflict,
   findByDocumentNumber,
   findById,
+  findDocumentNumbersByPrefix,
   findDebtorByDebtorNumber,
   findDebtorById,
   findDebtorByIdentityNumber,

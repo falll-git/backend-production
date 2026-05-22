@@ -12,6 +12,8 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "image/png",
@@ -23,6 +25,8 @@ const ALLOWED_EXTENSIONS = new Set([
   "pdf",
   "doc",
   "docx",
+  "ppt",
+  "pptx",
   "xls",
   "xlsx",
   "jpg",
@@ -55,7 +59,7 @@ const upload = multer({
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
-          "Format file harus PDF, DOC, DOCX, XLS, XLSX, JPG, JPEG, atau PNG.",
+          "Format file harus PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, JPG, JPEG, atau PNG.",
         ),
       );
     }

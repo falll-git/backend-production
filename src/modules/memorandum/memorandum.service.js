@@ -448,6 +448,7 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     regarding: normalizeText(payload.regarding),
     description: normalizeText(payload.description),
     file: storedFile.storedPath,
+    file_name: storedFile.fileName,
     file_size_bytes: toSizeBytesBigInt(storedFile.sizeBytes),
     status: "IN_PROGRESS",
     created_by: userId,
@@ -747,6 +748,7 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_name = storedFile.fileName;
     updateData.file_size_bytes = toSizeBytesBigInt(
       storedFile.sizeBytes ?? memorandum.file_size_bytes ?? null,
     );

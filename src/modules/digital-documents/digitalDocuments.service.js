@@ -26,6 +26,8 @@ const {
   toSizeBytesNumber,
 } = require("../../utils/size-bytes");
 
+const DOCUMENT_NUMBER_GENERATION_ATTEMPTS = 25;
+
 async function queueDigitalDocumentWatermark(documentId) {
   try {
     await enqueueRecordWatermark({
@@ -448,10 +450,29 @@ function buildDocumentNumberPrefix(documentType) {
   return `${typeCode}-${period}`;
 }
 
+function readDocumentNumberSequence(prefix, documentNumber) {
+  if (typeof documentNumber !== "string") return 0;
+
+  const expectedPrefix = `${prefix}-`;
+  if (!documentNumber.startsWith(expectedPrefix)) return 0;
+
+  const sequence = documentNumber.slice(expectedPrefix.length);
+  if (!/^\d+$/.test(sequence)) return 0;
+
+  return Number(sequence);
+}
+
 async function generateDocumentNumber(documentType, client, offset = 0) {
   const prefix = buildDocumentNumberPrefix(documentType);
-  const total = await repository.countByDocumentNumberPrefix(prefix, client);
-  const nextSequence = total + 1 + offset;
+  const existingNumbers = await repository.findDocumentNumbersByPrefix(
+    prefix,
+    client,
+  );
+  const latestSequence = existingNumbers.reduce((max, item) => {
+    const sequence = readDocumentNumberSequence(prefix, item.document_number);
+    return sequence > max ? sequence : max;
+  }, 0);
+  const nextSequence = latestSequence + 1 + offset;
   return `${prefix}-${String(nextSequence).padStart(4, "0")}`;
 }
 
@@ -463,7 +484,17 @@ function getPrismaUniqueTargets(error) {
   const target = error?.meta?.target;
   if (Array.isArray(target)) return target.map(String);
   if (typeof target === "string") return [target];
-  return [];
+
+  const fallbackSources = [];
+  if (typeof error?.message === "string") {
+    fallbackSources.push(error.message);
+  }
+
+  try {
+    fallbackSources.push(JSON.stringify(error?.meta || {}));
+  } catch {}
+
+  return fallbackSources.filter(Boolean);
 }
 
 function isDocumentNumberUniqueError(error) {
@@ -876,6 +907,17 @@ exports.create = async ({ req, payload, userId }) => {
     storageId: payload.storage_id,
     documentTypeId: payload.document_type_id,
   });
+  const ownership = await resolveOwnershipData({
+    payload,
+    current: null,
+    userId,
+  });
+  const debtorIdFromPayload = hasField(payload, "debtor_id")
+    ? await resolveDebtorId({
+        payload,
+        current: null,
+      })
+    : undefined;
   const normalizedName = normalizeDocumentName(payload.document_name);
   const storedFile = persistDigitalArchiveFile({
     entity: "documents",
@@ -885,20 +927,21 @@ exports.create = async ({ req, payload, userId }) => {
 
   let created = null;
   try {
-    for (let offset = 0; offset < 10; offset += 1) {
+    for (
+      let offset = 0;
+      offset < DOCUMENT_NUMBER_GENERATION_ATTEMPTS;
+      offset += 1
+    ) {
       try {
         created = await repository.withTransaction(async (client) => {
-          const ownership = await resolveOwnershipData({
-            payload,
-            current: null,
-            userId,
-            client,
-          });
-          const debtorId = await resolveDebtorId({
-            payload,
-            current: null,
-            client,
-          });
+          const debtorId =
+            debtorIdFromPayload !== undefined
+              ? debtorIdFromPayload
+              : await resolveDebtorId({
+                  payload,
+                  current: null,
+                  client,
+                });
 
           const document = await createDocumentWithGeneratedNumber({
             client,
@@ -930,8 +973,21 @@ exports.create = async ({ req, payload, userId }) => {
         });
         break;
       } catch (error) {
-        if (isDocumentNumberUniqueError(error) && offset < 9) {
+        if (
+          isDocumentNumberUniqueError(error) &&
+          offset < DOCUMENT_NUMBER_GENERATION_ATTEMPTS - 1
+        ) {
           continue;
+        }
+        if (isDocumentNumberUniqueError(error)) {
+          console.error(
+            "Digital document number generation failed after retries:",
+            error,
+          );
+          throw new AppError(
+            "Nomor dokumen otomatis bentrok. Silakan coba simpan ulang.",
+            409,
+          );
         }
         throw error;
       }
@@ -1007,120 +1063,139 @@ exports.update = async ({ req, id, payload, userId }) => {
     }
   }
 
-  const updated = await repository.withTransaction(async (client) => {
-    const nextStorage = prevalidatedStorage;
-    const nextDocumentType = prevalidatedDocumentType;
-    const ownership = await resolveOwnershipData({
-      payload,
-      current,
-      userId,
-      client,
-    });
-    const debtorId = await resolveDebtorId({
-      payload,
-      current,
-      client,
-    });
-
-    const filePayload =
-      payload.file !== undefined && payload.file !== null
-        ? persistDigitalArchiveFile({
-            entity: "documents",
-            input: payload.file,
-            previousPath: current.file,
-            fallbackBaseName: payload.document_name || current.document_name,
-          })
-        : null;
-
-    const updatePayload = {
-      storage_id: nextStorage.id,
-      document_type_id: nextDocumentType.id,
-      document_name:
-        payload.document_name !== undefined
-          ? normalizeDocumentName(payload.document_name)
-          : current.document_name,
-      description:
-        payload.description !== undefined
-          ? normalizeText(payload.description)
-          : current.description,
-      owner_user_id: ownership.owner_user_id,
-      owner_division_id: ownership.owner_division_id,
-      debtor_id: debtorId,
-      is_restricted:
-        payload.is_restricted !== undefined
-          ? Boolean(payload.is_restricted)
-          : current.is_restricted,
-      access_level:
-        payload.is_restricted !== undefined
-          ? payload.is_restricted
-            ? "RESTRICT"
-            : "NON_RESTRICT"
-          : current.access_level,
-      file: filePayload ? filePayload.storedPath : current.file,
-      updated_by: userId,
-    };
-
-    const storageChanged = current.storage_id !== updatePayload.storage_id;
-    const fileChanged = Boolean(
-      filePayload && filePayload.storedPath !== current.file,
-    );
-    const hasMetadataChange =
-      current.document_type_id !== updatePayload.document_type_id ||
-      current.document_name !== updatePayload.document_name ||
-      (current.description || null) !== (updatePayload.description || null) ||
-      current.owner_user_id !== updatePayload.owner_user_id ||
-      current.owner_division_id !== updatePayload.owner_division_id ||
-      current.debtor_id !== updatePayload.debtor_id ||
-      current.is_restricted !== updatePayload.is_restricted;
-
-    const result = await repository.update(id, updatePayload, client);
-
-    if (ownership.related_user_ids !== undefined) {
-      await repository.replaceRelatedUsers(
-        id,
-        ownership.related_user_ids,
-        client,
-      );
-    }
-
-    if (fileChanged) {
-      await repository.clearPrimaryDocumentFiles(id, client);
-      await repository.createDocumentFile(
-        buildDocumentFilePayload({
-          documentId: id,
-          storedFile: filePayload,
-          originalInput: payload.file,
-          uploadedBy: userId,
-        }),
-        client,
-      );
-    }
-
-    const logs = buildUpdateLogMessages({
-      hasMetadataChange,
-      storageChanged,
-      fileChanged,
-    });
-
-    for (const log of logs) {
-      await repository.createActivityLog(
-        {
-          document_id: result.id,
-          actor_id: userId,
-          action: log.action,
-          from_storage_id: storageChanged ? current.storage_id : null,
-          to_storage_id: storageChanged ? updatePayload.storage_id : null,
-          description: log.description,
-        },
-        client,
-      );
-    }
-
-    return {
-      document: result,
-      fileChanged,
-    };
+  const ownership = await resolveOwnershipData({
+    payload,
+    current,
+    userId,
   });
+  const debtorIdFromPayload = hasField(payload, "debtor_id")
+    ? await resolveDebtorId({
+        payload,
+        current,
+      })
+    : undefined;
+  const filePayload =
+    payload.file !== undefined && payload.file !== null
+      ? persistDigitalArchiveFile({
+          entity: "documents",
+          input: payload.file,
+          fallbackBaseName: payload.document_name || current.document_name,
+        })
+      : null;
+
+  let updated;
+  try {
+    updated = await repository.withTransaction(async (client) => {
+      const nextStorage = prevalidatedStorage;
+      const nextDocumentType = prevalidatedDocumentType;
+      const debtorId =
+        debtorIdFromPayload !== undefined
+          ? debtorIdFromPayload
+          : await resolveDebtorId({
+              payload,
+              current,
+              client,
+            });
+
+      const updatePayload = {
+        storage_id: nextStorage.id,
+        document_type_id: nextDocumentType.id,
+        document_name:
+          payload.document_name !== undefined
+            ? normalizeDocumentName(payload.document_name)
+            : current.document_name,
+        description:
+          payload.description !== undefined
+            ? normalizeText(payload.description)
+            : current.description,
+        owner_user_id: ownership.owner_user_id,
+        owner_division_id: ownership.owner_division_id,
+        debtor_id: debtorId,
+        is_restricted:
+          payload.is_restricted !== undefined
+            ? Boolean(payload.is_restricted)
+            : current.is_restricted,
+        access_level:
+          payload.is_restricted !== undefined
+            ? payload.is_restricted
+              ? "RESTRICT"
+              : "NON_RESTRICT"
+            : current.access_level,
+        file: filePayload ? filePayload.storedPath : current.file,
+        updated_by: userId,
+      };
+
+      const storageChanged = current.storage_id !== updatePayload.storage_id;
+      const fileChanged = Boolean(
+        filePayload && filePayload.storedPath !== current.file,
+      );
+      const hasMetadataChange =
+        current.document_type_id !== updatePayload.document_type_id ||
+        current.document_name !== updatePayload.document_name ||
+        (current.description || null) !== (updatePayload.description || null) ||
+        current.owner_user_id !== updatePayload.owner_user_id ||
+        current.owner_division_id !== updatePayload.owner_division_id ||
+        current.debtor_id !== updatePayload.debtor_id ||
+        current.is_restricted !== updatePayload.is_restricted;
+
+      const result = await repository.update(id, updatePayload, client);
+
+      if (ownership.related_user_ids !== undefined) {
+        await repository.replaceRelatedUsers(
+          id,
+          ownership.related_user_ids,
+          client,
+        );
+      }
+
+      if (fileChanged) {
+        await repository.clearPrimaryDocumentFiles(id, client);
+        await repository.createDocumentFile(
+          buildDocumentFilePayload({
+            documentId: id,
+            storedFile: filePayload,
+            originalInput: payload.file,
+            uploadedBy: userId,
+          }),
+          client,
+        );
+      }
+
+      const logs = buildUpdateLogMessages({
+        hasMetadataChange,
+        storageChanged,
+        fileChanged,
+      });
+
+      for (const log of logs) {
+        await repository.createActivityLog(
+          {
+            document_id: result.id,
+            actor_id: userId,
+            action: log.action,
+            from_storage_id: storageChanged ? current.storage_id : null,
+            to_storage_id: storageChanged ? updatePayload.storage_id : null,
+            description: log.description,
+          },
+          client,
+        );
+      }
+
+      return {
+        document: result,
+        fileChanged,
+      };
+    });
+  } catch (error) {
+    if (filePayload?.isNewUpload) {
+      deleteStoredFile(filePayload.storedPath);
+    }
+    throw error;
+  }
+
+  if (updated.fileChanged && filePayload?.isNewUpload && current.file) {
+    deleteStoredFile(current.file);
+  }
 
   const freshDocument = await repository.findById(updated.document.id, {
     deleted_at: null,

@@ -379,6 +379,7 @@ model incoming_mails {
   regarding                 String
   description               String?
   file                      String?
+  file_name                 String?
   file_size_bytes           BigInt?
   watermark_status          watermark_statuses     @default(SKIPPED)
   watermark_file            String?
@@ -681,6 +682,7 @@ model outgoing_mails {
   address                   String
   mail_number               String                       @unique
   file                      String?
+  file_name                 String?
   file_size_bytes           BigInt?
   watermark_status          watermark_statuses           @default(SKIPPED)
   watermark_file            String?
@@ -720,6 +722,7 @@ model memorandums {
   regarding                 String
   description               String?
   file                      String?
+  file_name                 String?
   file_size_bytes           BigInt?
   watermark_status          watermark_statuses     @default(SKIPPED)
   watermark_file            String?

@@ -49,6 +49,10 @@ function inferMimeTypeFromFileName(fileName) {
   if (normalized.endsWith(".docx")) {
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   }
+  if (normalized.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+  if (normalized.endsWith(".pptx")) {
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  }
   if (normalized.endsWith(".xls")) return "application/vnd.ms-excel";
   if (normalized.endsWith(".xlsx")) {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -64,6 +68,9 @@ const MIME_TO_EXTENSION = {
   "application/msword": "doc",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     "docx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    "pptx",
   "application/vnd.ms-excel": "xls",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
 };
