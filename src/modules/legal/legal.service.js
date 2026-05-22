@@ -235,10 +235,16 @@ function calculateRemaining(payload) {
   const nominal = number(payload.nominal);
   const paid = number(payload.paid_amount);
   const processed = number(payload.processed_amount);
-  if (payload.remaining_amount !== undefined && payload.remaining_amount !== null) {
-    return payload.remaining_amount;
+  const used = paid + processed;
+
+  if (used - nominal > 0.000001) {
+    throw new AppError(
+      "Nominal dana titipan yang sudah dibayar/diproses tidak boleh melebihi nominal.",
+      422,
+    );
   }
-  return Math.max(nominal - paid - processed, 0);
+
+  return Math.max(nominal - used, 0);
 }
 
 async function listModel({
@@ -803,6 +809,8 @@ exports.createDeposit = async ({ payload, userId }) => {
   await ensureContract(payload.contract_id, userId);
   if (payload.third_party_id) await ensureThirdParty(payload.third_party_id);
   const remaining = calculateRemaining(payload);
+  const paidAmount = number(payload.paid_amount);
+  const processedAmount = number(payload.processed_amount);
   return serializeDeposit(
     await repository.create("legal_deposits", {
       deposit_type_id: normalizeText(payload.deposit_type_id),
@@ -810,8 +818,8 @@ exports.createDeposit = async ({ payload, userId }) => {
       contract_id: payload.contract_id,
       third_party_id: normalizeText(payload.third_party_id),
       nominal: decimalField(payload, "nominal"),
-      paid_amount: decimalField(payload, "paid_amount") || 0,
-      processed_amount: decimalField(payload, "processed_amount") || 0,
+      paid_amount: paidAmount,
+      processed_amount: processedAmount,
       remaining_amount: remaining,
       status: normalizeUpper(payload.status || "PENDING"),
       notes: normalizeText(payload.notes),
@@ -838,18 +846,11 @@ exports.updateDeposit = async ({ id, payload, userId }) => {
     nominal: payload.nominal ?? current.nominal,
     paid_amount: payload.paid_amount ?? current.paid_amount,
     processed_amount: payload.processed_amount ?? current.processed_amount,
-    remaining_amount:
-      payload.remaining_amount ??
-      Math.max(
-        number(payload.nominal ?? current.nominal) -
-          number(payload.paid_amount ?? current.paid_amount) -
-          number(payload.processed_amount ?? current.processed_amount),
-        0,
-      ),
     status: normalizeUpper(payload.status) || current.status,
     notes: payload.notes !== undefined ? normalizeText(payload.notes) : current.notes,
     updated_by: userId || null,
   };
+  next.remaining_amount = calculateRemaining(next);
   await ensureContract(next.contract_id, userId);
   if (next.third_party_id) await ensureThirdParty(next.third_party_id);
   return serializeDeposit(await repository.update("legal_deposits", id, next));
@@ -917,13 +918,18 @@ exports.createDepositTransaction = async ({ payload, userId }) => {
         : 0;
     const paidAmount = number(deposit.paid_amount) + paidDelta;
     const processedAmount = number(deposit.processed_amount) + processedDelta;
+    const remainingAmount = calculateRemaining({
+      nominal: deposit.nominal,
+      paid_amount: paidAmount,
+      processed_amount: processedAmount,
+    });
     await repository.update(
       "legal_deposits",
       deposit.id,
       {
         paid_amount: paidAmount,
         processed_amount: processedAmount,
-        remaining_amount: Math.max(number(deposit.nominal) - paidAmount - processedAmount, 0),
+        remaining_amount: remainingAmount,
         updated_by: userId || null,
       },
       tx,

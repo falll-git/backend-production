@@ -1,10 +1,15 @@
 const multer = require("multer");
+const {
+  DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+  DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+} = require("../utils/upload-limits");
 
-const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/plain",
@@ -18,6 +23,8 @@ const ALLOWED_EXTENSIONS = new Set([
   "pdf",
   "doc",
   "docx",
+  "ppt",
+  "pptx",
   "xls",
   "xlsx",
   "txt",
@@ -39,7 +46,7 @@ function getFileExtension(fileName) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: MAX_FILE_SIZE_BYTES,
+    fileSize: DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   },
   fileFilter(req, file, callback) {
     const extension = getFileExtension(file.originalname);
@@ -51,7 +58,7 @@ const upload = multer({
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
-          "Format file harus PDF, DOC, DOCX, XLS, XLSX, TXT, CSV, JPG, JPEG, atau PNG.",
+          "Format file harus PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT, CSV, JPG, JPEG, atau PNG.",
         ),
       );
     }
@@ -68,7 +75,7 @@ function uploadDomainFile(fieldName = "file") {
           if (error.code === "LIMIT_FILE_SIZE") {
             return res.status(413).json({
               status: false,
-              message: "Ukuran file maksimal 20MB.",
+              message: `Ukuran file maksimal ${DOCUMENT_UPLOAD_MAX_SIZE_LABEL}.`,
             });
           }
 
