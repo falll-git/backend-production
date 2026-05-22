@@ -259,6 +259,7 @@ exports.create = async ({ req, payload, userId }) => {
       address: normalizeText(payload.address),
       mail_number: normalizeText(payload.mail_number),
       file: storedFile.storedPath,
+      file_name: storedFile.fileName,
       file_size_bytes: toSizeBytesBigInt(storedFile.sizeBytes),
       status: "ACTIVE",
       created_by: userId,
@@ -337,6 +338,7 @@ exports.update = async ({ req, id, payload, userId }) => {
   }
   if (payload.file !== undefined) {
     updateData.file = storedFile.storedPath;
+    updateData.file_name = storedFile.fileName;
     updateData.file_size_bytes = toSizeBytesBigInt(
       storedFile.sizeBytes ?? outgoingMail.file_size_bytes ?? null,
     );

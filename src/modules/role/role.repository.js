@@ -61,10 +61,10 @@ exports.delete = (id) => {
 };
 
 exports.deleteWithRoleMenus = async (id) => {
-  const [, role] = await prisma.$transaction([
-    prisma.role_menus.deleteMany({ where: { role_id: id } }),
-    prisma.roles.delete({ where: { id } }),
-  ]);
+  const role = await prisma.$transaction(async (client) => {
+    await client.role_menus.deleteMany({ where: { role_id: id } });
+    return client.roles.delete({ where: { id } });
+  });
 
   return role;
 };

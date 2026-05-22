@@ -300,6 +300,13 @@ function validateLoanRequestDates(payload) {
 }
 
 async function assertLoanActionActor({ item, userId, feature }) {
+  if (item.borrower_id === userId) {
+    throw new AppError(
+      "Peminjam tidak dapat memproses pengajuan peminjaman miliknya sendiri",
+      403,
+    );
+  }
+
   const scope = await getDigitalArchiveAccessScope(userId);
   const [canUpdate, hasFeature] = await Promise.all([
     roleHasPermission(scope.roleId, LOAN_ACTION_URL, "update"),

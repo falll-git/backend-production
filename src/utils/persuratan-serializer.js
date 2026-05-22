@@ -20,7 +20,14 @@ const {
 const { serializeRole } = require("./role-types");
 
 const IMAGE_PREVIEW_EXTENSIONS = new Set(["jpg", "jpeg", "png"]);
-const OFFICE_PREVIEW_EXTENSIONS = new Set(["doc", "docx", "xls", "xlsx"]);
+const OFFICE_PREVIEW_EXTENSIONS = new Set([
+  "doc",
+  "docx",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx",
+]);
 
 function toIsoDateTime(value) {
   if (!value) return null;
@@ -433,12 +440,15 @@ async function serializePersuratanFile({
     originalFileUrl,
     module,
   );
-  const fileName = currentValue
-    ? deriveDocumentFileName(
-        normalizedStoredPath || currentValue,
-        fallbackBaseName,
-      )
-    : null;
+  const fileName =
+    typeof record?.file_name === "string" && record.file_name.trim()
+      ? record.file_name.trim()
+      : currentValue
+        ? deriveDocumentFileName(
+            normalizedStoredPath || currentValue,
+            fallbackBaseName,
+          )
+        : null;
 
   return {
     file: fileUrl,
