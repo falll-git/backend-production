@@ -7,7 +7,10 @@ function status(error, fallback = 400) {
 
 exports.summary = async (req, res) => {
   try {
-    return successResponse(res, await service.getSummary(req.query));
+    return successResponse(
+      res,
+      await service.getSummary(req.query, req.user?.id),
+    );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }
@@ -15,7 +18,7 @@ exports.summary = async (req, res) => {
 
 exports.npf = async (req, res) => {
   try {
-    return successResponse(res, await service.getNpf(req.query));
+    return successResponse(res, await service.getNpf(req.query, req.user?.id));
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }
@@ -23,7 +26,10 @@ exports.npf = async (req, res) => {
 
 exports.marketingActivity = async (req, res) => {
   try {
-    return successResponse(res, await service.getMarketingActivity(req.query));
+    return successResponse(
+      res,
+      await service.getMarketingActivity(req.query, req.user?.id),
+    );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }

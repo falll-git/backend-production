@@ -45,7 +45,7 @@ async function getDigitalArchiveReportScope(userId) {
   return {
     ...scope,
     canReportAll,
-    canViewAllDocuments: Boolean(scope.canViewAllDocuments || canReportAll),
+    canViewAllDocuments: Boolean(canReportAll),
     canAccessRestricted: Boolean(scope.canAccessRestricted),
     canAccessRestrictedDocuments: Boolean(
       scope.canAccessRestrictedDocuments ?? scope.canAccessRestricted,

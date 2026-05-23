@@ -1,7 +1,9 @@
 const repository = require("./debtorContracts.repository");
 const { AppError } = require("../../utils/errors");
 const {
+  buildContractManageWhere,
   buildContractVisibilityWhere,
+  buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
@@ -190,7 +192,7 @@ async function ensureDebtorAccessible(debtorId, userId) {
   const scope = await getDebtorAccessScope(userId);
   const debtor = await repository.findDebtorByIdWithWhere(
     debtorId,
-    buildDebtorVisibilityWhere(scope),
+    buildDebtorManageWhere(scope),
   );
   if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
 }
@@ -240,7 +242,7 @@ exports.getById = async ({ id, userId }) => {
   const scope = await getDebtorAccessScope(userId);
   const contract = await repository.findById(id, {
     deleted_at: null,
-    ...buildContractVisibilityWhere(scope),
+    ...buildContractManageWhere(scope),
   });
   if (!contract) throw new AppError("Kontrak debitur tidak ditemukan.", 404);
   return serializeContract(contract);
@@ -265,8 +267,33 @@ exports.create = async ({ payload, userId }) => {
   }
 };
 
+function canManageContractRecord(contract, scope) {
+  if (!contract || !scope?.userId) return false;
+  if (scope.canManageAll) return true;
+
+  return (
+    contract.created_by === scope.userId ||
+    contract.marketing_user_id === scope.userId ||
+    contract.debtor?.created_by === scope.userId ||
+    contract.debtor?.marketing_user_id === scope.userId
+  );
+}
+
+async function getManageableContract(id, userId) {
+  const scope = await getDebtorAccessScope(userId);
+  const contract = await repository.findById(id, {
+    deleted_at: null,
+    ...buildContractVisibilityWhere(scope),
+  });
+  if (!contract) throw new AppError("Kontrak debitur tidak ditemukan.", 404);
+  if (!canManageContractRecord(contract, scope)) {
+    throw new AppError("Anda tidak memiliki izin mengelola kontrak ini.", 403);
+  }
+  return contract;
+}
+
 exports.update = async ({ id, payload, userId }) => {
-  await exports.getById({ id, userId });
+  await getManageableContract(id, userId);
   const normalized = compactUndefined(normalizePayload(payload));
   await ensureReferences(normalized);
   await ensureDebtorAccessible(normalized.debtor_id, userId);
@@ -286,7 +313,7 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  await exports.getById({ id, userId });
+  await getManageableContract(id, userId);
   await repository.update(id, {
     status: "INACTIVE",
     deleted_at: new Date(),

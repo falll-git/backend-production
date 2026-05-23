@@ -1,7 +1,6 @@
 const prisma = require("../config/prisma");
 const {
   MANAGE_ALL_FEATURE,
-  REPORT_ALL_FEATURE,
   VIEW_DIVISION_FEATURE,
 } = require("./menu-access");
 const { roleHasFeature } = require("./rbac");
@@ -58,11 +57,6 @@ async function getPersuratanAccessScope(userId) {
   });
 
   const roleId = user?.role_id ?? null;
-  const canAccessAllPersuratan = await roleHasFeature(
-    roleId,
-    PERSURATAN_DATA_SCOPE_URLS,
-    REPORT_ALL_FEATURE,
-  );
   const canAccessDivisionPersuratan = await roleHasFeature(
     roleId,
     PERSURATAN_DATA_SCOPE_URLS,
@@ -73,6 +67,7 @@ async function getPersuratanAccessScope(userId) {
     PERSURATAN_DATA_SCOPE_URLS,
     MANAGE_ALL_FEATURE,
   );
+  const canAccessAllPersuratan = canManageAllPersuratan;
 
   return {
     userId: user?.id ?? null,
@@ -259,30 +254,21 @@ function canManageIncomingMail(record, scope) {
   if (!canViewIncomingMail(record, scope)) return false;
   if (scope.canManageAllPersuratan) return true;
 
-  return (
-    isSameUser(record.created_by, scope.userId) ||
-    hasIncomingDivisionAccess(record, scope)
-  );
+  return isSameUser(record.created_by, scope.userId);
 }
 
 function canManageMemorandum(record, scope) {
   if (!canViewMemorandum(record, scope)) return false;
   if (scope.canManageAllPersuratan) return true;
 
-  return (
-    isSameUser(record.created_by, scope.userId) ||
-    hasMemorandumDivisionAccess(record, scope)
-  );
+  return isSameUser(record.created_by, scope.userId);
 }
 
 function canManageOutgoingMail(record, scope) {
   if (!canViewOutgoingMail(record, scope)) return false;
   if (scope.canManageAllPersuratan) return true;
 
-  return (
-    isSameUser(record.created_by, scope.userId) ||
-    hasOutgoingDivisionAccess(record, scope)
-  );
+  return isSameUser(record.created_by, scope.userId);
 }
 
 module.exports = {

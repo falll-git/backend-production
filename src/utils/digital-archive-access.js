@@ -1,7 +1,6 @@
 const prisma = require("../config/prisma");
 const {
   MANAGE_ALL_FEATURE,
-  REPORT_ALL_FEATURE,
   VIEW_DIVISION_FEATURE,
 } = require("./menu-access");
 const { roleHasFeature } = require("./rbac");
@@ -60,11 +59,6 @@ async function getDigitalArchiveAccessScope(userId) {
     },
   });
   const roleId = user?.role_id ?? null;
-  const canViewAllDocuments = await roleHasFeature(
-    roleId,
-    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
-    REPORT_ALL_FEATURE,
-  );
   const canAccessDivisionDocuments = await roleHasFeature(
     roleId,
     DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
@@ -75,6 +69,7 @@ async function getDigitalArchiveAccessScope(userId) {
     DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
     MANAGE_ALL_FEATURE,
   );
+  const canViewAllDocuments = canManageAllDocuments;
 
   return {
     userId: user?.id ?? null,

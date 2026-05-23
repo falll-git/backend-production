@@ -77,3 +77,10 @@ exports.reactivateAccessSchema = Joi.object({
     "string.max": "Alasan aktivasi ulang maksimal 500 karakter.",
   }),
 });
+
+exports.deleteUserSchema = Joi.object({
+  confirmation: Joi.string().trim().required().messages({
+    "any.required": "Konfirmasi penghapusan wajib diisi.",
+    "string.empty": "Konfirmasi penghapusan wajib diisi.",
+  }),
+});

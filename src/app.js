@@ -39,6 +39,7 @@ const debtorMarketingRoutes = require("./modules/debtor-marketing/debtorMarketin
 const debtorWarningLetterRoutes = require("./modules/debtor-warning-letters/debtorWarningLetters.route");
 const debtorReportRoutes = require("./modules/debtor-reports/debtorReports.route");
 const legalRoutes = require("./modules/legal/legal.route");
+const notificationRoutes = require("./modules/notifications/notifications.route");
 const secureFileAccess = require("./middlewares/secure-file-access.middleware");
 const { PUBLIC_PREFIX, STORAGE_ROOT } = require("./utils/persuratan-files");
 const {
@@ -176,6 +177,7 @@ app.use("/api/debtor-marketing", debtorMarketingRoutes);
 app.use("/api/debtor-warning-letters", debtorWarningLetterRoutes);
 app.use("/api/debtor-reports", debtorReportRoutes);
 app.use("/api/legal", legalRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

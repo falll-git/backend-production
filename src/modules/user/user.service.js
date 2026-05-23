@@ -117,6 +117,34 @@ function buildUserSearchWhere(search) {
     : {};
 }
 
+function normalizeUserStatusFilter(status) {
+  const normalized = String(status || "active")
+    .trim()
+    .toLowerCase();
+
+  if (["active", "inactive", "all"].includes(normalized)) {
+    return normalized;
+  }
+
+  return "active";
+}
+
+function buildUserStatusWhere(status) {
+  const normalized = normalizeUserStatusFilter(status);
+  if (normalized === "all") return {};
+
+  return {
+    is_active: normalized === "active",
+  };
+}
+
+function buildUserWhere({ search, status }) {
+  return {
+    ...buildUserSearchWhere(search),
+    ...buildUserStatusWhere(status),
+  };
+}
+
 function countDependencySummary(dependencySummary) {
   return Object.values(dependencySummary?._count || {}).reduce(
     (total, count) => total + Number(count || 0),
@@ -298,8 +326,8 @@ async function deliverInvitation(user, invitation) {
   }
 }
 
-exports.getUsers = async ({ pagination, search }) => {
-  const where = buildUserSearchWhere(search);
+exports.getUsers = async ({ pagination, search, status }) => {
+  const where = buildUserWhere({ search, status });
 
   const data = await repository.findMany({
     where,
@@ -329,7 +357,7 @@ exports.getAssignableUsers = async ({ pagination, search }) => {
   };
 };
 
-exports.getUsersForRequest = async ({ pagination, search, requestUser }) => {
+exports.getUsersForRequest = async ({ pagination, search, status, requestUser }) => {
   const user = await resolveRequestUser(requestUser);
   if (!user) {
     throw new AppError("Sesi pengguna tidak valid.", 401);
@@ -342,7 +370,7 @@ exports.getUsersForRequest = async ({ pagination, search, requestUser }) => {
   );
 
   if (canReadUserManagement) {
-    return exports.getUsers({ pagination, search });
+    return exports.getUsers({ pagination, search, status });
   }
 
   return exports.getAssignableUsers({ pagination, search });
@@ -603,7 +631,7 @@ exports.getDeleteImpact = async (id, actorId) => {
   return buildDeleteImpact(user, actorId, dependencySummary);
 };
 
-exports.deleteUser = async (id, actorId) => {
+exports.deleteUser = async (id, actorId, payload = {}) => {
   const user = await repository.findById(id);
 
   if (!user) {
@@ -621,6 +649,16 @@ exports.deleteUser = async (id, actorId) => {
     throw new AppError(
       deleteImpact.message,
       409,
+    );
+  }
+
+  const expectedConfirmation = `HAPUS ${user.username}`;
+  const confirmation = normalizeText(payload.confirmation || "");
+
+  if (confirmation !== expectedConfirmation) {
+    throw new AppError(
+      `Konfirmasi penghapusan tidak sesuai. Ketik "${expectedConfirmation}" untuk menghapus pengguna ini.`,
+      422,
     );
   }
 

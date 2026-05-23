@@ -8,6 +8,7 @@ const {
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
 const {
+  buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
@@ -262,7 +263,7 @@ async function ensureDebtorAccessible(debtorId, userId) {
   const scope = await getDebtorAccessScope(userId);
   const debtor = await repository.findDebtorByIdWithWhere(
     debtorId,
-    buildDebtorVisibilityWhere(scope),
+    buildDebtorManageWhere(scope),
   );
   if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
 }
@@ -339,12 +340,12 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
 
 exports.update = async ({ req, kindSlug, id, payload, userId }) => {
   const scope = await getDebtorAccessScope(userId);
-  const debtorVisibilityWhere = buildDebtorVisibilityWhere(scope);
+  const debtorManageWhere = buildDebtorManageWhere(scope);
   const current = await repository.findById(id, {
     activity_kind: getKind(kindSlug),
     deleted_at: null,
-    ...(Object.keys(debtorVisibilityWhere).length > 0
-      ? { debtor: debtorVisibilityWhere }
+    ...(Object.keys(debtorManageWhere).length > 0
+      ? { debtor: debtorManageWhere }
       : {}),
   });
   if (!current) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
@@ -381,7 +382,16 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
 };
 
 exports.delete = async ({ kindSlug, id, userId }) => {
-  await exports.getById({ req: null, kindSlug, id, userId });
+  const scope = await getDebtorAccessScope(userId);
+  const debtorManageWhere = buildDebtorManageWhere(scope);
+  const current = await repository.findById(id, {
+    activity_kind: getKind(kindSlug),
+    deleted_at: null,
+    ...(Object.keys(debtorManageWhere).length > 0
+      ? { debtor: debtorManageWhere }
+      : {}),
+  });
+  if (!current) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
   await repository.update(id, {
     deleted_at: new Date(),
     deleted_by: userId || null,

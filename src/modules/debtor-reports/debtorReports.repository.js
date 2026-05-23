@@ -4,13 +4,14 @@ exports.countDebtors = (where = {}) => prisma.digital_debtors.count({ where });
 
 exports.countContracts = (where = {}) => prisma.debtor_contracts.count({ where });
 
-exports.findContractsForNpf = () =>
+exports.findContractsForNpf = (extraWhere = {}) =>
   prisma.debtor_contracts.findMany({
     where: {
       deleted_at: null,
       status: {
         in: ["ACTIVE", "AKTIF", "BERJALAN"],
       },
+      ...extraWhere,
     },
     include: {
       debtor: {
@@ -35,7 +36,7 @@ exports.findContractsForNpf = () =>
     },
   });
 
-exports.findCollectibilityTrendRows = ({ from, to } = {}) =>
+exports.findCollectibilityTrendRows = ({ from, to, contractWhere = {} } = {}) =>
   prisma.debtor_collectibilities.findMany({
     where: {
       deleted_at: null,
@@ -52,6 +53,7 @@ exports.findCollectibilityTrendRows = ({ from, to } = {}) =>
         status: {
           in: ["ACTIVE", "AKTIF", "BERJALAN"],
         },
+        ...contractWhere,
       },
     },
     include: {
@@ -62,7 +64,7 @@ exports.findCollectibilityTrendRows = ({ from, to } = {}) =>
     },
   });
 
-exports.groupMarketingActivities = ({ fromDate, toDate } = {}) =>
+exports.groupMarketingActivities = ({ fromDate, toDate, debtorWhere = {} } = {}) =>
   prisma.debtor_marketing_activities.groupBy({
     by: ["activity_kind", "status"],
     where: {
@@ -75,13 +77,16 @@ exports.groupMarketingActivities = ({ fromDate, toDate } = {}) =>
             },
           }
         : {}),
+      ...(Object.keys(debtorWhere).length > 0
+        ? { debtor: debtorWhere }
+        : {}),
     },
     _count: {
       id: true,
     },
   });
 
-exports.findRecentMarketingActivities = ({ fromDate, toDate } = {}) =>
+exports.findRecentMarketingActivities = ({ fromDate, toDate, debtorWhere = {} } = {}) =>
   prisma.debtor_marketing_activities.findMany({
     where: {
       deleted_at: null,
@@ -92,6 +97,9 @@ exports.findRecentMarketingActivities = ({ fromDate, toDate } = {}) =>
               ...(toDate ? { lte: toDate } : {}),
             },
           }
+        : {}),
+      ...(Object.keys(debtorWhere).length > 0
+        ? { debtor: debtorWhere }
         : {}),
     },
     take: 20,

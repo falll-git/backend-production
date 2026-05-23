@@ -341,6 +341,83 @@ function isOverdueDate(value, referenceDate = new Date()) {
   return dueDate.getTime() < referenceDate.getTime();
 }
 
+function getDeadlineStatus(value) {
+  if (!value) {
+    return {
+      follow_up_status: "NONE",
+      follow_up_status_label: "Tidak ada tenggat",
+      is_follow_up_overdue: false,
+    };
+  }
+
+  if (isOverdueDate(value)) {
+    return {
+      follow_up_status: "OVERDUE",
+      follow_up_status_label: "Lewat tenggat",
+      is_follow_up_overdue: true,
+    };
+  }
+
+  return {
+    follow_up_status: "ACTIVE",
+    follow_up_status_label: "Aktif",
+    is_follow_up_overdue: false,
+  };
+}
+
+function getTimeValue(value) {
+  if (!value) return 0;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function buildDispositionDeadlineMeta(dispositions) {
+  const items = Array.isArray(dispositions) ? dispositions : [];
+  const activeDueItems = items
+    .filter((item) => item.is_current && item.due_date)
+    .sort((left, right) => getTimeValue(left.due_date) - getTimeValue(right.due_date));
+  const dueItem =
+    activeDueItems[0] ??
+    [...items]
+      .filter((item) => item.due_date)
+      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+    null;
+  const noteItem =
+    items
+      .filter(
+        (item) =>
+          typeof item.note === "string" &&
+          item.note.trim() &&
+          (dueItem ? item.due_date === dueItem.due_date : true),
+      )
+      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+    items
+      .filter((item) => typeof item.note === "string" && item.note.trim())
+      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+    null;
+  const dueDate = dueItem?.due_date ?? null;
+
+  return {
+    due_date: dueDate,
+    note: noteItem?.note ?? null,
+    ...getDeadlineStatus(dueDate),
+  };
+}
+
+function buildOutgoingDeadlineMeta(record) {
+  const sendDueDate = toIsoDateTime(record.send_due_date);
+  const responseDueDate = toIsoDateTime(record.response_due_date);
+  const followUpDueDate = responseDueDate || sendDueDate;
+
+  return {
+    send_due_date: sendDueDate,
+    response_due_date: responseDueDate,
+    follow_up_due_date: followUpDueDate,
+    follow_up_note: record.follow_up_note ?? null,
+    ...getDeadlineStatus(followUpDueDate),
+  };
+}
+
 function resolveIncomingMailStatus(record) {
   const dispositions = Array.isArray(record.disposition_mails)
     ? record.disposition_mails
@@ -568,6 +645,7 @@ async function serializeIncomingMail({ req, record }) {
     disposition_mails: dispositions,
   });
   const workflowMeta = buildDispositionWorkflowMeta(dispositions);
+  const deadlineMeta = buildDispositionDeadlineMeta(dispositions);
   const targetDivisions = (
     Array.isArray(record.target_divisions) ? record.target_divisions : []
   )
@@ -614,6 +692,7 @@ async function serializeIncomingMail({ req, record }) {
     status_label: status.label,
     is_overdue: status.key === "OVERDUE",
     ...workflowMeta,
+    ...deadlineMeta,
     ...fileData,
   };
 }
@@ -629,6 +708,7 @@ async function serializeOutgoingMail({ req, record }) {
   });
   const status = resolveOutgoingMailStatus(record);
   const storage = serializeStorageSummary(record.storage);
+  const deadlineMeta = buildOutgoingDeadlineMeta(record);
 
   return {
     ...record,
@@ -649,6 +729,7 @@ async function serializeOutgoingMail({ req, record }) {
     physical_storage: storage,
     physical_storage_label: storage?.location_label ?? null,
     send_date: toIsoDateTime(record.send_date),
+    ...deadlineMeta,
     created_at: toIsoDateTime(record.created_at),
     updated_at: toIsoDateTime(record.updated_at),
     deleted_at: toIsoDateTime(record.deleted_at),
@@ -682,6 +763,7 @@ async function serializeMemorandum({ req, record }) {
   );
   const status = resolveMemorandumStatus({ ...record, dispositions });
   const workflowMeta = buildDispositionWorkflowMeta(dispositions);
+  const deadlineMeta = buildDispositionDeadlineMeta(dispositions);
   const targetDivisions = (
     Array.isArray(record.target_divisions) ? record.target_divisions : []
   )
@@ -734,6 +816,7 @@ async function serializeMemorandum({ req, record }) {
     status_label: status.label,
     is_overdue: status.key === "OVERDUE",
     ...workflowMeta,
+    ...deadlineMeta,
     ...fileData,
   };
 }

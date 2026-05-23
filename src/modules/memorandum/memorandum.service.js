@@ -1,5 +1,6 @@
 const repository = require("./memorandum.repository");
 const userRepository = require("../user/user.repository");
+const notificationService = require("../notifications/notifications.service");
 const {
   deleteReplacedStoredFile,
   deleteStoredFile,
@@ -203,6 +204,11 @@ function buildWhere({
       { memo_number: { contains: search, mode: "insensitive" } },
       { regarding: { contains: search, mode: "insensitive" } },
       { description: { contains: search, mode: "insensitive" } },
+      {
+        dispositions: {
+          some: { note: { contains: search, mode: "insensitive" } },
+        },
+      },
       { origin_division: { name: { contains: search, mode: "insensitive" } } },
       { storage: { is: { name: { contains: search, mode: "insensitive" } } } },
       {
@@ -369,14 +375,12 @@ exports.getMemorandums = async ({
   });
 
   if (pagination.enabled && !hasSpecificStatusFilter(query.status)) {
-    const [records, total] = await Promise.all([
-      repository.findMany({
-        where,
-        skip: pagination.skip,
-        take: pagination.take,
-      }),
-      repository.count(where),
-    ]);
+    const records = await repository.findMany({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+    });
+    const total = await repository.count(where);
 
     return {
       data: await serializeList(req, records),
@@ -459,8 +463,8 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     sender_id: userId,
     parent_disposition_id: null,
     start_date: null,
-    due_date: null,
-    note: null,
+    due_date: normalizeOptionalDate(payload.due_date),
+    note: normalizeText(payload.note),
     status: "NEW",
   }));
   const targetDivisionsData =
@@ -485,6 +489,12 @@ exports.createMemorandum = async ({ req, payload, userId }) => {
     await queueMemorandumWatermark(created.id);
     created = await repository.findById(created.id);
   }
+
+  await notificationService.notifyMemorandumDispositions({
+    memorandum: created,
+    dispositions: created?.dispositions || [],
+    actorId: userId,
+  });
 
   return serializeMemorandum({
     req,
@@ -546,6 +556,13 @@ exports.redispose = async ({ id, payload, senderId }) => {
     note: normalizeText(payload.note),
     startDate: normalizeOptionalDate(payload.start_date),
     dueDate: normalizeOptionalDate(payload.due_date),
+  });
+
+  await notificationService.notifyMemorandumDispositions({
+    memorandum,
+    dispositions,
+    actorId: senderId,
+    redisposition: true,
   });
 
   return dispositions.map((disposition, index) =>
@@ -616,7 +633,10 @@ exports.updateDispositionStatus = async ({
   }
 
   if (disposition.receiver_id !== userId) {
-    throw new Error("Hanya penerima disposisi yang dapat memperbarui status.");
+    throw new AppError(
+      "Hanya penerima disposisi yang dapat memperbarui status.",
+      403,
+    );
   }
 
   const normalizedStatus = String(status || "")

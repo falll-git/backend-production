@@ -1,5 +1,6 @@
 const repository = require("./digitalDocumentLoans.repository");
 const digitalDocumentRepository = require("../digital-documents/digitalDocuments.repository");
+const notificationService = require("../notifications/notifications.service");
 const { AppError } = require("../../utils/errors");
 const {
   serializeDigitalDocumentLoan,
@@ -235,7 +236,76 @@ function buildWhere(query, userId) {
   return where;
 }
 
-function buildVisibilityWhere(scope, userId) {
+async function getLoanActionAccess(scope) {
+  const [
+    canReadActionQueue,
+    canApprove,
+    canReject,
+    canHandover,
+    canReturn,
+  ] = await Promise.all([
+    roleHasPermission(scope?.roleId, LOAN_ACTION_URL, "read"),
+    roleHasFeature(scope?.roleId, LOAN_ACTION_URL, APPROVE_FEATURE),
+    roleHasFeature(scope?.roleId, LOAN_ACTION_URL, REJECT_FEATURE),
+    roleHasFeature(scope?.roleId, LOAN_ACTION_URL, HANDOVER_FEATURE),
+    roleHasFeature(scope?.roleId, LOAN_ACTION_URL, RETURN_FEATURE),
+  ]);
+  const actionableStatuses = new Set();
+
+  if (canApprove || canReject) {
+    actionableStatuses.add("PENDING");
+  }
+  if (canHandover) {
+    actionableStatuses.add("APPROVED");
+  }
+  if (canReturn) {
+    actionableStatuses.add("HANDED_OVER");
+    actionableStatuses.add("BORROWED");
+  }
+
+  return {
+    canReadActionQueue: Boolean(canReadActionQueue && actionableStatuses.size > 0),
+    actionableStatuses: Array.from(actionableStatuses),
+  };
+}
+
+function canAccessRestrictedDocuments(scope) {
+  return Boolean(
+    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
+  );
+}
+
+function buildActionQueueWhere(scope, actionAccess = {}) {
+  return {
+    status: {
+      in: actionAccess.actionableStatuses || [],
+    },
+    ...(canAccessRestrictedDocuments(scope)
+      ? {}
+      : {
+          document: {
+            access_level: "NON_RESTRICT",
+          },
+        }),
+  };
+}
+
+function canViewActionQueueItem(item, scope, actionAccess = {}) {
+  if (
+    !actionAccess.canReadActionQueue ||
+    !actionAccess.actionableStatuses?.includes(item?.status)
+  ) {
+    return false;
+  }
+
+  const document = item.document;
+  const isRestricted =
+    document?.access_level === "RESTRICT" || document?.is_restricted === true;
+
+  return !isRestricted || canAccessRestrictedDocuments(scope);
+}
+
+function buildVisibilityWhere(scope, userId, actionAccess = {}) {
   const visibleDocumentWhere = {
     document: buildDocumentVisibilityWhere(scope),
   };
@@ -251,6 +321,9 @@ function buildVisibilityWhere(scope, userId) {
   return {
     OR: [
       visibleDocumentWhere,
+      ...(actionAccess.canReadActionQueue
+        ? [buildActionQueueWhere(scope, actionAccess)]
+        : []),
       {
         borrower_id: userId,
       },
@@ -270,12 +343,15 @@ function buildVisibilityWhere(scope, userId) {
   };
 }
 
-function canViewLoan(item, scope, userId) {
+function canViewLoan(item, scope, userId, actionAccess = {}) {
   if (!item) return false;
   if (scope?.canViewAllDocuments) {
     return canScopeAccessDocument(item.document, scope);
   }
   if (!userId) return false;
+  if (canViewActionQueueItem(item, scope, actionAccess)) {
+    return true;
+  }
 
   return (
     item.borrower_id === userId ||
@@ -320,15 +396,26 @@ async function assertLoanActionActor({ item, userId, feature }) {
     );
   }
 
-  if (!canScopeAccessDocument(item.document, scope)) {
-    throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
+  if (
+    hasFeature &&
+    canViewActionQueueItem(item, scope, {
+      canReadActionQueue: true,
+      actionableStatuses: [item.status],
+    })
+  ) {
+    return;
   }
+
+  if (canScopeAccessDocument(item.document, scope)) return;
+
+  throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const actionAccess = await getLoanActionAccess(scope);
   const where = {
-    AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
+    AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId, actionAccess)],
   };
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
@@ -362,7 +449,8 @@ exports.getById = async ({ req, id, userId }) => {
   }
 
   const scope = await getDigitalArchiveAccessScope(userId);
-  if (!canViewLoan(item, scope, userId)) {
+  const actionAccess = await getLoanActionAccess(scope);
+  if (!canViewLoan(item, scope, userId, actionAccess)) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
 
@@ -433,6 +521,12 @@ exports.create = async ({ req, payload, userId }) => {
   });
 
   const items = await repository.findManyByIds(createdIds);
+  for (const item of items) {
+    await notificationService.notifyArchiveLoanRequested({
+      item,
+      actorId: userId,
+    });
+  }
 
   return {
     count: items.length,
@@ -487,6 +581,11 @@ exports.approve = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveLoanResolved({
+    item: updated,
+    actorId: userId,
+    status: "APPROVED",
+  });
   return serializeDigitalDocumentLoan(req, updated);
 };
 
@@ -537,6 +636,11 @@ exports.reject = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveLoanResolved({
+    item: updated,
+    actorId: userId,
+    status: "REJECTED",
+  });
   return serializeDigitalDocumentLoan(req, updated);
 };
 
@@ -598,6 +702,11 @@ exports.handover = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveLoanResolved({
+    item: updated,
+    actorId: userId,
+    status: "HANDED_OVER",
+  });
   return serializeDigitalDocumentLoan(req, updated);
 };
 

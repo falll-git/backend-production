@@ -223,12 +223,10 @@ exports.update = (modelName, id, data, tx) =>
 
 exports.group = (modelName, args) => prisma[modelName].groupBy(args);
 
-exports.aggregateDeposits = () =>
+exports.aggregateDeposits = (where = { deleted_at: null }) =>
   prisma.legal_deposits.groupBy({
     by: ["type", "status"],
-    where: {
-      deleted_at: null,
-    },
+    where,
     _sum: {
       nominal: true,
       paid_amount: true,
