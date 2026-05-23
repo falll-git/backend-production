@@ -21,7 +21,10 @@ const DIGITAL_ARCHIVE_DATA_SCOPE_URLS = [
   "/dashboard/arsip-digital/laporan",
 ];
 
-async function getDigitalArchiveAccessScope(userId) {
+async function getDigitalArchiveAccessScope(
+  userId,
+  menuUrls = DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+) {
   if (!userId) {
     return {
       userId: null,
@@ -61,12 +64,12 @@ async function getDigitalArchiveAccessScope(userId) {
   const roleId = user?.role_id ?? null;
   const canAccessDivisionDocuments = await roleHasFeature(
     roleId,
-    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+    menuUrls,
     VIEW_DIVISION_FEATURE,
   );
   const canManageAllDocuments = await roleHasFeature(
     roleId,
-    DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
+    menuUrls,
     MANAGE_ALL_FEATURE,
   );
   const canViewAllDocuments = canManageAllDocuments;

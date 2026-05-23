@@ -4,7 +4,10 @@ const {
   buildReportSummary,
   toPrintableDocumentItems,
 } = require("../../utils/persuratan-serializer");
-const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
+const {
+  REPORT_ALL_FEATURE,
+  VIEW_DIVISION_FEATURE,
+} = require("../../utils/menu-access");
 const { resolveRequestUser, roleHasFeature } = require("../../utils/rbac");
 const { getPersuratanAccessScope } = require("../../utils/persuratan-access");
 
@@ -69,6 +72,19 @@ function normalizeScope(value, fallback = "my") {
     normalized === "cetak-semua"
   ) {
     return "all";
+  }
+
+  if (
+    normalized === "division" ||
+    normalized === "divisi" ||
+    normalized === "data-divisi" ||
+    normalized === "data_divisi" ||
+    normalized === "laporan-divisi" ||
+    normalized === "laporan_divisi" ||
+    normalized === "cetak-divisi" ||
+    normalized === "cetak_divisi"
+  ) {
+    return "division";
   }
 
   return fallback;
@@ -207,30 +223,45 @@ function filterPrintableRecords(records, onlyWithFile) {
   return records.filter((item) => Boolean(item.file_url || item.file));
 }
 
-function getDispositionBasedScopes(canReportAll) {
-  return canReportAll ? ["my", "all"] : ["my"];
+function buildAvailableScopes({ canReportAll, canViewDivision, divisionId }) {
+  const scopes = [];
+
+  if (canViewDivision && divisionId) {
+    scopes.push("division");
+  }
+
+  if (canReportAll) {
+    scopes.push("all");
+  }
+
+  return scopes.length > 0 ? scopes : ["my"];
 }
 
-function buildDocumentScopeMetadata({ kind, canReportAll }) {
-  const dispositionScopes = getDispositionBasedScopes(canReportAll);
+function resolveDefaultScope({ canReportAll, canViewDivision, divisionId }) {
+  if (canReportAll) return "all";
+  if (canViewDivision && divisionId) return "division";
+  return "my";
+}
+
+function buildDocumentScopeMetadata({ kind, availableScopes }) {
   const allDocumentScopes = {
     incoming_mails: {
       kind: "incoming-mail",
-      available_scopes: dispositionScopes,
+      available_scopes: availableScopes,
       scope_applies: true,
-      scope_basis: "disposition_receiver",
+      scope_basis: "created_by_or_disposition_or_division",
     },
     outgoing_mails: {
       kind: "outgoing-mail",
-      available_scopes: dispositionScopes,
+      available_scopes: availableScopes,
       scope_applies: true,
       scope_basis: "created_by_or_division",
     },
     memorandums: {
       kind: "memorandum",
-      available_scopes: dispositionScopes,
+      available_scopes: availableScopes,
       scope_applies: true,
-      scope_basis: "disposition_receiver",
+      scope_basis: "created_by_or_disposition_or_division",
     },
   };
 
@@ -249,7 +280,18 @@ function buildDocumentScopeMetadata({ kind, canReportAll }) {
   return allDocumentScopes;
 }
 
-function buildScopedQuery(query, scope, userId) {
+function buildScopedQuery(query, scope, userId, divisionId, kind) {
+  if (scope === "division") {
+    return {
+      ...query,
+      assigned_to_me: undefined,
+      receiver_id: undefined,
+      division_id: divisionId,
+      target_division_id:
+        kind === "incoming-mail" ? divisionId : query.target_division_id,
+    };
+  }
+
   if (scope !== "my") {
     return query;
   }
@@ -258,6 +300,33 @@ function buildScopedQuery(query, scope, userId) {
     ...query,
     assigned_to_me: undefined,
     receiver_id: userId,
+  };
+}
+
+function buildReportDataScope(dataScope, selectedScope) {
+  if (selectedScope === "all") {
+    return {
+      ...dataScope,
+      canAccessAllPersuratan: true,
+      canAccessDivisionPersuratan: false,
+      canManageAllPersuratan: false,
+    };
+  }
+
+  if (selectedScope === "division") {
+    return {
+      ...dataScope,
+      canAccessAllPersuratan: true,
+      canAccessDivisionPersuratan: false,
+      canManageAllPersuratan: false,
+    };
+  }
+
+  return {
+    ...dataScope,
+    canAccessAllPersuratan: false,
+    canAccessDivisionPersuratan: false,
+    canManageAllPersuratan: false,
   };
 }
 
@@ -284,12 +353,23 @@ async function resolveReportScope({
     scopeMenuUrl,
     REPORT_ALL_FEATURE,
   );
-  const dataScope = await getPersuratanAccessScope(user.id);
+  const canViewDivision = await roleHasFeature(
+    user.role_id,
+    scopeMenuUrl,
+    VIEW_DIVISION_FEATURE,
+  );
+  const dataScope = await getPersuratanAccessScope(user.id, scopeMenuUrl);
   const reportDataScope = {
     ...dataScope,
     canAccessAllPersuratan: false,
+    canAccessDivisionPersuratan: false,
     canManageAllPersuratan: false,
   };
+  const availableScopes = buildAvailableScopes({
+    canReportAll,
+    canViewDivision,
+    divisionId: dataScope.divisionId,
+  });
   const requestedScope = hasScopeInput(query.scope)
     ? normalizeScope(query.scope, "my")
     : null;
@@ -301,12 +381,36 @@ async function resolveReportScope({
     );
   }
 
+  if (requestedScope === "division" && !canViewDivision) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk melihat laporan data divisi.",
+      403,
+    );
+  }
+
+  if (requestedScope === "division" && !dataScope.divisionId) {
+    throw new AppError(
+      "Akun Anda belum terhubung dengan divisi untuk melihat laporan data divisi.",
+      403,
+    );
+  }
+
+  const defaultScope = resolveDefaultScope({
+    canReportAll,
+    canViewDivision,
+    divisionId: dataScope.divisionId,
+  });
+  const effectiveScope = availableScopes.includes(requestedScope)
+    ? requestedScope
+    : defaultScope;
+
   return {
     user,
-    scope: requestedScope || "my",
+    scope: effectiveScope,
     requested_scope: requestedScope,
-    available_scopes: canReportAll ? ["my", "all"] : ["my"],
+    available_scopes: availableScopes,
     can_report_all: canReportAll,
+    can_view_division: canViewDivision && Boolean(dataScope.divisionId),
     data_scope: reportDataScope,
   };
 }
@@ -328,12 +432,31 @@ exports.getReport = async ({
   const scope = scopeAccess.scope;
   const myFilter = normalizeMyFilter(query.my_filter, scope);
   const listQuery = stripPagination(query);
-  const scopedIncomingQuery = buildScopedQuery(listQuery, scope, userId);
-  const scopedMemorandumQuery = buildScopedQuery(listQuery, scope, userId);
-  const serviceScopeOverride =
-    scope === "all"
-      ? { ...scopeAccess.data_scope, canAccessAllPersuratan: true }
-      : scopeAccess.data_scope;
+  const scopedIncomingQuery = buildScopedQuery(
+    listQuery,
+    scope,
+    userId,
+    scopeAccess.data_scope.divisionId,
+    "incoming-mail",
+  );
+  const scopedOutgoingQuery = buildScopedQuery(
+    listQuery,
+    scope,
+    userId,
+    scopeAccess.data_scope.divisionId,
+    "outgoing-mail",
+  );
+  const scopedMemorandumQuery = buildScopedQuery(
+    listQuery,
+    scope,
+    userId,
+    scopeAccess.data_scope.divisionId,
+    "memorandum",
+  );
+  const serviceScopeOverride = buildReportDataScope(
+    scopeAccess.data_scope,
+    scope,
+  );
   const incoming =
     kind === "all" || kind === "incoming-mail"
       ? await repository.findIncomingMails({
@@ -347,7 +470,7 @@ exports.getReport = async ({
     kind === "all" || kind === "outgoing-mail"
       ? await repository.findOutgoingMails({
           req,
-          query: listQuery,
+          query: scopedOutgoingQuery,
           userId,
           scopeOverride: serviceScopeOverride,
         })
@@ -387,8 +510,9 @@ exports.getReport = async ({
       scope_applies_to: buildScopeAppliesTo(kind),
       document_scopes: buildDocumentScopeMetadata({
         kind,
-        canReportAll: scopeAccess.can_report_all,
+        availableScopes: scopeAccess.available_scopes,
       }),
+      can_view_division: scopeAccess.can_view_division,
     },
     summary: buildReportSummary({
       incoming: filteredIncoming,

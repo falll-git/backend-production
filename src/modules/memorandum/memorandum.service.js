@@ -38,11 +38,12 @@ const {
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
+
+const MEMORANDUM_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
-const MEMORANDUM_MENU_URL =
-  "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 
 async function queueMemorandumWatermark(entityId) {
   try {
@@ -350,7 +351,9 @@ exports.getMemorandums = async ({
   userId,
   scopeOverride = null,
 }) => {
-  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL));
   const receiverId =
     normalizeText(query.receiver_id) ||
     (String(query.assigned_to_me).toLowerCase() === "true" ? userId : null);
@@ -402,7 +405,7 @@ exports.getMemorandumById = async ({ req, id, userId }) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
   if (!canViewMemorandum(memorandum, scope)) {
     throw new AppError("Memorandum tidak ditemukan.", 404);
   }
@@ -709,7 +712,7 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
   if (!canManageMemorandum(memorandum, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk mengubah memorandum ini.", 403);
   }
@@ -810,7 +813,7 @@ exports.deleteMemorandum = async (id, userId) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
   if (!canManageMemorandum(memorandum, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk menghapus memorandum ini.", 403);
   }

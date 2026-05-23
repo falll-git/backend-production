@@ -20,6 +20,13 @@ const {
 
 const ACCESS_REQUEST_ACTION_URL =
   "/dashboard/arsip-digital/disposisi/permintaan";
+const ACCESS_REQUEST_READ_URLS = [
+  "/dashboard/arsip-digital/disposisi/pengajuan",
+  "/dashboard/arsip-digital/disposisi/permintaan",
+  "/dashboard/arsip-digital/disposisi/historis",
+];
+const ACCESS_REQUEST_CREATE_URL =
+  "/dashboard/arsip-digital/disposisi/pengajuan";
 
 function normalizeText(value) {
   return String(value || "")
@@ -255,7 +262,10 @@ function canViewAccessRequest(item, scope, userId, actionAccess = {}) {
 }
 
 async function assertAccessRequestActionActor({ item, userId, feature }) {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    ACCESS_REQUEST_ACTION_URL,
+  );
   const [canUpdate, hasFeature] = await Promise.all([
     roleHasPermission(scope.roleId, ACCESS_REQUEST_ACTION_URL, "update"),
     roleHasFeature(scope.roleId, ACCESS_REQUEST_ACTION_URL, feature),
@@ -288,7 +298,9 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
-  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getDigitalArchiveAccessScope(userId, ACCESS_REQUEST_READ_URLS));
   const actionAccess = await getAccessRequestActionAccess(scope);
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId, actionAccess)],
@@ -324,7 +336,10 @@ exports.getById = async ({ req, id, userId }) => {
     throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    ACCESS_REQUEST_READ_URLS,
+  );
   const actionAccess = await getAccessRequestActionAccess(scope);
   if (!canViewAccessRequest(item, scope, userId, actionAccess)) {
     throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
@@ -340,7 +355,10 @@ exports.create = async ({ req, payload, userId }) => {
 
   const documentIds = Array.from(new Set(payload.document_ids));
   const createdIds = [];
-  const requesterScope = await getDigitalArchiveAccessScope(userId);
+  const requesterScope = await getDigitalArchiveAccessScope(
+    userId,
+    ACCESS_REQUEST_CREATE_URL,
+  );
   const expiresAt = new Date(payload.expires_at);
 
   if (expiresAt.getTime() <= Date.now()) {

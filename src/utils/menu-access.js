@@ -180,7 +180,10 @@ const MENU_FEATURES = {
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
   ],
-  "/dashboard/manajemen-surat/laporan": [REPORT_ALL_FEATURE],
+  "/dashboard/manajemen-surat/laporan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/manajemen-surat/cetak-dokumen": [
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,

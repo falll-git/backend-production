@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const ROOTS = ["src", "prisma"];
+const ROOTS = ["src", "prisma", "scripts"];
 
 function collectJavaScriptFiles(directory, store = []) {
   if (!fs.existsSync(directory)) return store;
