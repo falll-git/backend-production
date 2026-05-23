@@ -24,6 +24,13 @@ const {
 } = require("../../utils/pagination");
 
 const LOAN_ACTION_URL = "/dashboard/arsip-digital/peminjaman/accept";
+const LOAN_READ_URLS = [
+  "/dashboard/arsip-digital/peminjaman/request",
+  "/dashboard/arsip-digital/peminjaman/accept",
+  "/dashboard/arsip-digital/historis/peminjaman",
+  "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
+];
+const LOAN_REQUEST_URL = "/dashboard/arsip-digital/peminjaman/request";
 
 function normalizeText(value) {
   return String(value || "")
@@ -383,7 +390,7 @@ async function assertLoanActionActor({ item, userId, feature }) {
     );
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(userId, LOAN_ACTION_URL);
   const [canUpdate, hasFeature] = await Promise.all([
     roleHasPermission(scope.roleId, LOAN_ACTION_URL, "update"),
     roleHasFeature(scope.roleId, LOAN_ACTION_URL, feature),
@@ -412,7 +419,9 @@ async function assertLoanActionActor({ item, userId, feature }) {
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
-  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getDigitalArchiveAccessScope(userId, LOAN_READ_URLS));
   const actionAccess = await getLoanActionAccess(scope);
   const where = {
     AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId, actionAccess)],
@@ -448,7 +457,7 @@ exports.getById = async ({ req, id, userId }) => {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(userId, LOAN_READ_URLS);
   const actionAccess = await getLoanActionAccess(scope);
   if (!canViewLoan(item, scope, userId, actionAccess)) {
     throw new AppError("Peminjaman dokumen tidak ditemukan", 404);
@@ -462,7 +471,7 @@ exports.create = async ({ req, payload, userId }) => {
     throw new AppError("User tidak dikenali", 401);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(userId, LOAN_REQUEST_URL);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const documentIds = Array.from(new Set(payload.document_ids));
   const createdIds = [];

@@ -9,6 +9,7 @@
     "prisma:generate": "prisma generate",
     "migrate:status": "prisma migrate status",
     "migrate:deploy": "prisma migrate deploy",
+    "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
     "seed": "prisma db seed"
   },
   "keywords": [],

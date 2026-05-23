@@ -18,7 +18,10 @@ function hasDivisionScope(scope) {
   return Boolean(scope?.divisionId && scope?.canAccessDivisionPersuratan);
 }
 
-async function getPersuratanAccessScope(userId) {
+async function getPersuratanAccessScope(
+  userId,
+  menuUrls = PERSURATAN_DATA_SCOPE_URLS,
+) {
   if (!userId) {
     return {
       userId: null,
@@ -59,12 +62,12 @@ async function getPersuratanAccessScope(userId) {
   const roleId = user?.role_id ?? null;
   const canAccessDivisionPersuratan = await roleHasFeature(
     roleId,
-    PERSURATAN_DATA_SCOPE_URLS,
+    menuUrls,
     VIEW_DIVISION_FEATURE,
   );
   const canManageAllPersuratan = await roleHasFeature(
     roleId,
-    PERSURATAN_DATA_SCOPE_URLS,
+    menuUrls,
     MANAGE_ALL_FEATURE,
   );
   const canAccessAllPersuratan = canManageAllPersuratan;

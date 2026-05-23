@@ -219,12 +219,62 @@ const ROLE_MENU_POLICIES = {
       permissions: ["read"],
       features: [REPORT_ALL_FEATURE],
     })),
+    {
+      url: URLS.archiveInput,
+      permissions: ["create", "read"],
+      features: [MANAGE_ALL_FEATURE],
+    },
+    {
+      url: URLS.archiveList,
+      permissions: ["create", "read", "update", "delete"],
+      features: [MANAGE_ALL_FEATURE],
+    },
+    { url: URLS.archiveAccessRequest, permissions: ["create", "read"] },
+    {
+      url: URLS.archiveAccessApproval,
+      permissions: ["read", "update"],
+      features: [APPROVE_FEATURE, REJECT_FEATURE],
+    },
+    { url: URLS.archiveLoanRequest, permissions: ["create", "read"] },
+    {
+      url: URLS.archiveLoanApproval,
+      permissions: ["read", "update"],
+      features: [
+        APPROVE_FEATURE,
+        REJECT_FEATURE,
+        HANDOVER_FEATURE,
+        RETURN_FEATURE,
+      ],
+    },
 
     ...CORRESPONDENCE_MONITOR_URLS.map((url) => ({
       url,
       permissions: ["read"],
       features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
     })),
+    {
+      url: URLS.incomingMail,
+      permissions: ["create", "read", "update", "delete"],
+      features: [
+        MANAGE_ALL_FEATURE,
+        DIVISION_MANAGER_FEATURE,
+        REDISPOSE_FEATURE,
+      ],
+    },
+    {
+      url: URLS.outgoingMail,
+      permissions: ["create", "read", "update", "delete"],
+      features: [MANAGE_ALL_FEATURE],
+    },
+    {
+      url: URLS.memorandum,
+      permissions: ["create", "read", "update", "delete"],
+      features: [
+        MANAGE_ALL_FEATURE,
+        DIVISION_MANAGER_FEATURE,
+        REDISPOSE_FEATURE,
+      ],
+    },
 
     {
       url: URLS.debtorList,
@@ -276,28 +326,28 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.archiveStorage,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveList,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveDueDate,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveAccessApproval,
       permissions: ["read", "update"],
-      features: [REPORT_ALL_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
+      features: [VIEW_DIVISION_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
     },
     {
       url: URLS.archiveLoanApproval,
       permissions: ["read", "update"],
       features: [
-        REPORT_ALL_FEATURE,
+        VIEW_DIVISION_FEATURE,
         APPROVE_FEATURE,
         REJECT_FEATURE,
         HANDOVER_FEATURE,
@@ -307,34 +357,33 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.archiveAccessHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveLoanReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveStorageHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveLoanHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
 
     {
       url: URLS.incomingMail,
       permissions: ["read", "update"],
       features: [
-        REPORT_ALL_FEATURE,
         VIEW_DIVISION_FEATURE,
         DIVISION_MANAGER_FEATURE,
         REDISPOSE_FEATURE,
@@ -343,13 +392,12 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.outgoingMail,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.memorandum,
       permissions: ["read", "update"],
       features: [
-        REPORT_ALL_FEATURE,
         VIEW_DIVISION_FEATURE,
         DIVISION_MANAGER_FEATURE,
         REDISPOSE_FEATURE,
@@ -358,18 +406,17 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.correspondenceReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.correspondencePrint,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
 
     ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
       url,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
     })),
   ],
   Supervisor: [
@@ -378,38 +425,38 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.archiveInput,
       permissions: ["create", "read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveStorage,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveList,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveDueDate,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveAccessApproval,
       permissions: ["read", "update"],
-      features: [REPORT_ALL_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
+      features: [VIEW_DIVISION_FEATURE, APPROVE_FEATURE, REJECT_FEATURE],
     },
     {
       url: URLS.archiveAccessHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveLoanApproval,
       permissions: ["read", "update"],
       features: [
-        REPORT_ALL_FEATURE,
+        VIEW_DIVISION_FEATURE,
         APPROVE_FEATURE,
         REJECT_FEATURE,
         HANDOVER_FEATURE,
@@ -419,54 +466,53 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.archiveLoanReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveStorageHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveLoanHistory,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.archiveReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
 
     {
       url: URLS.incomingMail,
       permissions: ["read", "update"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
+      features: [VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
     },
     {
       url: URLS.outgoingMail,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.memorandum,
       permissions: ["read", "update"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
+      features: [VIEW_DIVISION_FEATURE, REDISPOSE_FEATURE],
     },
     {
       url: URLS.correspondenceReport,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
     {
       url: URLS.correspondencePrint,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [VIEW_DIVISION_FEATURE],
     },
 
     ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
       url,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
     })),
   ],
   Staf: [
@@ -699,4 +745,9 @@ async function seedRoleMenus() {
   );
 }
 
-module.exports = { seedRoleMenus };
+module.exports = {
+  ROLE_MENU_POLICIES,
+  SEEDED_ROLES,
+  buildPermission,
+  seedRoleMenus,
+};

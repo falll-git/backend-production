@@ -32,6 +32,9 @@ const {
 } = require("../watermark-settings/watermarkProcessor.service");
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
+const OUTGOING_MAIL_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar";
+
 async function queueOutgoingMailWatermark(entityId) {
   try {
     await enqueueRecordWatermark({
@@ -66,12 +69,17 @@ function normalizeOptionalDate(value) {
   return normalizeDate(value);
 }
 
+function appendAndFilter(where, clause) {
+  where.AND = [...(where.AND || []), clause];
+}
+
 function buildWhere({
   search,
   dateFrom,
   dateTo,
   letterPrioritieId,
   deliveryMedia,
+  divisionId,
 }) {
   const where = {
     deleted_at: null,
@@ -122,6 +130,14 @@ function buildWhere({
     if (normalizedDeliveryMedia) {
       where.delivery_media = normalizedDeliveryMedia;
     }
+  }
+
+  if (divisionId) {
+    appendAndFilter(where, {
+      creator: {
+        division_id: divisionId,
+      },
+    });
   }
 
   const sendDateFilter = {};
@@ -182,7 +198,9 @@ function hasSpecificStatusFilter(status) {
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
-  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getPersuratanAccessScope(userId, OUTGOING_MAIL_MENU_URL));
   const where = {
     AND: [
       buildWhere({
@@ -191,6 +209,7 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
         dateTo: query.date_to,
         letterPrioritieId: normalizeText(query.letter_prioritie_id),
         deliveryMedia: normalizeText(query.delivery_media),
+        divisionId: normalizeText(query.division_id),
       }),
       buildOutgoingMailVisibilityWhere(scope),
     ],
@@ -229,7 +248,7 @@ exports.getById = async ({ req, id, userId }) => {
     throw new Error("Surat keluar tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, OUTGOING_MAIL_MENU_URL);
   if (!canViewOutgoingMail(outgoingMail, scope)) {
     throw new AppError("Surat keluar tidak ditemukan.", 404);
   }
@@ -302,7 +321,7 @@ exports.update = async ({ req, id, payload, userId }) => {
     throw new Error("Surat keluar tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, OUTGOING_MAIL_MENU_URL);
   if (!canManageOutgoingMail(outgoingMail, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk mengubah surat keluar ini.", 403);
   }
@@ -402,7 +421,7 @@ exports.delete = async (id, userId) => {
     throw new Error("Surat keluar tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, OUTGOING_MAIL_MENU_URL);
   if (!canManageOutgoingMail(outgoingMail, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk menghapus surat keluar ini.", 403);
   }

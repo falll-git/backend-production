@@ -17,6 +17,14 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 
+const STORAGE_READ_URLS = [
+  "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
+];
+const STORAGE_HISTORY_URL = "/dashboard/arsip-digital/historis/penyimpanan";
+const ACCESS_HISTORY_URL = "/dashboard/arsip-digital/disposisi/historis";
+const LOAN_HISTORY_URL = "/dashboard/arsip-digital/historis/peminjaman";
+const LOAN_REPORT_URL = "/dashboard/arsip-digital/peminjaman/laporan";
 const DIGITAL_ARCHIVE_REPORT_URL = "/dashboard/arsip-digital/laporan";
 
 function isNonEmptyObject(value) {
@@ -34,11 +42,14 @@ function andWhere(...clauses) {
   };
 }
 
-async function getDigitalArchiveReportScope(userId) {
-  const scope = await getDigitalArchiveAccessScope(userId);
+async function getDigitalArchiveReportScope(
+  userId,
+  menuUrls = DIGITAL_ARCHIVE_REPORT_URL,
+) {
+  const scope = await getDigitalArchiveAccessScope(userId, menuUrls);
   const canReportAll = await roleHasFeature(
     scope.roleId,
-    DIGITAL_ARCHIVE_REPORT_URL,
+    menuUrls,
     REPORT_ALL_FEATURE,
   );
 
@@ -701,7 +712,9 @@ function buildActivityWhere(query, visibilityWhere) {
 }
 
 exports.getStorageSummary = async ({ userId, scopeOverride = null }) => {
-  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getDigitalArchiveAccessScope(userId, STORAGE_READ_URLS));
   const data = await loadStorageSummaryData(scope);
   return buildStorageSummaryResponse(data);
 };
@@ -977,7 +990,7 @@ exports.getRackDocuments = async ({ req, rackId, query, userId }) => {
 };
 
 exports.getStorageHistories = async ({ query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(userId, STORAGE_HISTORY_URL);
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const where = buildActivityWhere(query, visibilityWhere);
   const pagination = resolvePagination(query, {
@@ -1009,6 +1022,8 @@ exports.getStorageHistories = async ({ query, userId }) => {
 };
 
 exports.getAccessRequestHistories = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveAccessScope(userId, ACCESS_HISTORY_URL);
+
   return accessRequestService.getAll({
     req,
     query: {
@@ -1016,10 +1031,13 @@ exports.getAccessRequestHistories = async ({ req, query, userId }) => {
       report: "history",
     },
     userId,
+    scopeOverride: scope,
   });
 };
 
 exports.getLoanHistories = async ({ req, query, userId }) => {
+  const scope = await getDigitalArchiveAccessScope(userId, LOAN_HISTORY_URL);
+
   return loanService.getAll({
     req,
     query: {
@@ -1027,11 +1045,15 @@ exports.getLoanHistories = async ({ req, query, userId }) => {
       report: "history",
     },
     userId,
+    scopeOverride: scope,
   });
 };
 
 exports.getLoanReport = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveReportScope(userId);
+  const scope = await getDigitalArchiveReportScope(userId, [
+    LOAN_REPORT_URL,
+    DIGITAL_ARCHIVE_REPORT_URL,
+  ]);
 
   return loanService.getAll({
     req,

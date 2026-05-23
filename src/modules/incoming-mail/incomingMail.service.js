@@ -38,11 +38,12 @@ const {
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
+
+const INCOMING_MAIL_MENU_URL =
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
-const INCOMING_MAIL_MENU_URL =
-  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
 
 async function queueIncomingMailWatermark(entityId) {
   try {
@@ -344,7 +345,9 @@ exports.getIncomingMails = async ({
   userId,
   scopeOverride = null,
 }) => {
-  const scope = scopeOverride || (await getPersuratanAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL));
   const receiverId =
     normalizeText(query.receiver_id) ||
     (String(query.assigned_to_me).toLowerCase() === "true" ? userId : null);
@@ -395,7 +398,7 @@ exports.getIncomingMailsById = async ({ req, id, userId }) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
   if (!canViewIncomingMail(incomingMail, scope)) {
     throw new AppError("Surat masuk tidak ditemukan.", 404);
   }
@@ -700,7 +703,7 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
   if (!canManageIncomingMail(incomingMail, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk mengubah surat masuk ini.", 403);
   }
@@ -806,7 +809,7 @@ exports.deleteIncomingMail = async (id, userId) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  const scope = await getPersuratanAccessScope(userId);
+  const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
   if (!canManageIncomingMail(incomingMail, scope)) {
     throw new AppError("Anda tidak memiliki akses untuk menghapus surat masuk ini.", 403);
   }

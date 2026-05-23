@@ -28,6 +28,20 @@ const {
 } = require("../../utils/size-bytes");
 
 const DOCUMENT_NUMBER_GENERATION_ATTEMPTS = 25;
+const DIGITAL_DOCUMENT_READ_URLS = [
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
+  "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
+  "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
+  "/dashboard/arsip-digital/peminjaman/request",
+];
+const DIGITAL_DOCUMENT_WRITE_URLS = [
+  "/dashboard/arsip-digital/input-dokumen",
+];
+const DIGITAL_DOCUMENT_UPDATE_URLS = [
+  "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
+];
+const DIGITAL_DOCUMENT_REQUESTABLE_URL =
+  "/dashboard/arsip-digital/disposisi/pengajuan";
 
 async function queueDigitalDocumentWatermark(documentId) {
   try {
@@ -822,7 +836,9 @@ async function hydrateDocumentMetrics(document) {
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
-  const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const scope =
+    scopeOverride ||
+    (await getDigitalArchiveAccessScope(userId, DIGITAL_DOCUMENT_READ_URLS));
   const where = buildDocumentWhere(query, scope);
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
@@ -850,7 +866,10 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
 };
 
 exports.getRequestable = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_REQUESTABLE_URL,
+  );
   const where = buildRequestableDocumentWhere(query, scope);
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
@@ -878,7 +897,10 @@ exports.getRequestable = async ({ req, query, userId }) => {
 };
 
 exports.getById = async ({ req, id, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_READ_URLS,
+  );
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
 
   const document = await repository.findById(id, {
@@ -901,7 +923,10 @@ exports.getById = async ({ req, id, userId }) => {
 };
 
 exports.getActivityLogs = async ({ id, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_READ_URLS,
+  );
   const visibilityWhere = buildDocumentVisibilityWhere(scope);
   const document = await repository.findById(id, {
     AND: [
@@ -935,7 +960,10 @@ exports.create = async ({ req, payload, userId }) => {
     throw new AppError("User tidak dikenali", 401);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_WRITE_URLS,
+  );
   assertRestrictedDocumentWriteAllowed(payload, scope);
 
   const { storage, documentType } = await ensureSupportingData({
@@ -1071,7 +1099,10 @@ exports.update = async ({ req, id, payload, userId }) => {
     throw new AppError("Dokumen tidak ditemukan", 404);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_UPDATE_URLS,
+  );
   assertCanManageVisibleDocument(current, scope, userId, "mengubah");
   assertRestrictedDocumentWriteAllowed(payload, scope);
 
@@ -1265,7 +1296,10 @@ exports.delete = async ({ id, userId }) => {
     throw new AppError("Dokumen tidak ditemukan", 404);
   }
 
-  const scope = await getDigitalArchiveAccessScope(userId);
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    DIGITAL_DOCUMENT_UPDATE_URLS,
+  );
   assertCanManageVisibleDocument(current, scope, userId, "menghapus");
 
   const activeLoan = await repository.findActiveLoanConflict(id);
