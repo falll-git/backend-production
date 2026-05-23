@@ -18,8 +18,11 @@ const {
   LEGAL_DATA_SCOPE_URLS,
   userHasAnyMenuRead,
 } = require("../utils/debtor-access");
+const { REPORT_ALL_FEATURE } = require("../utils/menu-access");
+const { roleHasFeature } = require("../utils/rbac");
 
 const WATERMARK_SUPPORTED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "png"]);
+const PERSURATAN_PRINT_MENU_URL = "/dashboard/manajemen-surat/cetak-dokumen";
 
 function normalizeRequestedPath(req, publicPrefix) {
   return `${publicPrefix}${req.path || ""}`;
@@ -67,6 +70,9 @@ async function isWatermarkTargetEnabled(module) {
 async function blocksOriginalWatermarkTarget({ module, record, storedPath }) {
   if (!record || record.watermark_file === storedPath) return false;
   if (record.file !== storedPath) return false;
+  if (record.watermark_status !== "APPLIED" || !record.watermark_file) {
+    return false;
+  }
 
   const extension = getStoredPathExtension(storedPath);
   if (!WATERMARK_SUPPORTED_EXTENSIONS.has(extension)) return false;
@@ -148,7 +154,14 @@ async function canAccessIncomingMailFile(payload) {
   }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
-  return canViewIncomingMail(record, scope);
+  return (
+    canViewIncomingMail(record, scope) ||
+    (await roleHasFeature(
+      scope.roleId,
+      PERSURATAN_PRINT_MENU_URL,
+      REPORT_ALL_FEATURE,
+    ))
+  );
 }
 
 async function canAccessOutgoingMailFile(payload) {
@@ -178,7 +191,14 @@ async function canAccessOutgoingMailFile(payload) {
   }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
-  return canViewOutgoingMail(record, scope);
+  return (
+    canViewOutgoingMail(record, scope) ||
+    (await roleHasFeature(
+      scope.roleId,
+      PERSURATAN_PRINT_MENU_URL,
+      REPORT_ALL_FEATURE,
+    ))
+  );
 }
 
 async function canAccessMemorandumFile(payload) {
@@ -205,7 +225,14 @@ async function canAccessMemorandumFile(payload) {
   }
 
   const scope = await getPersuratanAccessScope(payload.user_id);
-  return canViewMemorandum(record, scope);
+  return (
+    canViewMemorandum(record, scope) ||
+    (await roleHasFeature(
+      scope.roleId,
+      PERSURATAN_PRINT_MENU_URL,
+      REPORT_ALL_FEATURE,
+    ))
+  );
 }
 
 async function debtorFileExists(payload) {

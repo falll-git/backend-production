@@ -1,6 +1,7 @@
 const repository = require("./digitalDocuments.repository");
 const { AppError } = require("../../utils/errors");
 const {
+  canScopeAccessDocument,
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
 } = require("../../utils/digital-archive-access");
@@ -672,6 +673,37 @@ function canManageDocument(document, scope, userId) {
   return document.created_by === userId || document.owner_user_id === userId;
 }
 
+function canAccessRestrictedDocuments(scope) {
+  return Boolean(
+    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
+  );
+}
+
+function assertCanManageVisibleDocument(document, scope, userId, actionLabel) {
+  if (
+    !canScopeAccessDocument(document, scope) ||
+    !canManageDocument(document, scope, userId)
+  ) {
+    throw new AppError(
+      `Anda tidak memiliki akses untuk ${actionLabel} dokumen ini`,
+      403,
+    );
+  }
+}
+
+function assertRestrictedDocumentWriteAllowed(payload, scope) {
+  if (payload.is_restricted === undefined || !Boolean(payload.is_restricted)) {
+    return;
+  }
+
+  if (!canAccessRestrictedDocuments(scope)) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk menyimpan dokumen restricted",
+      403,
+    );
+  }
+}
+
 async function createDocumentWithGeneratedNumber({
   client,
   payload,
@@ -903,6 +935,9 @@ exports.create = async ({ req, payload, userId }) => {
     throw new AppError("User tidak dikenali", 401);
   }
 
+  const scope = await getDigitalArchiveAccessScope(userId);
+  assertRestrictedDocumentWriteAllowed(payload, scope);
+
   const { storage, documentType } = await ensureSupportingData({
     storageId: payload.storage_id,
     documentTypeId: payload.document_type_id,
@@ -1037,9 +1072,8 @@ exports.update = async ({ req, id, payload, userId }) => {
   }
 
   const scope = await getDigitalArchiveAccessScope(userId);
-  if (!canManageDocument(current, scope, userId)) {
-    throw new AppError("Anda tidak memiliki akses untuk mengubah dokumen ini", 403);
-  }
+  assertCanManageVisibleDocument(current, scope, userId, "mengubah");
+  assertRestrictedDocumentWriteAllowed(payload, scope);
 
   let prevalidatedStorage = current.storage;
   let prevalidatedDocumentType = current.document_type;
@@ -1232,9 +1266,7 @@ exports.delete = async ({ id, userId }) => {
   }
 
   const scope = await getDigitalArchiveAccessScope(userId);
-  if (!canManageDocument(current, scope, userId)) {
-    throw new AppError("Anda tidak memiliki akses untuk menghapus dokumen ini", 403);
-  }
+  assertCanManageVisibleDocument(current, scope, userId, "menghapus");
 
   const activeLoan = await repository.findActiveLoanConflict(id);
   if (activeLoan) {

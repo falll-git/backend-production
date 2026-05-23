@@ -6,6 +6,7 @@ const {
   assertMenuFeaturesAllowed,
   assertMenuPermissionAllowed,
   normalizeFeatures,
+  normalizeMenuFeatures,
   serializeMenuAccess,
 } = require("../../utils/menu-access");
 const { resolveRequestUser, roleHasPermission } = require("../../utils/rbac");
@@ -17,6 +18,7 @@ const ROLE_MENU_ADMIN_URL = "/dashboard/parameter/role-menu";
 function serializeRoleMenu(roleMenu) {
   return {
     ...roleMenu,
+    features: normalizeMenuFeatures(roleMenu.menu, roleMenu.features),
     role: serializeRole(roleMenu.role),
     menu: serializeMenuAccess(roleMenu.menu),
   };

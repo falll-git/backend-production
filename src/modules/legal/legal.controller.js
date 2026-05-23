@@ -147,21 +147,30 @@ exports.createDepositTransaction = async (req, res) => {
 
 exports.summaryReport = async (req, res) => {
   try {
-    return successResponse(res, await service.getSummaryReport(req.query));
+    return successResponse(
+      res,
+      await service.getSummaryReport(req.query, req.user?.id),
+    );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }
 };
 exports.thirdPartyDocumentsReport = async (req, res) => {
   try {
-    return successResponse(res, await service.getThirdPartyDocumentsReport(req.query));
+    return successResponse(
+      res,
+      await service.getThirdPartyDocumentsReport(req.query, req.user?.id),
+    );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }
 };
 exports.thirdPartyDepositFundsReport = async (req, res) => {
   try {
-    return successResponse(res, await service.getThirdPartyDepositFundsReport(req.query));
+    return successResponse(
+      res,
+      await service.getThirdPartyDepositFundsReport(req.query, req.user?.id),
+    );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }

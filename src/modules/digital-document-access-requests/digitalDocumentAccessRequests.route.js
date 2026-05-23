@@ -16,7 +16,6 @@ const ACCESS_REQUEST_READ_URLS = [
   "/dashboard/arsip-digital/disposisi/pengajuan",
   "/dashboard/arsip-digital/disposisi/permintaan",
   "/dashboard/arsip-digital/disposisi/historis",
-  "/dashboard/arsip-digital/laporan",
 ];
 const ACCESS_REQUEST_CREATE_URL = "/dashboard/arsip-digital/disposisi/pengajuan";
 const ACCESS_REQUEST_ACTION_URL = "/dashboard/arsip-digital/disposisi/permintaan";

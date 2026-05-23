@@ -6,7 +6,6 @@ const { uploadDomainFile } = require("../../middlewares/domain-upload.middleware
 const {
   normalizePersuratanMultipartBody,
 } = require("../../middlewares/persuratan-upload.middleware");
-const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
 const controller = require("./legal.controller");
 const validation = require("./legal.validation");
 
@@ -246,23 +245,19 @@ router.post(
 router.get(
   "/reports/summary",
   auth,
-  authorize("/dashboard/legal/laporan", "read", { feature: REPORT_ALL_FEATURE }),
+  authorize("/dashboard/legal/laporan", "read"),
   controller.summaryReport,
 );
 router.get(
   "/reports/third-party-documents",
   auth,
-  authorize("/dashboard/legal/laporan/pihak-ketiga/dokumen", "read", {
-    feature: REPORT_ALL_FEATURE,
-  }),
+  authorize("/dashboard/legal/laporan/pihak-ketiga/dokumen", "read"),
   controller.thirdPartyDocumentsReport,
 );
 router.get(
   "/reports/third-party-deposit-funds",
   auth,
-  authorize("/dashboard/legal/laporan/pihak-ketiga/dana-titipan", "read", {
-    feature: REPORT_ALL_FEATURE,
-  }),
+  authorize("/dashboard/legal/laporan/pihak-ketiga/dana-titipan", "read"),
   controller.thirdPartyDepositFundsReport,
 );
 

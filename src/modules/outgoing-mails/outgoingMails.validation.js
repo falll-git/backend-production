@@ -2,6 +2,8 @@ const Joi = require("joi");
 
 const SEND_DATE_REQUIRED_MESSAGE = "Tanggal kirim surat wajib diisi.";
 const SEND_DATE_INVALID_MESSAGE = "Format tanggal kirim surat tidak valid.";
+const SEND_DUE_DATE_INVALID_MESSAGE = "Format target pengiriman tidak valid.";
+const RESPONSE_DUE_DATE_INVALID_MESSAGE = "Format batas follow-up tidak valid.";
 const FILE_REQUIRED_MESSAGE = "Dokumen wajib diunggah.";
 const REQUIRED_CHANGE_MESSAGE = "Tidak ada data yang diperbarui.";
 const DELIVERY_MEDIA_VALUES = ["email", "pos", "kurir", "langsung"];
@@ -61,6 +63,15 @@ exports.createOutgoingMailSchema = Joi.object({
     "date.base": SEND_DATE_INVALID_MESSAGE,
     "date.format": SEND_DATE_INVALID_MESSAGE,
   }),
+  send_due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": SEND_DUE_DATE_INVALID_MESSAGE,
+    "date.format": SEND_DUE_DATE_INVALID_MESSAGE,
+  }),
+  response_due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": RESPONSE_DUE_DATE_INVALID_MESSAGE,
+    "date.format": RESPONSE_DUE_DATE_INVALID_MESSAGE,
+  }),
+  follow_up_note: Joi.string().allow("", null).optional(),
   address: Joi.string().trim().required().messages({
     "any.required": "Alamat penerima wajib diisi.",
     "string.empty": "Alamat penerima wajib diisi.",
@@ -112,6 +123,15 @@ exports.updateOutgoingMailSchema = Joi.object({
     "date.base": SEND_DATE_INVALID_MESSAGE,
     "date.format": SEND_DATE_INVALID_MESSAGE,
   }),
+  send_due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": SEND_DUE_DATE_INVALID_MESSAGE,
+    "date.format": SEND_DUE_DATE_INVALID_MESSAGE,
+  }),
+  response_due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": RESPONSE_DUE_DATE_INVALID_MESSAGE,
+    "date.format": RESPONSE_DUE_DATE_INVALID_MESSAGE,
+  }),
+  follow_up_note: Joi.string().allow("", null).optional(),
   address: Joi.string().trim().optional().messages({
     "string.empty": "Alamat penerima wajib diisi.",
   }),

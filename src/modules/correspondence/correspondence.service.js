@@ -6,6 +6,7 @@ const {
 } = require("../../utils/persuratan-serializer");
 const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
 const { resolveRequestUser, roleHasFeature } = require("../../utils/rbac");
+const { getPersuratanAccessScope } = require("../../utils/persuratan-access");
 
 const ACTIVE_MY_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 const REPORT_MENU_URL = "/dashboard/manajemen-surat/laporan";
@@ -283,6 +284,12 @@ async function resolveReportScope({
     scopeMenuUrl,
     REPORT_ALL_FEATURE,
   );
+  const dataScope = await getPersuratanAccessScope(user.id);
+  const reportDataScope = {
+    ...dataScope,
+    canAccessAllPersuratan: false,
+    canManageAllPersuratan: false,
+  };
   const requestedScope = hasScopeInput(query.scope)
     ? normalizeScope(query.scope, "my")
     : null;
@@ -300,6 +307,7 @@ async function resolveReportScope({
     requested_scope: requestedScope,
     available_scopes: canReportAll ? ["my", "all"] : ["my"],
     can_report_all: canReportAll,
+    data_scope: reportDataScope,
   };
 }
 
@@ -323,7 +331,9 @@ exports.getReport = async ({
   const scopedIncomingQuery = buildScopedQuery(listQuery, scope, userId);
   const scopedMemorandumQuery = buildScopedQuery(listQuery, scope, userId);
   const serviceScopeOverride =
-    scope === "all" ? { canAccessAllPersuratan: true } : null;
+    scope === "all"
+      ? { ...scopeAccess.data_scope, canAccessAllPersuratan: true }
+      : scopeAccess.data_scope;
   const incoming =
     kind === "all" || kind === "incoming-mail"
       ? await repository.findIncomingMails({

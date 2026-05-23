@@ -7,6 +7,7 @@ const authorize = require("../../middlewares/authorize.middleware");
 const {
   closeAccessSchema,
   createUserSchema,
+  deleteUserSchema,
   reactivateAccessSchema,
   updateUserSchema,
 } = require("./user.validation");
@@ -67,6 +68,12 @@ router.put(
   validate(updateUserSchema),
   controller.update,
 );
-router.delete("/:id", auth, authorize(USER_MENU_URL, "delete"), controller.delete);
+router.delete(
+  "/:id",
+  auth,
+  authorize(USER_MENU_URL, "delete"),
+  validate(deleteUserSchema),
+  controller.delete,
+);
 
 module.exports = router;

@@ -18,12 +18,10 @@ const {
 const router = express.Router();
 
 const DIGITAL_DOCUMENT_READ_URLS = [
-  "/dashboard/arsip-digital/input-dokumen",
   "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
   "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo",
   "/dashboard/arsip-digital/peminjaman/request",
-  "/dashboard/arsip-digital/laporan",
 ];
 const DIGITAL_DOCUMENT_WRITE_URLS = [
   "/dashboard/arsip-digital/input-dokumen",

@@ -1,7 +1,6 @@
 const prisma = require("../config/prisma");
 const {
   MANAGE_ALL_FEATURE,
-  REPORT_ALL_FEATURE,
   VIEW_DIVISION_FEATURE,
 } = require("./menu-access");
 const { roleHasFeature, roleHasPermission } = require("./rbac");
@@ -63,7 +62,6 @@ async function getDebtorAccessScope(userId, urls = DEBTOR_DATA_SCOPE_URLS) {
     },
   });
   const roleId = user?.role_id || null;
-  const canViewAll = await roleHasFeature(roleId, urls, REPORT_ALL_FEATURE);
   const canViewDivision = await roleHasFeature(
     roleId,
     urls,
@@ -75,7 +73,7 @@ async function getDebtorAccessScope(userId, urls = DEBTOR_DATA_SCOPE_URLS) {
     userId: user?.id || null,
     roleId,
     divisionId: user?.division_id || null,
-    canViewAll,
+    canViewAll: false,
     canViewDivision,
     canManageAll,
   };
@@ -132,6 +130,15 @@ function buildDebtorVisibilityWhere(scope) {
   };
 }
 
+function buildDebtorManageWhere(scope) {
+  if (scope?.canManageAll) return {};
+  if (!scope?.userId) return { id: "__no_debtor_manage_access__" };
+
+  return {
+    OR: [{ created_by: scope.userId }, { marketing_user_id: scope.userId }],
+  };
+}
+
 function buildContractVisibilityWhere(scope) {
   if (scope?.canViewAll || scope?.canManageAll) return {};
   if (!scope?.userId) return { id: "__no_contract_access__" };
@@ -169,6 +176,26 @@ function buildContractVisibilityWhere(scope) {
   };
 }
 
+function buildContractManageWhere(scope) {
+  if (scope?.canManageAll) return {};
+  if (!scope?.userId) return { id: "__no_contract_manage_access__" };
+
+  return {
+    OR: [
+      { created_by: scope.userId },
+      { marketing_user_id: scope.userId },
+      {
+        debtor: {
+          OR: [
+            { created_by: scope.userId },
+            { marketing_user_id: scope.userId },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 async function userHasAnyMenuRead(userId, urls) {
   if (!userId) return false;
 
@@ -185,7 +212,9 @@ async function userHasAnyMenuRead(userId, urls) {
 module.exports = {
   DEBTOR_DATA_SCOPE_URLS,
   LEGAL_DATA_SCOPE_URLS,
+  buildContractManageWhere,
   buildContractVisibilityWhere,
+  buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
   userHasAnyMenuRead,

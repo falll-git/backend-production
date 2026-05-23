@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const prisma = require("../../config/prisma");
 
 const userSummarySelect = {
@@ -93,37 +94,54 @@ exports.createWithInitialReceivers = async (
   receiversData,
   targetDivisionsData = [],
 ) => {
-  const memorandum = await prisma.$transaction(async (tx) => {
-    const memorandum = await tx.memorandums.create({
-      data,
+  const memorandumId = data.id || crypto.randomUUID();
+  let memorandumCreated = false;
+
+  try {
+    await prisma.memorandums.create({
+      data: {
+        ...data,
+        id: memorandumId,
+      },
     });
+    memorandumCreated = true;
 
     if (targetDivisionsData.length > 0) {
-      await tx.memorandum_target_divisions.createMany({
+      await prisma.memorandum_target_divisions.createMany({
         data: targetDivisionsData.map((target) => ({
           ...target,
-          memorandums_id: memorandum.id,
+          memorandums_id: memorandumId,
         })),
       });
     }
 
-    await tx.memorandum_dispositions.createMany({
-      data: receiversData.map((disposition) => ({
-        memorandums_id: memorandum.id,
-        receiver_id: disposition.receiver_id,
-        sender_id: disposition.sender_id,
-        parent_disposition_id: disposition.parent_disposition_id,
-        due_date: disposition.due_date,
-        start_date: disposition.start_date,
-        note: disposition.note,
-        status: disposition.status,
-      })),
-    });
+    if (receiversData.length > 0) {
+      await prisma.memorandum_dispositions.createMany({
+        data: receiversData.map((disposition) => ({
+          memorandums_id: memorandumId,
+          receiver_id: disposition.receiver_id,
+          sender_id: disposition.sender_id,
+          parent_disposition_id: disposition.parent_disposition_id,
+          due_date: disposition.due_date,
+          start_date: disposition.start_date,
+          note: disposition.note,
+          status: disposition.status,
+        })),
+      });
+    }
+  } catch (error) {
+    if (memorandumCreated) {
+      await prisma.memorandums
+        .delete({
+          where: { id: memorandumId },
+        })
+        .catch(() => {});
+    }
 
-    return memorandum;
-  });
+    throw error;
+  }
 
-  return loadById(memorandum.id);
+  return loadById(memorandumId);
 };
 
 exports.createDisposition = (data) => {
@@ -170,10 +188,6 @@ exports.updateDisposition = (id, data) => {
   return prisma.memorandum_dispositions.update({
     where: { id },
     data,
-    include: {
-      receiver: { select: userSummarySelect },
-      sender: { select: userSummarySelect },
-    },
   });
 };
 
@@ -186,40 +200,73 @@ exports.forwardDispositionToReceivers = async ({
   startDate,
   dueDate,
 }) => {
-  const createdDispositionIds = await prisma.$transaction(async (tx) => {
-    await tx.memorandum_dispositions.update({
+  const createdDispositionIds = receiverIds.map(() => crypto.randomUUID());
+  const previousDisposition = await prisma.memorandum_dispositions.findUnique({
+    where: { id: currentDispositionId },
+    select: {
+      status: true,
+      is_complete: true,
+    },
+  });
+  let currentDispositionUpdated = false;
+  let newDispositionsCreated = false;
+
+  try {
+    await prisma.memorandum_dispositions.update({
       where: { id: currentDispositionId },
       data: {
         status: "FORWARDED",
         is_complete: true,
       },
     });
+    currentDispositionUpdated = true;
 
-    const createdIds = [];
+    await prisma.memorandum_dispositions.createMany({
+      data: receiverIds.map((receiverId, index) => ({
+        id: createdDispositionIds[index],
+        memorandums_id: memorandumId,
+        sender_id: senderId,
+        receiver_id: receiverId,
+        parent_disposition_id: currentDispositionId,
+        note,
+        start_date: startDate,
+        due_date: dueDate,
+        status: startDate ? "IN_PROGRESS" : "NEW",
+      })),
+    });
+    newDispositionsCreated = true;
 
-    for (const receiverId of receiverIds) {
-      const created = await tx.memorandum_dispositions.create({
-        data: {
-          memorandums_id: memorandumId,
-          sender_id: senderId,
-          receiver_id: receiverId,
-          parent_disposition_id: currentDispositionId,
-          note,
-          start_date: startDate,
-          due_date: dueDate,
-          status: startDate ? "IN_PROGRESS" : "NEW",
-        },
-      });
-      createdIds.push(created.id);
-    }
-
-    await tx.memorandums.update({
+    await prisma.memorandums.update({
       where: { id: memorandumId },
       data: { status: "IN_PROGRESS", updated_by: senderId },
     });
+  } catch (error) {
+    if (newDispositionsCreated) {
+      await prisma.memorandum_dispositions
+        .deleteMany({
+          where: {
+            id: {
+              in: createdDispositionIds,
+            },
+          },
+        })
+        .catch(() => {});
+    }
 
-    return createdIds;
-  });
+    if (currentDispositionUpdated && previousDisposition) {
+      await prisma.memorandum_dispositions
+        .update({
+          where: { id: currentDispositionId },
+          data: {
+            status: previousDisposition.status,
+            is_complete: previousDisposition.is_complete,
+          },
+        })
+        .catch(() => {});
+    }
+
+    throw error;
+  }
 
   return prisma.memorandum_dispositions.findMany({
     where: {

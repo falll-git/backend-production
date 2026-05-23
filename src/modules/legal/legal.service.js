@@ -8,10 +8,20 @@ const {
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
 const {
   LEGAL_DATA_SCOPE_URLS,
+  buildContractManageWhere,
   buildContractVisibilityWhere,
+  buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
+const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
+const { roleHasFeature } = require("../../utils/rbac");
+
+const LEGAL_REPORT_URLS = {
+  summary: "/dashboard/legal/laporan",
+  thirdPartyDocuments: "/dashboard/legal/laporan/pihak-ketiga/dokumen",
+  thirdPartyDepositFunds: "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
+};
 
 const LEGAL_TYPES = new Set([
   "AKAD",
@@ -145,8 +155,24 @@ async function getLegalAccessScope(userId) {
   return getDebtorAccessScope(userId, LEGAL_DATA_SCOPE_URLS);
 }
 
-async function buildContractAccessWhere(userId) {
+async function getLegalReportScope(userId, menuUrl) {
   const scope = await getLegalAccessScope(userId);
+  const canReportAll = await roleHasFeature(
+    scope.roleId,
+    menuUrl,
+    REPORT_ALL_FEATURE,
+  );
+
+  return {
+    ...scope,
+    operationalCanManageAll: scope.canManageAll,
+    canViewAll: Boolean(canReportAll),
+    canManageAll: false,
+    canReportAll,
+  };
+}
+
+function buildContractAccessWhereFromScope(scope) {
   const contractWhere = buildContractVisibilityWhere(scope);
   return isEmptyObject(contractWhere)
     ? {}
@@ -157,24 +183,7 @@ async function buildContractAccessWhere(userId) {
       };
 }
 
-async function buildDepositTransactionAccessWhere(userId) {
-  const scope = await getLegalAccessScope(userId);
-  const contractWhere = buildContractVisibilityWhere(scope);
-  return isEmptyObject(contractWhere)
-    ? {}
-    : {
-        deposit: {
-          is: {
-            contract: {
-              is: contractWhere,
-            },
-          },
-        },
-      };
-}
-
-async function buildIdebAccessWhere(userId) {
-  const scope = await getLegalAccessScope(userId);
+function buildIdebAccessWhereFromScope(scope) {
   if (scope.canViewAll || scope.canManageAll) return {};
 
   return {
@@ -195,12 +204,38 @@ async function buildIdebAccessWhere(userId) {
   };
 }
 
+async function buildContractAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  return buildContractAccessWhereFromScope(scope);
+}
+
+async function buildDepositTransactionAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  const contractWhere = buildContractVisibilityWhere(scope);
+  return isEmptyObject(contractWhere)
+    ? {}
+    : {
+        deposit: {
+          is: {
+            contract: {
+              is: contractWhere,
+            },
+          },
+        },
+      };
+}
+
+async function buildIdebAccessWhere(userId) {
+  const scope = await getLegalAccessScope(userId);
+  return buildIdebAccessWhereFromScope(scope);
+}
+
 async function ensureContract(contractId, userId, tx) {
   const scope = await getLegalAccessScope(userId);
   const contract = await repository.findContractById(
     contractId,
     tx,
-    buildContractVisibilityWhere(scope),
+    buildContractManageWhere(scope),
   );
   if (!contract) throw new AppError("Kontrak tidak ditemukan atau tidak bisa diakses.", 404);
   return contract;
@@ -212,7 +247,7 @@ async function ensureDebtor(debtorId, userId, tx) {
   const debtor = await repository.findDebtorById(
     debtorId,
     tx,
-    buildDebtorVisibilityWhere(scope),
+    buildDebtorManageWhere(scope),
   );
   if (!debtor) throw new AppError("Debitur tidak ditemukan atau tidak bisa diakses.", 404);
   return debtor;
@@ -941,7 +976,10 @@ exports.createDepositTransaction = async ({ payload, userId }) => {
   });
 };
 
-exports.getSummaryReport = async () => {
+exports.getSummaryReport = async (_query = {}, userId = null) => {
+  const scope = await getLegalReportScope(userId, LEGAL_REPORT_URLS.summary);
+  const contractAccessWhere = buildContractAccessWhereFromScope(scope);
+  const idebAccessWhere = buildIdebAccessWhereFromScope(scope);
   const [
     templates,
     prints,
@@ -952,38 +990,80 @@ exports.getSummaryReport = async () => {
     claims,
     deposits,
   ] = await Promise.all([
-    repository.countWhere("legal_document_templates", { deleted_at: null }),
-    repository.countWhere("legal_print_histories", { deleted_at: null }),
-    repository.countWhere("legal_ideb_uploads", { deleted_at: null }),
-    repository.countWhere("legal_notary_progress", { deleted_at: null }),
-    repository.countWhere("legal_insurance_progress", { deleted_at: null }),
-    repository.countWhere("legal_kjpp_progress", { deleted_at: null }),
-    repository.countWhere("legal_claims", { deleted_at: null }),
-    repository.countWhere("legal_deposits", { deleted_at: null }),
+    scope.canReportAll
+      ? repository.countWhere("legal_document_templates", { deleted_at: null })
+      : 0,
+    repository.countWhere("legal_print_histories", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
+    repository.countWhere("legal_ideb_uploads", {
+      deleted_at: null,
+      ...idebAccessWhere,
+    }),
+    repository.countWhere("legal_notary_progress", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
+    repository.countWhere("legal_insurance_progress", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
+    repository.countWhere("legal_kjpp_progress", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
+    repository.countWhere("legal_claims", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
+    repository.countWhere("legal_deposits", {
+      deleted_at: null,
+      ...contractAccessWhere,
+    }),
   ]);
-  return { templates, prints, ideb, notary, insurance, kjpp, claims, deposits };
+  return {
+    templates,
+    prints,
+    ideb,
+    notary,
+    insurance,
+    kjpp,
+    claims,
+    deposits,
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
+  };
 };
 
-exports.getThirdPartyDocumentsReport = async () => {
+exports.getThirdPartyDocumentsReport = async (_query = {}, userId = null) => {
+  const scope = await getLegalReportScope(
+    userId,
+    LEGAL_REPORT_URLS.thirdPartyDocuments,
+  );
+  const contractAccessWhere = buildContractAccessWhereFromScope(scope);
   const [notary, insurance, kjpp, claims] = await Promise.all([
     repository.group("legal_notary_progress", {
       by: ["third_party_id", "status"],
-      where: { deleted_at: null },
+      where: { deleted_at: null, ...contractAccessWhere },
       _count: { id: true },
     }),
     repository.group("legal_insurance_progress", {
       by: ["third_party_id", "status"],
-      where: { deleted_at: null },
+      where: { deleted_at: null, ...contractAccessWhere },
       _count: { id: true },
     }),
     repository.group("legal_kjpp_progress", {
       by: ["third_party_id", "status"],
-      where: { deleted_at: null },
+      where: { deleted_at: null, ...contractAccessWhere },
       _count: { id: true },
     }),
     repository.group("legal_claims", {
       by: ["status"],
-      where: { deleted_at: null },
+      where: { deleted_at: null, ...contractAccessWhere },
       _count: { id: true },
       _sum: { claim_amount: true, disbursed_amount: true },
     }),
@@ -993,18 +1073,38 @@ exports.getThirdPartyDocumentsReport = async () => {
     insurance: await attachThirdPartyNames(insurance),
     kjpp: await attachThirdPartyNames(kjpp),
     claims,
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
   };
 };
 
-exports.getThirdPartyDepositFundsReport = async () => {
-  const rows = await repository.aggregateDeposits();
-  return rows.map((item) => ({
-    type: item.type,
-    status: item.status,
-    total_records: item._count.id,
-    nominal: number(item._sum.nominal),
-    paid_amount: number(item._sum.paid_amount),
-    processed_amount: number(item._sum.processed_amount),
-    remaining_amount: number(item._sum.remaining_amount),
-  }));
+exports.getThirdPartyDepositFundsReport = async (_query = {}, userId = null) => {
+  const scope = await getLegalReportScope(
+    userId,
+    LEGAL_REPORT_URLS.thirdPartyDepositFunds,
+  );
+  const contractAccessWhere = buildContractAccessWhereFromScope(scope);
+  const rows = await repository.aggregateDeposits({
+    deleted_at: null,
+    ...contractAccessWhere,
+  });
+  return {
+    data: rows.map((item) => ({
+      type: item.type,
+      status: item.status,
+      total_records: item._count.id,
+      nominal: number(item._sum.nominal),
+      paid_amount: number(item._sum.paid_amount),
+      processed_amount: number(item._sum.processed_amount),
+      remaining_amount: number(item._sum.remaining_amount),
+    })),
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
+  };
 };

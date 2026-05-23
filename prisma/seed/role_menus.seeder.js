@@ -10,6 +10,8 @@ const {
   REPORT_ALL_FEATURE,
   RETURN_FEATURE,
   VIEW_DIVISION_FEATURE,
+  getMenuFeatures,
+  normalizeFeatures,
 } = require("../../src/utils/menu-access");
 
 const SEEDED_ROLES = ["Admin", "Staf", "Supervisor", "Manager"];
@@ -221,7 +223,7 @@ const ROLE_MENU_POLICIES = {
     ...CORRESPONDENCE_MONITOR_URLS.map((url) => ({
       url,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
     })),
 
     {
@@ -497,15 +499,18 @@ const ROLE_MENU_POLICIES = {
   ],
 };
 
-function buildPermission({ permissions = ["read"], features = [] } = {}) {
+function buildPermission({ permissions = ["read"], features = [], url } = {}) {
   const permissionSet = new Set(permissions);
+  const allowedFeatures = new Set(getMenuFeatures(url));
 
   return {
     can_create: permissionSet.has("create"),
     can_read: permissionSet.has("read"),
     can_update: permissionSet.has("update"),
     can_delete: permissionSet.has("delete"),
-    features,
+    features: normalizeFeatures(features).filter((feature) =>
+      allowedFeatures.has(feature),
+    ),
   };
 }
 
@@ -515,9 +520,7 @@ function mergePermissions(current, next) {
     can_read: Boolean(current?.can_read || next.can_read),
     can_update: Boolean(current?.can_update || next.can_update),
     can_delete: Boolean(current?.can_delete || next.can_delete),
-    features: [
-      ...new Set([...(current?.features || []), ...(next.features || [])]),
-    ],
+    features: normalizeFeatures([...(current?.features || []), ...(next.features || [])]),
   };
 }
 

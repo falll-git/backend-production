@@ -111,6 +111,11 @@ const baseIncomingMailCreateSchema = Joi.object({
     "string.empty": "Perihal surat wajib diisi.",
   }),
   description: Joi.string().allow("", null).optional(),
+  note: Joi.string().allow("", null).optional(),
+  due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": DUE_DATE_INVALID_MESSAGE,
+    "date.format": DUE_DATE_INVALID_MESSAGE,
+  }),
   name: Joi.string().trim().required().messages({
     "any.required": "Nama pengirim wajib diisi.",
     "string.empty": "Nama pengirim wajib diisi.",

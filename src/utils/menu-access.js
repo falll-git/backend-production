@@ -127,7 +127,6 @@ const MENU_CAPABILITIES = {
 
 const MENU_FEATURES = {
   "/dashboard/arsip-digital/input-dokumen": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
@@ -136,7 +135,6 @@ const MENU_FEATURES = {
     VIEW_DIVISION_FEATURE,
   ],
   "/dashboard/arsip-digital/ruang-arsip/list-dokumen": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
@@ -183,21 +181,21 @@ const MENU_FEATURES = {
     VIEW_DIVISION_FEATURE,
   ],
   "/dashboard/manajemen-surat/laporan": [REPORT_ALL_FEATURE],
-  "/dashboard/manajemen-surat/cetak-dokumen": [REPORT_ALL_FEATURE],
-  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk": [
+  "/dashboard/manajemen-surat/cetak-dokumen": [
     REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
     DIVISION_MANAGER_FEATURE,
     REDISPOSE_FEATURE,
   ],
   "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/manajemen-surat/kelola-surat/input-memorandum": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
     DIVISION_MANAGER_FEATURE,
@@ -209,62 +207,92 @@ const MENU_FEATURES = {
   ],
   "/dashboard/informasi-debitur/laporan": [REPORT_ALL_FEATURE],
   "/dashboard/informasi-debitur": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/master-debitur": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/marketing/action-plan": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/marketing/hasil-kunjungan": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/marketing/langkah-penanganan": [
-    REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
-  "/dashboard/informasi-debitur/admin/upload-slik": [REPORT_ALL_FEATURE],
-  "/dashboard/informasi-debitur/admin/upload-restrik": [REPORT_ALL_FEATURE],
-  "/dashboard/informasi-debitur/admin/import-debitur": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/upload-slik": [MANAGE_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/upload-restrik": [MANAGE_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/import-debitur": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/import-kolektibilitas": [
-    REPORT_ALL_FEATURE,
+    MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/laporan/npf": [REPORT_ALL_FEATURE],
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": [
     REPORT_ALL_FEATURE,
   ],
-  "/dashboard/legal": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/template-dokumen": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/cetak/akad": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/cetak/haftsheet": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/cetak/surat-peringatan": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/cetak/formulir-asuransi": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/cetak/keterangan-lunas": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/cetak/surat-samsat": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/titipan/asuransi": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/titipan/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/titipan/angsuran": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/progress/notaris": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/progress/asuransi": [
-    REPORT_ALL_FEATURE,
+  "/dashboard/legal": [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+  "/dashboard/legal/cetak/akad": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/cetak/haftsheet": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/cetak/surat-peringatan": [
+    VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
-  "/dashboard/legal/progress/kjpp": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/progress/klaim": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/upload-ideb": [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/laporan": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/laporan/pihak-ketiga/dokumen": [REPORT_ALL_FEATURE],
-  "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": [REPORT_ALL_FEATURE],
+  "/dashboard/legal/cetak/formulir-asuransi": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/cetak/keterangan-lunas": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/cetak/surat-samsat": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/titipan/asuransi": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/titipan/notaris": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/titipan/angsuran": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/progress/notaris": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/progress/asuransi": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/progress/kjpp": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/progress/klaim": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/upload-ideb": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
+  "/dashboard/legal/laporan": [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+  "/dashboard/legal/laporan/pihak-ketiga/dokumen": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
+  "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
 };
 
 const DEBTOR_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
@@ -325,11 +353,25 @@ function getMenuPermissionMap(menuOrUrl) {
 function normalizeFeatures(features) {
   if (!Array.isArray(features)) return [];
 
-  return [
+  const normalized = [
     ...new Set(
       features.map((feature) => String(feature || "").trim()).filter(Boolean),
     ),
   ];
+
+  if (!normalized.includes(MANAGE_ALL_FEATURE)) {
+    return normalized;
+  }
+
+  return normalized.filter((feature) => feature !== VIEW_DIVISION_FEATURE);
+}
+
+function normalizeMenuFeatures(menuOrUrl, features) {
+  const allowedFeatures = new Set(getMenuFeatures(menuOrUrl));
+
+  return normalizeFeatures(features).filter((feature) =>
+    allowedFeatures.has(feature),
+  );
 }
 
 function getInvalidFeatures(menu, features) {
@@ -414,6 +456,7 @@ module.exports = {
   getMenuFeatureOptions,
   getMenuFeatures,
   getMenuPermissionMap,
+  normalizeMenuFeatures,
   normalizeFeatures,
   serializeMenuAccess,
 };

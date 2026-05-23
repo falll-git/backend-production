@@ -126,6 +126,11 @@ exports.createMemorandumSchema = Joi.object({
     "any.required": "Perihal memorandum wajib diisi.",
     "string.empty": "Perihal memorandum wajib diisi.",
   }),
+  note: Joi.string().allow("", null).optional(),
+  due_date: Joi.date().iso().allow("", null).optional().messages({
+    "date.base": DUE_DATE_INVALID_MESSAGE,
+    "date.format": DUE_DATE_INVALID_MESSAGE,
+  }),
   description: Joi.string().trim().required().messages({
     "any.required": "Isi memorandum wajib diisi.",
     "string.empty": "Isi memorandum wajib diisi.",

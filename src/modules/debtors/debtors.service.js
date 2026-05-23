@@ -2,6 +2,7 @@ const repository = require("./debtors.repository");
 const debtorContractsService = require("../debtor-contracts/debtorContracts.service");
 const { AppError } = require("../../utils/errors");
 const {
+  buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
   LEGAL_DATA_SCOPE_URLS,
@@ -709,8 +710,28 @@ exports.create = async ({ payload, userId }) => {
   }
 };
 
+function canManageDebtorRecord(debtor, scope) {
+  if (!debtor || !scope?.userId) return false;
+  if (scope.canManageAll) return true;
+
+  return debtor.created_by === scope.userId || debtor.marketing_user_id === scope.userId;
+}
+
+async function getManageableDebtor(id, userId) {
+  const scope = await getDebtorAccessScope(userId);
+  const debtor = await repository.findById(id, {
+    deleted_at: null,
+    ...buildDebtorManageWhere(scope),
+  });
+  if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
+  if (!canManageDebtorRecord(debtor, scope)) {
+    throw new AppError("Anda tidak memiliki izin mengelola debitur ini.", 403);
+  }
+  return debtor;
+}
+
 exports.update = async ({ id, payload, userId }) => {
-  await exports.getById({ id, userId });
+  await getManageableDebtor(id, userId);
   const normalized = compactUndefined(normalizeDebtorPayload(payload));
   await ensureDebtorReferences(normalized);
 
@@ -730,7 +751,7 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  await exports.getById({ id, userId });
+  await getManageableDebtor(id, userId);
   await repository.update(id, {
     status: "INACTIVE",
     deleted_at: new Date(),

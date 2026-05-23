@@ -1,4 +1,17 @@
 const repository = require("./debtorReports.repository");
+const {
+  buildContractVisibilityWhere,
+  buildDebtorVisibilityWhere,
+  getDebtorAccessScope,
+} = require("../../utils/debtor-access");
+const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
+const { roleHasFeature } = require("../../utils/rbac");
+
+const REPORT_URLS = {
+  summary: "/dashboard/informasi-debitur/laporan",
+  npf: "/dashboard/informasi-debitur/laporan/npf",
+  marketingActivity: "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+};
 
 function number(value) {
   return Number(value || 0);
@@ -28,18 +41,40 @@ function calculateRemainingMonths(value) {
   return Math.max(baseMonths + (dueDate.getDate() > today.getDate() ? 1 : 0), 0);
 }
 
-exports.getSummary = async () => {
+async function getReportScope(userId, menuUrl) {
+  const scope = await getDebtorAccessScope(userId);
+  const canReportAll = await roleHasFeature(
+    scope.roleId,
+    menuUrl,
+    REPORT_ALL_FEATURE,
+  );
+
+  return {
+    ...scope,
+    operationalCanManageAll: scope.canManageAll,
+    canViewAll: Boolean(canReportAll),
+    canManageAll: false,
+    canReportAll,
+  };
+}
+
+exports.getSummary = async (_query = {}, userId = null) => {
+  const scope = await getReportScope(userId, REPORT_URLS.summary);
+  const debtorWhere = buildDebtorVisibilityWhere(scope);
+  const contractWhere = buildContractVisibilityWhere(scope);
   const [totalDebtors, activeDebtors, activeContracts, closedContracts] =
     await Promise.all([
-      repository.countDebtors({ deleted_at: null }),
-      repository.countDebtors({ deleted_at: null, status: "ACTIVE" }),
+      repository.countDebtors({ deleted_at: null, ...debtorWhere }),
+      repository.countDebtors({ deleted_at: null, status: "ACTIVE", ...debtorWhere }),
       repository.countContracts({
         deleted_at: null,
         status: { in: ["ACTIVE", "AKTIF", "BERJALAN"] },
+        ...contractWhere,
       }),
       repository.countContracts({
         deleted_at: null,
         status: { in: ["CLOSED", "LUNAS", "SELESAI"] },
+        ...contractWhere,
       }),
     ]);
 
@@ -49,15 +84,23 @@ exports.getSummary = async () => {
     inactive_debtors: Math.max(totalDebtors - activeDebtors, 0),
     active_contracts: activeContracts,
     closed_contracts: closedContracts,
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
   };
 };
 
-exports.getNpf = async (query = {}) => {
+exports.getNpf = async (query = {}, userId = null) => {
+  const scope = await getReportScope(userId, REPORT_URLS.npf);
+  const contractWhere = buildContractVisibilityWhere(scope);
   const [contracts, trendRows] = await Promise.all([
-    repository.findContractsForNpf(),
+    repository.findContractsForNpf(contractWhere),
     repository.findCollectibilityTrendRows({
       from: query.from_period,
       to: query.to_period,
+      contractWhere,
     }),
   ]);
   const breakdownByKol = new Map();
@@ -144,15 +187,22 @@ exports.getNpf = async (query = {}) => {
     }),
     details,
     trend,
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
   };
 };
 
-exports.getMarketingActivity = async (query = {}) => {
+exports.getMarketingActivity = async (query = {}, userId = null) => {
   const fromDate = parseDate(query.from_date);
   const toDate = parseDate(query.to_date, true);
+  const scope = await getReportScope(userId, REPORT_URLS.marketingActivity);
+  const debtorWhere = buildDebtorVisibilityWhere(scope);
   const [groups, recent] = await Promise.all([
-    repository.groupMarketingActivities({ fromDate, toDate }),
-    repository.findRecentMarketingActivities({ fromDate, toDate }),
+    repository.groupMarketingActivities({ fromDate, toDate, debtorWhere }),
+    repository.findRecentMarketingActivities({ fromDate, toDate, debtorWhere }),
   ]);
 
   return {
@@ -172,5 +222,10 @@ exports.getMarketingActivity = async (query = {}) => {
       notes: item.notes,
       created_at: item.created_at,
     })),
+    scope: {
+      can_report_all: scope.canReportAll,
+      can_view_division: scope.canViewDivision,
+      can_manage_all: scope.operationalCanManageAll,
+    },
   };
 };

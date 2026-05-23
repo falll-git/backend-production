@@ -1,5 +1,6 @@
 const repository = require("./digitalDocumentAccessRequests.repository");
 const digitalDocumentRepository = require("../digital-documents/digitalDocuments.repository");
+const notificationService = require("../notifications/notifications.service");
 const { AppError } = require("../../utils/errors");
 const {
   serializeDigitalDocumentAccessRequest,
@@ -162,7 +163,50 @@ function buildWhere(query, userId) {
   return where;
 }
 
-function buildVisibilityWhere(scope, userId) {
+async function getAccessRequestActionAccess(scope) {
+  const [canReadActionQueue, canApprove, canReject] = await Promise.all([
+    roleHasPermission(scope?.roleId, ACCESS_REQUEST_ACTION_URL, "read"),
+    roleHasFeature(scope?.roleId, ACCESS_REQUEST_ACTION_URL, APPROVE_FEATURE),
+    roleHasFeature(scope?.roleId, ACCESS_REQUEST_ACTION_URL, REJECT_FEATURE),
+  ]);
+
+  return {
+    canReadActionQueue: Boolean(canReadActionQueue && (canApprove || canReject)),
+  };
+}
+
+function canAccessRestrictedDocuments(scope) {
+  return Boolean(
+    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
+  );
+}
+
+function buildActionQueueWhere(scope) {
+  return {
+    status: "PENDING",
+    ...(canAccessRestrictedDocuments(scope)
+      ? {}
+      : {
+          document: {
+            access_level: "NON_RESTRICT",
+          },
+        }),
+  };
+}
+
+function canViewActionQueueItem(item, scope, actionAccess = {}) {
+  if (!actionAccess.canReadActionQueue || item?.status !== "PENDING") {
+    return false;
+  }
+
+  const document = item.document;
+  const isRestricted =
+    document?.access_level === "RESTRICT" || document?.is_restricted === true;
+
+  return !isRestricted || canAccessRestrictedDocuments(scope);
+}
+
+function buildVisibilityWhere(scope, userId, actionAccess = {}) {
   const visibleDocumentWhere = {
     document: buildDocumentVisibilityWhere(scope),
   };
@@ -178,6 +222,9 @@ function buildVisibilityWhere(scope, userId) {
   return {
     OR: [
       visibleDocumentWhere,
+      ...(actionAccess.canReadActionQueue
+        ? [buildActionQueueWhere(scope)]
+        : []),
       {
         requester_id: userId,
       },
@@ -191,12 +238,13 @@ function buildVisibilityWhere(scope, userId) {
   };
 }
 
-function canViewAccessRequest(item, scope, userId) {
+function canViewAccessRequest(item, scope, userId, actionAccess = {}) {
   if (!item) return false;
   if (scope?.canViewAllDocuments) {
     return canScopeAccessDocument(item.document, scope);
   }
   if (!userId) return false;
+  if (canViewActionQueueItem(item, scope, actionAccess)) return true;
 
   return (
     item.requester_id === userId ||
@@ -220,11 +268,10 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
     );
   }
 
-  if (!canScopeAccessDocument(item.document, scope)) {
-    throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
-  }
-
   if (item.owner_id === userId) {
+    if (!canScopeAccessDocument(item.document, scope)) {
+      throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
+    }
     return;
   }
 
@@ -234,12 +281,17 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
       403,
     );
   }
+
+  if (!canViewActionQueueItem(item, scope, { canReadActionQueue: true })) {
+    throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
+  }
 }
 
 exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   const scope = scopeOverride || (await getDigitalArchiveAccessScope(userId));
+  const actionAccess = await getAccessRequestActionAccess(scope);
   const where = {
-    AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId)],
+    AND: [buildWhere(query, userId), buildVisibilityWhere(scope, userId, actionAccess)],
   };
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,
@@ -273,7 +325,8 @@ exports.getById = async ({ req, id, userId }) => {
   }
 
   const scope = await getDigitalArchiveAccessScope(userId);
-  if (!canViewAccessRequest(item, scope, userId)) {
+  const actionAccess = await getAccessRequestActionAccess(scope);
+  if (!canViewAccessRequest(item, scope, userId, actionAccess)) {
     throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
   }
 
@@ -381,6 +434,12 @@ exports.create = async ({ req, payload, userId }) => {
   });
 
   const items = await repository.findManyByIds(createdIds);
+  for (const item of items) {
+    await notificationService.notifyArchiveAccessRequested({
+      item,
+      actorId: userId,
+    });
+  }
 
   return {
     count: items.length,
@@ -448,6 +507,11 @@ exports.approve = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveAccessResolved({
+    item: updated,
+    actorId: userId,
+    approved: true,
+  });
   return serializeDigitalDocumentAccessRequest(req, updated);
 };
 
@@ -500,5 +564,10 @@ exports.reject = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveAccessResolved({
+    item: updated,
+    actorId: userId,
+    approved: false,
+  });
   return serializeDigitalDocumentAccessRequest(req, updated);
 };

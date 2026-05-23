@@ -64,6 +64,8 @@ model users {
   handed_over_digital_document_loans  digital_document_loans[]           @relation("DigitalDocumentLoanHandOverActor")
   returned_digital_document_loans     digital_document_loans[]           @relation("DigitalDocumentLoanReturnActor")
   digital_document_activity_logs      digital_document_activity_logs[]   @relation("DigitalDocumentActivityActor")
+  received_notifications              notifications[]                    @relation("NotificationRecipient")
+  created_notifications               notifications[]                    @relation("NotificationCreator")
   marketing_debtors                   digital_debtors[]                  @relation("DebtorMarketingOwner")
   marketing_contracts                 debtor_contracts[]                 @relation("ContractMarketingOwner")
 
@@ -261,6 +263,37 @@ model role_menus {
   updated_at DateTime @updatedAt
 
   @@unique([role_id, menu_id])
+}
+
+model notifications {
+  id            String    @id @default(uuid())
+  recipient_id  String
+  module        String
+  event_type    String
+  entity_type   String
+  entity_id     String
+  title         String
+  message       String
+  link_url      String?
+  priority      String    @default("NORMAL")
+  read_at       DateTime?
+  email_status  String    @default("SKIPPED")
+  email_sent_at DateTime?
+  email_error   String?
+  dedupe_key    String?   @unique
+  created_by    String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  deleted_at    DateTime?
+
+  recipient users  @relation("NotificationRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  creator   users? @relation("NotificationCreator", fields: [created_by], references: [id], onDelete: SetNull)
+
+  @@index([recipient_id, read_at, created_at])
+  @@index([recipient_id, deleted_at])
+  @@index([module, event_type])
+  @@index([entity_type, entity_id])
+  @@index([email_status])
 }
 
 model watermark_settings {
@@ -679,6 +712,9 @@ model outgoing_mails {
   delivery_media            outgoing_mail_delivery_media
   name                      String
   send_date                 DateTime
+  send_due_date             DateTime?
+  response_due_date         DateTime?
+  follow_up_note            String?
   address                   String
   mail_number               String                       @unique
   file                      String?
@@ -710,6 +746,8 @@ model outgoing_mails {
   @@index([storage_id])
   @@index([status])
   @@index([watermark_status])
+  @@index([send_due_date])
+  @@index([response_due_date])
 }
 
 model memorandums {

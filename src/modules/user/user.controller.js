@@ -13,10 +13,12 @@ exports.getAll = async (req, res) => {
   try {
     const pagination = resolvePagination(req.query, PAGINATION_PROFILES.SETUP);
     const search = req.query.search || "";
+    const status = req.query.status || "active";
 
     const result = await service.getUsersForRequest({
       pagination,
       search,
+      status,
       requestUser: req.user,
     });
     paginatedResponse(res, result.data, result.meta);
@@ -74,7 +76,7 @@ exports.update = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    await service.deleteUser(req.params.id, req.user.id);
+    await service.deleteUser(req.params.id, req.user.id, req.body);
     successResponse(res, null, "Pengguna berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
