@@ -325,13 +325,16 @@ model watermark_settings {
 }
 
 model storage_usage_configs {
-  id                   String   @id @default(uuid())
-  free_quota_gb        Float    @default(100)
-  overage_price_per_gb Decimal  @default(0.0023) @db.Decimal(12, 6)
-  currency             String   @default("USD")
-  is_active            Boolean  @default(true)
-  created_at           DateTime @default(now())
-  updated_at           DateTime @updatedAt
+  id                         String   @id @default(uuid())
+  free_quota_gb              Float    @default(100)
+  overage_price_per_gb       Decimal  @default(200) @db.Decimal(12, 6)
+  currency                   String   @default("IDR")
+  billing_model              String   @default("TIERED")
+  pricing_tiers              Json     @default("[]")
+  manual_review_threshold_gb Float    @default(1000)
+  is_active                  Boolean  @default(true)
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
 
   @@index([is_active])
 }

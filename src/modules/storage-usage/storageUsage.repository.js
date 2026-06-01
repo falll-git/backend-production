@@ -31,12 +31,25 @@ exports.findActiveConfig = () => {
   });
 };
 
-exports.upsertDefaultConfig = ({ freeQuotaGb, overagePricePerGb, currency }) => {
+exports.upsertDefaultConfig = ({
+  freeQuotaGb,
+  overagePricePerGb,
+  currency,
+  billingModel,
+  pricingTiers,
+  manualReviewThresholdGb,
+}) => {
   return prisma.storage_usage_configs.upsert({
     where: {
       id: "storage-usage-config-default",
     },
     update: {
+      free_quota_gb: freeQuotaGb,
+      overage_price_per_gb: overagePricePerGb,
+      currency,
+      billing_model: billingModel,
+      pricing_tiers: pricingTiers,
+      manual_review_threshold_gb: manualReviewThresholdGb,
       is_active: true,
     },
     create: {
@@ -44,6 +57,9 @@ exports.upsertDefaultConfig = ({ freeQuotaGb, overagePricePerGb, currency }) => 
       free_quota_gb: freeQuotaGb,
       overage_price_per_gb: overagePricePerGb,
       currency,
+      billing_model: billingModel,
+      pricing_tiers: pricingTiers,
+      manual_review_threshold_gb: manualReviewThresholdGb,
       is_active: true,
     },
   });

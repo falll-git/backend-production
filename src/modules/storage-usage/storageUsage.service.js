@@ -2,9 +2,35 @@ const repository = require("./storageUsage.repository");
 const { resolveStoredFileSizeBytes } = require("../../utils/storage-usage-files");
 
 const DEFAULT_FREE_QUOTA_GB = 100;
-const DEFAULT_OVERAGE_PRICE_PER_GB = 0.0023;
-const DEFAULT_CURRENCY = "USD";
+const DEFAULT_OVERAGE_PRICE_PER_GB = 200;
+const DEFAULT_CURRENCY = "IDR";
+const DEFAULT_BILLING_MODEL = "TIERED";
+const DEFAULT_MANUAL_REVIEW_THRESHOLD_GB = 1000;
 const GB_BYTES = 1024 ** 3;
+
+const DEFAULT_PRICING_TIERS = [
+  {
+    from_gb: 0,
+    to_gb: 100,
+    price_per_gb: 0,
+    label: "0-100 GB",
+    description: "Gratis",
+  },
+  {
+    from_gb: 100,
+    to_gb: 500,
+    price_per_gb: 200,
+    label: "100-500 GB",
+    description: "Rp 200/GB/bulan",
+  },
+  {
+    from_gb: 500,
+    to_gb: 1000,
+    price_per_gb: 150,
+    label: "500-1000 GB",
+    description: "Rp 150/GB/bulan",
+  },
+];
 
 const MODULE_LABELS = {
   digital_archive: "Arsip Digital",
@@ -110,6 +136,9 @@ async function getActiveConfig() {
     freeQuotaGb: DEFAULT_FREE_QUOTA_GB,
     overagePricePerGb: DEFAULT_OVERAGE_PRICE_PER_GB,
     currency: DEFAULT_CURRENCY,
+    billingModel: DEFAULT_BILLING_MODEL,
+    pricingTiers: DEFAULT_PRICING_TIERS,
+    manualReviewThresholdGb: DEFAULT_MANUAL_REVIEW_THRESHOLD_GB,
   });
 }
 
@@ -257,7 +286,7 @@ function resolveStatus(usedBytes, freeQuotaBytes) {
   if (usedBytes > freeQuotaBytes) {
     return {
       status_key: "OVER_LIMIT",
-      status_label: "Melewati Kuota",
+      status_label: "Melewati Kuota / Argo berjalan",
     };
   }
 
@@ -274,6 +303,84 @@ function resolveStatus(usedBytes, freeQuotaBytes) {
   };
 }
 
+function normalizePricingTiers(value) {
+  const source = Array.isArray(value) && value.length > 0 ? value : DEFAULT_PRICING_TIERS;
+
+  const tiers = source
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+
+      const fromGb = toFiniteNumber(item.from_gb, NaN);
+      const toGb = item.to_gb === null ? null : toFiniteNumber(item.to_gb, NaN);
+      const pricePerGb = toFiniteNumber(item.price_per_gb, NaN);
+
+      if (!Number.isFinite(fromGb) || !Number.isFinite(pricePerGb)) return null;
+      if (toGb !== null && (!Number.isFinite(toGb) || toGb <= fromGb)) return null;
+
+      return {
+        from_gb: fromGb,
+        to_gb: toGb,
+        price_per_gb: pricePerGb,
+        label:
+          typeof item.label === "string" && item.label.trim()
+            ? item.label.trim()
+            : toGb === null
+              ? `> ${fromGb} GB`
+              : `${fromGb}-${toGb} GB`,
+        description:
+          typeof item.description === "string" && item.description.trim()
+            ? item.description.trim()
+            : pricePerGb > 0
+              ? `Rp ${pricePerGb}/GB/bulan`
+              : "Gratis",
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.from_gb - right.from_gb);
+
+  return tiers.length > 0 ? tiers : DEFAULT_PRICING_TIERS;
+}
+
+function calculateTieredBilling({ usedBytes, freeQuotaGb, pricingTiers, manualReviewThresholdGb }) {
+  const usedGbExact = bytesToGb(usedBytes);
+  const reviewThresholdGb = Math.max(
+    freeQuotaGb,
+    toFiniteNumber(manualReviewThresholdGb, DEFAULT_MANUAL_REVIEW_THRESHOLD_GB),
+  );
+  const automaticUsageGb = Math.min(usedGbExact, reviewThresholdGb);
+  const unpricedGb = Math.max(usedGbExact - reviewThresholdGb, 0);
+  let totalCost = 0;
+
+  const tierBreakdown = pricingTiers.map((tier) => {
+    const tierToGb = tier.to_gb === null ? reviewThresholdGb : Math.min(tier.to_gb, reviewThresholdGb);
+    const usedInTierGb = Math.max(
+      Math.min(automaticUsageGb, tierToGb) - tier.from_gb,
+      0,
+    );
+    const cost = usedInTierGb * tier.price_per_gb;
+    totalCost += cost;
+
+    return {
+      ...tier,
+      used_gb: roundNumber(usedInTierGb, 4),
+      billable_gb: tier.price_per_gb > 0 ? roundNumber(usedInTierGb, 4) : 0,
+      cost: roundNumber(cost, 2),
+    };
+  });
+
+  return {
+    billing_model: DEFAULT_BILLING_MODEL,
+    free_quota_gb: freeQuotaGb,
+    billable_gb: roundNumber(Math.max(automaticUsageGb - freeQuotaGb, 0), 4),
+    priced_usage_gb: roundNumber(automaticUsageGb, 4),
+    unpriced_gb: roundNumber(unpricedGb, 4),
+    manual_review_threshold_gb: reviewThresholdGb,
+    manual_review_required: unpricedGb > 0,
+    estimated_cost: roundNumber(totalCost, 2),
+    tier_breakdown: tierBreakdown,
+  };
+}
+
 exports.getSummary = async ({ query = {} } = {}) => {
   const days = normalizeDays(query.days);
   const [config, entries] = await Promise.all([
@@ -287,11 +394,26 @@ exports.getSummary = async ({ query = {} } = {}) => {
     config.overage_price_per_gb,
     DEFAULT_OVERAGE_PRICE_PER_GB,
   );
+  const billingModel =
+    typeof config.billing_model === "string" && config.billing_model.trim()
+      ? config.billing_model.trim().toUpperCase()
+      : DEFAULT_BILLING_MODEL;
+  const pricingTiers = normalizePricingTiers(config.pricing_tiers);
+  const manualReviewThresholdGb = toFiniteNumber(
+    config.manual_review_threshold_gb,
+    DEFAULT_MANUAL_REVIEW_THRESHOLD_GB,
+  );
   const usedBytes = entries.reduce((sum, entry) => sum + entry.size_bytes, 0);
   const remainingBytes = Math.max(freeQuotaBytes - usedBytes, 0);
   const overageBytes = Math.max(usedBytes - freeQuotaBytes, 0);
   const overageGb = bytesToGb(overageBytes);
   const status = resolveStatus(usedBytes, freeQuotaBytes);
+  const billing = calculateTieredBilling({
+    usedBytes,
+    freeQuotaGb,
+    pricingTiers,
+    manualReviewThresholdGb,
+  });
 
   return {
     config: {
@@ -299,6 +421,9 @@ exports.getSummary = async ({ query = {} } = {}) => {
       free_quota_bytes: freeQuotaBytes,
       overage_price_per_gb: pricePerGb,
       currency: config.currency || DEFAULT_CURRENCY,
+      billing_model: billingModel,
+      pricing_tiers: pricingTiers,
+      manual_review_threshold_gb: manualReviewThresholdGb,
       source: process.env.STORAGE_USAGE_SOURCE || "database_file_size",
     },
     usage: {
@@ -312,12 +437,16 @@ exports.getSummary = async ({ query = {} } = {}) => {
       remaining_gb: roundNumber(bytesToGb(remainingBytes), 2),
       overage_bytes: overageBytes,
       overage_gb: roundNumber(overageGb, 2),
-      estimated_overage_cost: roundNumber(overageGb * pricePerGb, 4),
+      estimated_overage_cost: billing.estimated_cost,
+      billable_gb: billing.billable_gb,
+      manual_review_required: billing.manual_review_required,
+      unpriced_gb: billing.unpriced_gb,
       file_count: entries.length,
       ...status,
     },
     breakdown: summarizeBreakdown(entries, usedBytes),
     trend: buildTrend(entries, days, freeQuotaGb),
+    billing,
     updated_at: new Date().toISOString(),
   };
 };

@@ -11,6 +11,7 @@
     "migrate:status": "prisma migrate status",
     "migrate:deploy": "prisma migrate deploy",
     "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
+    "seed:system": "node prisma/seed-system.js",
     "seed": "prisma db seed"
   },
   "keywords": [],
