@@ -194,7 +194,7 @@ exports.revokeActiveRefreshTokenByHash = (
   });
 };
 
-exports.rotateRefreshToken = ({
+exports.rotateRefreshToken = async ({
   oldRefreshTokenId,
   refreshTokenId,
   userId,
@@ -202,7 +202,7 @@ exports.rotateRefreshToken = ({
   expiresAt,
   now,
 }) => {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     if (oldRefreshTokenId) {
       await exports.revokeRefreshToken(oldRefreshTokenId, now, tx);
     } else {
@@ -219,16 +219,15 @@ exports.rotateRefreshToken = ({
       tx,
     );
 
-    const user = await tx.users.findUnique({
-      where: { id: userId },
-      select: authUserSelect,
-    });
-
     return {
-      user,
       refreshTokenId,
     };
   });
+
+  return {
+    ...result,
+    user: await exports.findById(userId),
+  };
 };
 
 exports.completeInviteOnboarding = async ({
@@ -237,8 +236,8 @@ exports.completeInviteOnboarding = async ({
   password,
   now,
 }) => {
-  return prisma.$transaction(async (tx) => {
-    const user = await tx.users.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.users.update({
       where: { id: userId },
       data: {
         password,
@@ -247,7 +246,6 @@ exports.completeInviteOnboarding = async ({
         onboarding_status: "ACTIVE",
         activated_at: now,
       },
-      select: authUserSelect,
     });
 
     await tx.refresh_tokens.updateMany({
@@ -266,9 +264,9 @@ exports.completeInviteOnboarding = async ({
         used_at: now,
       },
     });
-
-    return user;
   });
+
+  return exports.findById(userId);
 };
 
 exports.completePasswordReset = async ({
@@ -278,8 +276,8 @@ exports.completePasswordReset = async ({
   now,
   emailVerifiedAt,
 }) => {
-  return prisma.$transaction(async (tx) => {
-    const user = await tx.users.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.users.update({
       where: { id: userId },
       data: {
         password,
@@ -288,7 +286,6 @@ exports.completePasswordReset = async ({
         activated_at: now,
         ...(emailVerifiedAt ? { email_verified_at: emailVerifiedAt } : {}),
       },
-      select: authUserSelect,
     });
 
     await tx.refresh_tokens.updateMany({
@@ -311,7 +308,7 @@ exports.completePasswordReset = async ({
         used_at: now,
       },
     });
-
-    return user;
   });
+
+  return exports.findById(userId);
 };

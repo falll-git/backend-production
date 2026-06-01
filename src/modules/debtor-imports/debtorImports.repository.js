@@ -16,6 +16,11 @@ function findJobs({ where, skip, take, orderBy }) {
           created_at: "desc",
         },
       },
+      segments: {
+        orderBy: {
+          file_name: "asc",
+        },
+      },
     },
   });
 }
@@ -46,6 +51,31 @@ function findDebtorById(id) {
   });
 }
 
+function findJobById(id) {
+  return prisma.debtor_import_jobs.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+    },
+    include: {
+      records: {
+        where: {
+          deleted_at: null,
+        },
+        take: 10,
+        orderBy: {
+          created_at: "desc",
+        },
+      },
+      segments: {
+        orderBy: {
+          file_name: "asc",
+        },
+      },
+    },
+  });
+}
+
 function findContractById(id) {
   return prisma.debtor_contracts.findFirst({
     where: {
@@ -55,8 +85,8 @@ function findContractById(id) {
   });
 }
 
-function transaction(callback) {
-  return prisma.$transaction(callback);
+function transaction(callback, options) {
+  return prisma.$transaction(callback, options);
 }
 
 module.exports = {
@@ -65,6 +95,8 @@ module.exports = {
   createJob,
   findContractById,
   findDebtorById,
+  findJobById,
   findJobs,
+  prisma,
   transaction,
 };

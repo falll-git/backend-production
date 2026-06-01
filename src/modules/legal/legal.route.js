@@ -14,9 +14,10 @@ const PRINT_URLS = [
   "/dashboard/legal/cetak/akad",
   "/dashboard/legal/cetak/haftsheet",
   "/dashboard/legal/cetak/surat-peringatan",
-  "/dashboard/legal/cetak/formulir-asuransi",
+  "/dashboard/legal/cetak/surat-pengantar",
   "/dashboard/legal/cetak/keterangan-lunas",
   "/dashboard/legal/cetak/surat-samsat",
+  "/dashboard/legal/cetak/dokumen-lainnya",
 ];
 const DEPOSIT_URLS = [
   "/dashboard/legal/titipan/asuransi",
@@ -83,16 +84,6 @@ router.post(
   ...uploadBody,
   validate(validation.printDocumentSchema),
   controller.createPrint,
-);
-
-router.get("/ideb", auth, authorize("/dashboard/legal/upload-ideb", "read"), controller.listIdeb);
-router.post(
-  "/ideb",
-  auth,
-  authorize("/dashboard/legal/upload-ideb", "create"),
-  ...uploadBody,
-  validate(validation.idebSchema),
-  controller.createIdeb,
 );
 
 router.get(

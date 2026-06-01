@@ -70,8 +70,6 @@ exports.deleteTemplate = async (req, res) => {
 
 exports.listPrints = list("listPrints");
 exports.createPrint = create("createPrint", "Dokumen legal berhasil dicetak.");
-exports.listIdeb = list("listIdeb");
-exports.createIdeb = create("createIdeb", "Upload IDEB legal berhasil dibuat.");
 
 exports.listNotaryProgress = list("listNotaryProgress");
 exports.createNotaryProgress = create("createNotaryProgress", "Progress notaris berhasil dibuat.");

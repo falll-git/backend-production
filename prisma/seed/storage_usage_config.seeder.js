@@ -2,7 +2,7 @@ const prisma = require("../../src/config/prisma");
 
 const DEFAULT_STORAGE_USAGE_CONFIG = {
   id: "storage-usage-config-default",
-  free_quota_gb: 500,
+  free_quota_gb: 100,
   overage_price_per_gb: 0.0023,
   currency: "USD",
   is_active: true,

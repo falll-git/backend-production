@@ -45,8 +45,8 @@ exports.update = (id, data) =>
     include: INCLUDE,
   });
 
-exports.findDebtorById = (id) =>
-  prisma.digital_debtors.findFirst({ where: { id, deleted_at: null } });
+exports.findDebtorById = (id, extraWhere = {}) =>
+  prisma.digital_debtors.findFirst({ where: { id, deleted_at: null, ...extraWhere } });
 
-exports.findContractById = (id) =>
-  prisma.debtor_contracts.findFirst({ where: { id, deleted_at: null } });
+exports.findContractById = (id, extraWhere = {}) =>
+  prisma.debtor_contracts.findFirst({ where: { id, deleted_at: null, ...extraWhere } });

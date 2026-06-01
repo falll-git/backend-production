@@ -23,6 +23,20 @@ const { roleHasFeature } = require("../utils/rbac");
 
 const WATERMARK_SUPPORTED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "png"]);
 const PERSURATAN_PRINT_MENU_URL = "/dashboard/manajemen-surat/cetak-dokumen";
+const MIME_TYPES_BY_EXTENSION = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  json: "application/json",
+};
 
 function normalizeRequestedPath(req, publicPrefix) {
   return `${publicPrefix}${req.path || ""}`;
@@ -49,6 +63,103 @@ function getStoredPathExtension(storedPath) {
   return parts.length > 1 ? parts.pop() || "" : "";
 }
 
+function getFileNameFromPath(storedPath) {
+  if (typeof storedPath !== "string" || !storedPath.trim()) return null;
+
+  const normalized = storedPath.trim().split("?")[0].split("#")[0];
+  const fileName = normalized.split(/[\\/]/).filter(Boolean).pop();
+  if (!fileName) return null;
+
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
+}
+
+function hasFileExtension(fileName) {
+  return typeof fileName === "string" && /\.[A-Za-z0-9]{1,8}$/.test(fileName);
+}
+
+function normalizeFileNameForHeader(fileName, storedPath) {
+  const fallback = getFileNameFromPath(storedPath) || "dokumen";
+  const rawName =
+    typeof fileName === "string" && fileName.trim() ? fileName.trim() : fallback;
+  const withoutUnsafeChars = rawName
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[\\/]+/g, "-")
+    .trim();
+  const extension = getStoredPathExtension(storedPath);
+  const finalName =
+    withoutUnsafeChars && hasFileExtension(withoutUnsafeChars)
+      ? withoutUnsafeChars
+      : extension
+        ? `${withoutUnsafeChars || "dokumen"}.${extension}`
+        : withoutUnsafeChars || fallback;
+
+  return finalName;
+}
+
+function buildContentDisposition(fileName) {
+  const fallbackName = fileName
+    .replace(/["\\]/g, "_")
+    .replace(/[^\x20-\x7E]/g, "_");
+  return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(
+    fileName,
+  )}`;
+}
+
+function inferMimeType(fileName, storedPath) {
+  const fileNameExtension = getStoredPathExtension(fileName);
+  const storedPathExtension = getStoredPathExtension(storedPath);
+  return (
+    MIME_TYPES_BY_EXTENSION[fileNameExtension] ||
+    MIME_TYPES_BY_EXTENSION[storedPathExtension] ||
+    null
+  );
+}
+
+function normalizeFileMeta(meta, payload) {
+  const fileName = normalizeFileNameForHeader(meta?.fileName, payload.path);
+  return {
+    fileName,
+    mimeType: meta?.mimeType || inferMimeType(fileName, payload.path),
+  };
+}
+
+function selectDomainFileMeta(record, fallbackName) {
+  if (!record) return null;
+  return {
+    fileName:
+      record.file_name ||
+      record.generated_file_name ||
+      record.document_name ||
+      record.title ||
+      record.type ||
+      record.source_type ||
+      record.activity_kind ||
+      record.letter_type ||
+      record.template_type ||
+      record.document_type ||
+      record.deed_type ||
+      record.insurance_type ||
+      record.appraisal_type ||
+      record.claim_type ||
+      fallbackName ||
+      null,
+    mimeType: record.mime_type || record.generated_mime_type || null,
+  };
+}
+
+async function firstFileMeta(checks) {
+  for (const check of checks) {
+    const record = await check();
+    if (record) return selectDomainFileMeta(record);
+  }
+
+  return null;
+}
+
 async function isWatermarkTargetEnabled(module) {
   const settings = await prisma.watermark_settings.findFirst({
     orderBy: {
@@ -65,6 +176,263 @@ async function isWatermarkTargetEnabled(module) {
       Array.isArray(settings.target_modules) &&
       settings.target_modules.includes(module),
   );
+}
+
+async function getDigitalArchiveFileMeta(payload) {
+  const record = await prisma.digital_documents.findFirst({
+    where: {
+      id: payload.entity_id,
+      deleted_at: null,
+    },
+    select: {
+      document_name: true,
+      file: true,
+      watermark_file: true,
+      document_files: {
+        where: {
+          deleted_at: null,
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+        select: {
+          file_path: true,
+          file_name: true,
+          mime_type: true,
+          is_primary: true,
+        },
+      },
+    },
+  });
+
+  if (!record) return null;
+
+  const files = Array.isArray(record.document_files)
+    ? record.document_files
+    : [];
+  const matched = files.find((item) => item.file_path === payload.path);
+  const primary = files.find((item) => item.is_primary) || files[0] || null;
+  const sourceFile = matched || primary;
+
+  return {
+    fileName: sourceFile?.file_name || record.document_name || null,
+    mimeType: sourceFile?.mime_type || null,
+  };
+}
+
+async function getPersuratanFileMeta(payload, modelName) {
+  const record = await prisma[modelName].findFirst({
+    where: {
+      id: payload.entity_id,
+      deleted_at: null,
+      OR: [{ file: payload.path }, { watermark_file: payload.path }],
+    },
+    select: {
+      file_name: true,
+      file: true,
+      watermark_file: true,
+    },
+  });
+
+  if (!record) return null;
+  return selectDomainFileMeta(record);
+}
+
+async function getDebtorInformationFileMeta(payload) {
+  return firstFileMeta([
+    () =>
+      prisma.debtor_documents.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          document_type: true,
+        },
+      }),
+    () =>
+      prisma.debtor_import_jobs.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          type: true,
+        },
+      }),
+    () =>
+      prisma.debtor_external_records.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          source_type: true,
+        },
+      }),
+    () =>
+      prisma.debtor_ideb_uploads.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
+      prisma.debtor_marketing_activities.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          activity_kind: true,
+        },
+      }),
+    () =>
+      prisma.debtor_warning_letters.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          letter_type: true,
+        },
+      }),
+  ]);
+}
+
+async function getLegalManagementFileMeta(payload) {
+  return firstFileMeta([
+    () =>
+      prisma.legal_document_templates.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          title: true,
+          template_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_print_histories.findFirst({
+        where: {
+          id: payload.entity_id,
+          generated_file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          generated_file_name: true,
+          generated_mime_type: true,
+          document_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_notary_progress.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          deed_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_insurance_progress.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          insurance_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_kjpp_progress.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          appraisal_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_claims.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+          deleted_at: null,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+          claim_type: true,
+        },
+      }),
+  ]);
+}
+
+async function getFileResponseMeta(payload) {
+  switch (payload.module) {
+    case "digital_archive":
+      return getDigitalArchiveFileMeta(payload);
+    case "incoming_mail":
+      return getPersuratanFileMeta(payload, "incoming_mails");
+    case "outgoing_mail":
+      return getPersuratanFileMeta(payload, "outgoing_mails");
+    case "memorandum":
+      return getPersuratanFileMeta(payload, "memorandums");
+    case "debtor_information":
+      return getDebtorInformationFileMeta(payload);
+    case "legal_management":
+      return getLegalManagementFileMeta(payload);
+    default:
+      return null;
+  }
+}
+
+function applySecureFileHeaders(res, payload, meta) {
+  const normalized = normalizeFileMeta(meta, payload);
+
+  res.removeHeader("X-Frame-Options");
+  res.setHeader("Content-Disposition", buildContentDisposition(normalized.fileName));
+  res.setHeader("X-Content-Type-Options", "nosniff");
+
+  if (normalized.mimeType) {
+    res.setHeader("Content-Type", normalized.mimeType);
+  }
 }
 
 async function blocksOriginalWatermarkTarget({ module, record, storedPath }) {
@@ -261,6 +629,14 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.debtor_ideb_uploads.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+        deleted_at: null,
+      },
+      select: { id: true },
+    }),
     () => prisma.debtor_marketing_activities.findFirst({
       where: {
         id: payload.entity_id,
@@ -304,14 +680,6 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
-    () => prisma.legal_ideb_uploads.findFirst({
-      where: {
-        id: payload.entity_id,
-        file_path: payload.path,
-        deleted_at: null,
-      },
-      select: { id: true },
-    }),
     () => prisma.legal_notary_progress.findFirst({
       where: {
         id: payload.entity_id,
@@ -321,6 +689,14 @@ async function legalFileExists(payload) {
       select: { id: true },
     }),
     () => prisma.legal_insurance_progress.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+        deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.legal_kjpp_progress.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
@@ -409,7 +785,16 @@ function secureFileAccess(publicPrefix) {
       });
     }
 
+    try {
+      const meta = await getFileResponseMeta(payload);
+      applySecureFileHeaders(res, payload, meta);
+    } catch (error) {
+      console.error("Secure file metadata lookup failed:", error);
+      applySecureFileHeaders(res, payload, null);
+    }
+
     req.fileAccess = payload;
+    res.locals.fileAccess = payload;
     return next();
   };
 }

@@ -11,7 +11,6 @@ const {
   buildContractManageWhere,
   buildContractVisibilityWhere,
   buildDebtorManageWhere,
-  buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
 const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
@@ -27,10 +26,20 @@ const LEGAL_TYPES = new Set([
   "AKAD",
   "HAFTSHEET",
   "SURAT_PERINGATAN",
-  "FORMULIR_ASURANSI",
+  "SURAT_PENGANTAR",
   "SKL",
   "SAMSAT",
+  "DOKUMEN_LAINNYA",
 ]);
+const DEPOSIT_THIRD_PARTY_CATEGORY_BY_TYPE = {
+  NOTARIS: "NOTARY",
+  ASURANSI: "INSURANCE",
+};
+const LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY = {
+  NOTARY: "NOTARY_DEED",
+  INSURANCE: "INSURANCE_TYPE",
+  KJPP: "KJPP_APPRAISAL",
+};
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -183,27 +192,6 @@ function buildContractAccessWhereFromScope(scope) {
       };
 }
 
-function buildIdebAccessWhereFromScope(scope) {
-  if (scope.canViewAll || scope.canManageAll) return {};
-
-  return {
-    OR: [
-      { uploaded_by: scope.userId || "__no_user_access__" },
-      { created_by: scope.userId || "__no_user_access__" },
-      {
-        debtor: {
-          is: buildDebtorVisibilityWhere(scope),
-        },
-      },
-      {
-        contract: {
-          is: buildContractVisibilityWhere(scope),
-        },
-      },
-    ],
-  };
-}
-
 async function buildContractAccessWhere(userId) {
   const scope = await getLegalAccessScope(userId);
   return buildContractAccessWhereFromScope(scope);
@@ -223,11 +211,6 @@ async function buildDepositTransactionAccessWhere(userId) {
           },
         },
       };
-}
-
-async function buildIdebAccessWhere(userId) {
-  const scope = await getLegalAccessScope(userId);
-  return buildIdebAccessWhereFromScope(scope);
 }
 
 async function ensureContract(contractId, userId, tx) {
@@ -266,6 +249,57 @@ async function ensureThirdParty(thirdPartyId, expectedCategory) {
   return thirdParty;
 }
 
+async function ensureDepositType(depositTypeId, depositType) {
+  const id = normalizeText(depositTypeId);
+  if (!id) return null;
+
+  const type = normalizeUpper(depositType);
+  const depositTypeRecord = await repository.findDepositTypeById(id);
+  if (!depositTypeRecord) {
+    throw new AppError("Jenis titipan tidak ditemukan atau tidak aktif.", 404);
+  }
+
+  if (normalizeUpper(depositTypeRecord.category) !== type) {
+    throw new AppError(`Kategori jenis titipan wajib ${type}.`, 422);
+  }
+
+  return depositTypeRecord;
+}
+
+async function ensureDepositThirdParty(thirdPartyId, depositType) {
+  const id = normalizeText(thirdPartyId);
+  if (!id) return null;
+
+  const type = normalizeUpper(depositType);
+  const expectedCategory = DEPOSIT_THIRD_PARTY_CATEGORY_BY_TYPE[type];
+  if (!expectedCategory) {
+    throw new AppError("Pihak ketiga tidak boleh diisi untuk dana titipan angsuran.", 422);
+  }
+
+  return ensureThirdParty(id, expectedCategory);
+}
+
+async function resolveLegalProcessType(value, category, label) {
+  const text = normalizeText(value);
+  if (!text) {
+    throw new AppError(`${label} wajib dipilih.`, 422);
+  }
+
+  const processType = await repository.findLegalProcessType({
+    value: text,
+    category,
+  });
+
+  if (!processType) {
+    throw new AppError(
+      `${label} tidak aktif atau belum terdaftar di Parameter.`,
+      422,
+    );
+  }
+
+  return processType.name;
+}
+
 function calculateRemaining(payload) {
   const nominal = number(payload.nominal);
   const paid = number(payload.paid_amount);
@@ -280,6 +314,53 @@ function calculateRemaining(payload) {
   }
 
   return Math.max(nominal - used, 0);
+}
+
+function assertLegalDocumentType(value) {
+  const documentType = normalizeUpper(value);
+  if (!LEGAL_TYPES.has(documentType)) {
+    throw new AppError("Jenis dokumen legal tidak valid.", 422);
+  }
+  return documentType;
+}
+
+function assertNumberingTemplateMatches(template, documentType) {
+  if (!template || !template.is_active) {
+    throw new AppError("Template penomoran aktif untuk dokumen legal tidak ditemukan.", 422);
+  }
+
+  if (
+    normalizeUpper(template.module) !== "LEGAL" ||
+    normalizeUpper(template.document_type) !== documentType
+  ) {
+    throw new AppError("Template penomoran tidak sesuai dengan jenis dokumen legal.", 422);
+  }
+
+  return template;
+}
+
+async function ensureNumberingTemplate(documentType, numberingTemplateId, tx) {
+  const id = normalizeText(numberingTemplateId);
+  if (!id) return null;
+
+  const template = await repository.findNumberingTemplateById(id, tx);
+  return assertNumberingTemplateMatches(template, documentType);
+}
+
+async function ensureLegalTemplate(templateId, documentType) {
+  const id = normalizeText(templateId);
+  if (!id) return null;
+
+  const template = await repository.findTemplateById(id);
+  if (!template || !template.is_active) {
+    throw new AppError("Template legal aktif tidak ditemukan.", 404);
+  }
+
+  if (normalizeUpper(template.template_type) !== documentType) {
+    throw new AppError("Template legal tidak sesuai dengan jenis dokumen yang dicetak.", 422);
+  }
+
+  return template;
 }
 
 async function listModel({
@@ -435,11 +516,10 @@ function renderNumber(template, documentType, sequence, date = new Date()) {
 
 async function generateDocumentNumber(documentType, numberingTemplateId, tx) {
   const template = numberingTemplateId
-    ? await repository.findNumberingTemplateById(numberingTemplateId, tx)
+    ? await ensureNumberingTemplate(documentType, numberingTemplateId, tx)
     : await repository.findActiveNumberingTemplate(documentType, tx);
-  if (!template || !template.is_active) {
-    throw new AppError("Template penomoran aktif untuk dokumen legal tidak ditemukan.", 422);
-  }
+  assertNumberingTemplateMatches(template, documentType);
+
   const key = periodKey(new Date(), template.reset_period);
   const lastSequence =
     template.last_period_key === key ? Number(template.last_sequence || 0) : 0;
@@ -469,11 +549,10 @@ exports.listPrints = async ({ req, query, userId }) =>
   });
 
 exports.createPrint = async ({ req, payload, userId }) => {
-  const documentType = normalizeUpper(payload.document_type);
+  const documentType = assertLegalDocumentType(payload.document_type);
   await ensureContract(payload.contract_id, userId);
-  if (payload.template_id && !(await repository.findTemplateById(payload.template_id))) {
-    throw new AppError("Template legal tidak ditemukan.", 404);
-  }
+  await ensureLegalTemplate(payload.template_id, documentType);
+
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: "legal/generated",
@@ -483,14 +562,11 @@ exports.createPrint = async ({ req, payload, userId }) => {
     : null;
 
   const print = await repository.transaction(async (tx) => {
-    const generated = payload.generated_number
-      ? {
-          numberingTemplate: payload.numbering_template_id
-            ? await repository.findNumberingTemplateById(payload.numbering_template_id, tx)
-            : null,
-          generatedNumber: normalizeText(payload.generated_number),
-        }
-      : await generateDocumentNumber(documentType, payload.numbering_template_id, tx);
+    const generated = await generateDocumentNumber(
+      documentType,
+      payload.numbering_template_id,
+      tx,
+    );
 
     return repository.create(
       "legal_print_histories",
@@ -519,49 +595,6 @@ exports.createPrint = async ({ req, payload, userId }) => {
   return serializePrint(req, print);
 };
 
-exports.listIdeb = async ({ req, query, userId }) =>
-  listModel({
-    req,
-    modelName: "legal_ideb_uploads",
-    query,
-    searchFields: ["status", "file_name"],
-    extraWhere: await buildIdebAccessWhere(userId),
-    serializer: (request, item) => serializeWithFile(request, item, "ideb"),
-  });
-
-exports.createIdeb = async ({ req, payload, userId }) => {
-  const debtor = payload.debtor_id
-    ? await ensureDebtor(payload.debtor_id, userId)
-    : null;
-  const contract = payload.contract_id
-    ? await ensureContract(payload.contract_id, userId)
-    : null;
-  if (debtor && contract && contract.debtor_id !== debtor.id) {
-    throw new AppError("Kontrak tidak sesuai dengan debitur yang dipilih.", 422);
-  }
-  const fileMeta = persistDomainFile({
-    entity: "legal/ideb",
-    input: payload.file,
-    fallbackBaseName: "ideb",
-  });
-  if (!fileMeta) throw new AppError("File IDEB wajib diunggah.", 422);
-  return serializeWithFile(
-    req,
-    await repository.create("legal_ideb_uploads", {
-      debtor_id: debtor?.id || contract?.debtor_id || normalizeText(payload.debtor_id),
-      contract_id: normalizeText(payload.contract_id),
-      month: payload.month,
-      year: payload.year,
-      status: normalizeUpper(payload.status || "PENDING"),
-      result_summary: payload.result_summary || undefined,
-      ...fileMeta,
-      uploaded_by: userId || null,
-      created_by: userId || null,
-    }),
-    "ideb",
-  );
-};
-
 async function createProgress({ req, modelName, payload, userId, category, entity }) {
   await ensureContract(payload.contract_id, userId);
   await ensureThirdParty(payload.third_party_id, category);
@@ -574,6 +607,28 @@ async function createProgress({ req, modelName, payload, userId, category, entit
     : null;
   const data = { ...payload };
   delete data.file;
+  const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
+  if (processCategory && data.deed_type !== undefined) {
+    data.deed_type = await resolveLegalProcessType(
+      data.deed_type,
+      processCategory,
+      "Jenis proses notaris",
+    );
+  }
+  if (processCategory && data.insurance_type !== undefined) {
+    data.insurance_type = await resolveLegalProcessType(
+      data.insurance_type,
+      processCategory,
+      "Jenis proses asuransi",
+    );
+  }
+  if (processCategory && data.appraisal_type !== undefined) {
+    data.appraisal_type = await resolveLegalProcessType(
+      data.appraisal_type,
+      processCategory,
+      "Jenis proses KJPP",
+    );
+  }
   for (const key of Object.keys(data)) {
     if (key.endsWith("_at") || key.startsWith("period_")) {
       data[key] = data[key] ? new Date(data[key]) : null;
@@ -609,6 +664,28 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
       : null;
   const data = { ...payload };
   delete data.file;
+  const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
+  if (processCategory && data.deed_type !== undefined) {
+    data.deed_type = await resolveLegalProcessType(
+      data.deed_type,
+      processCategory,
+      "Jenis proses notaris",
+    );
+  }
+  if (processCategory && data.insurance_type !== undefined) {
+    data.insurance_type = await resolveLegalProcessType(
+      data.insurance_type,
+      processCategory,
+      "Jenis proses asuransi",
+    );
+  }
+  if (processCategory && data.appraisal_type !== undefined) {
+    data.appraisal_type = await resolveLegalProcessType(
+      data.appraisal_type,
+      processCategory,
+      "Jenis proses KJPP",
+    );
+  }
   for (const key of Object.keys(data)) {
     if (key.endsWith("_at") || key.startsWith("period_")) {
       data[key] = data[key] ? new Date(data[key]) : null;
@@ -772,6 +849,11 @@ exports.createClaim = async ({ req, payload, userId }) => {
     : null;
   const data = { ...payload };
   delete data.file;
+  data.claim_type = await resolveLegalProcessType(
+    data.claim_type,
+    "INSURANCE_CLAIM",
+    "Jenis klaim",
+  );
   return serializeClaim(
     req,
     await repository.create("legal_claims", {
@@ -801,6 +883,13 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
       : null;
   const data = { ...payload };
   delete data.file;
+  if (data.claim_type !== undefined) {
+    data.claim_type = await resolveLegalProcessType(
+      data.claim_type,
+      "INSURANCE_CLAIM",
+      "Jenis klaim",
+    );
+  }
   if (data.status) data.status = normalizeUpper(data.status);
   if (data.contract_id) await ensureContract(data.contract_id, userId);
   if (data.insurance_progress_id) {
@@ -841,17 +930,23 @@ exports.listDeposits = async ({ query, userId }) =>
   });
 
 exports.createDeposit = async ({ payload, userId }) => {
+  const type = normalizeUpper(payload.type);
+  const depositTypeId = normalizeText(payload.deposit_type_id);
+  const thirdPartyId = normalizeText(payload.third_party_id);
+
   await ensureContract(payload.contract_id, userId);
-  if (payload.third_party_id) await ensureThirdParty(payload.third_party_id);
+  await ensureDepositType(depositTypeId, type);
+  await ensureDepositThirdParty(thirdPartyId, type);
+
   const remaining = calculateRemaining(payload);
   const paidAmount = number(payload.paid_amount);
   const processedAmount = number(payload.processed_amount);
   return serializeDeposit(
     await repository.create("legal_deposits", {
-      deposit_type_id: normalizeText(payload.deposit_type_id),
-      type: normalizeUpper(payload.type),
+      deposit_type_id: depositTypeId,
+      type,
       contract_id: payload.contract_id,
-      third_party_id: normalizeText(payload.third_party_id),
+      third_party_id: thirdPartyId,
       nominal: decimalField(payload, "nominal"),
       paid_amount: paidAmount,
       processed_amount: processedAmount,
@@ -887,7 +982,8 @@ exports.updateDeposit = async ({ id, payload, userId }) => {
   };
   next.remaining_amount = calculateRemaining(next);
   await ensureContract(next.contract_id, userId);
-  if (next.third_party_id) await ensureThirdParty(next.third_party_id);
+  await ensureDepositType(next.deposit_type_id, next.type);
+  await ensureDepositThirdParty(next.third_party_id, next.type);
   return serializeDeposit(await repository.update("legal_deposits", id, next));
 };
 
@@ -979,11 +1075,9 @@ exports.createDepositTransaction = async ({ payload, userId }) => {
 exports.getSummaryReport = async (_query = {}, userId = null) => {
   const scope = await getLegalReportScope(userId, LEGAL_REPORT_URLS.summary);
   const contractAccessWhere = buildContractAccessWhereFromScope(scope);
-  const idebAccessWhere = buildIdebAccessWhereFromScope(scope);
   const [
     templates,
     prints,
-    ideb,
     notary,
     insurance,
     kjpp,
@@ -996,10 +1090,6 @@ exports.getSummaryReport = async (_query = {}, userId = null) => {
     repository.countWhere("legal_print_histories", {
       deleted_at: null,
       ...contractAccessWhere,
-    }),
-    repository.countWhere("legal_ideb_uploads", {
-      deleted_at: null,
-      ...idebAccessWhere,
     }),
     repository.countWhere("legal_notary_progress", {
       deleted_at: null,
@@ -1025,7 +1115,6 @@ exports.getSummaryReport = async (_query = {}, userId = null) => {
   return {
     templates,
     prints,
-    ideb,
     notary,
     insurance,
     kjpp,

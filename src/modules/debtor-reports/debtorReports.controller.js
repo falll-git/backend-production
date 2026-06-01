@@ -28,7 +28,7 @@ exports.marketingActivity = async (req, res) => {
   try {
     return successResponse(
       res,
-      await service.getMarketingActivity(req.query, req.user?.id),
+      await service.getMarketingActivity(req, req.query, req.user?.id),
     );
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });

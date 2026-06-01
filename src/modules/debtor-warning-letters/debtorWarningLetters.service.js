@@ -6,6 +6,19 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  buildContractManageWhere,
+  buildContractVisibilityWhere,
+  buildDebtorManageWhere,
+  buildDebtorVisibilityWhere,
+  getDebtorAccessScope,
+} = require("../../utils/debtor-access");
+
+const READ_SCOPE_URLS = [
+  "/dashboard/informasi-debitur",
+  "/dashboard/informasi-debitur/master-debitur",
+];
+const MANAGE_SCOPE_URLS = ["/dashboard/informasi-debitur/master-debitur"];
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -92,21 +105,39 @@ function normalizePayload(payload, current = {}) {
   };
 }
 
-async function ensureReferences(data) {
-  const debtor = await repository.findDebtorById(data.debtor_id);
+async function ensureReferences(data, userId) {
+  const scope = await getDebtorAccessScope(userId, MANAGE_SCOPE_URLS);
+  const debtor = await repository.findDebtorById(
+    data.debtor_id,
+    buildDebtorManageWhere(scope),
+  );
   if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
 
   if (data.contract_id) {
-    const contract = await repository.findContractById(data.contract_id);
+    const contract = await repository.findContractById(
+      data.contract_id,
+      buildContractManageWhere(scope),
+    );
     if (!contract || contract.debtor_id !== data.debtor_id) {
       throw new AppError("Kontrak debitur tidak ditemukan.", 404);
     }
   }
 }
 
-exports.getAll = async ({ req, query }) => {
+exports.getAll = async ({ req, query, userId }) => {
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
-  const where = buildWhere(query);
+  const scope = await getDebtorAccessScope(userId, READ_SCOPE_URLS);
+  const where = {
+    AND: [
+      buildWhere(query),
+      {
+        OR: [
+          { debtor: buildDebtorVisibilityWhere(scope) },
+          { contract: buildContractVisibilityWhere(scope) },
+        ],
+      },
+    ],
+  };
   const [data, total] = await Promise.all([
     repository.findMany({
       where,
@@ -122,15 +153,38 @@ exports.getAll = async ({ req, query }) => {
   };
 };
 
-exports.getById = async ({ req, id }) => {
-  const item = await repository.findById(id, { deleted_at: null });
+exports.getById = async ({ req, id, userId }) => {
+  const scope = await getDebtorAccessScope(userId, READ_SCOPE_URLS);
+  const item = await repository.findById(id, {
+    deleted_at: null,
+    OR: [
+      { debtor: buildDebtorVisibilityWhere(scope) },
+      { contract: buildContractVisibilityWhere(scope) },
+    ],
+  });
   if (!item) throw new AppError("Surat peringatan tidak ditemukan.", 404);
   return serialize(req, item);
 };
 
+exports.getByIdForManage = async ({ req, id, userId }) => {
+  void req;
+  const scope = await getDebtorAccessScope(userId, MANAGE_SCOPE_URLS);
+  const item = await repository.findById(id, {
+    deleted_at: null,
+    OR: [
+      { debtor: buildDebtorManageWhere(scope) },
+      { contract: buildContractManageWhere(scope) },
+    ],
+  });
+  if (!item) {
+    throw new AppError("Surat peringatan tidak ditemukan atau tidak bisa dikelola.", 404);
+  }
+  return item;
+};
+
 exports.create = async ({ req, payload, userId }) => {
   const data = normalizePayload(payload);
-  await ensureReferences(data);
+  await ensureReferences(data, userId);
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: "debtor-warning-letters",
@@ -150,10 +204,9 @@ exports.create = async ({ req, payload, userId }) => {
 };
 
 exports.update = async ({ req, id, payload, userId }) => {
-  const current = await repository.findById(id, { deleted_at: null });
-  if (!current) throw new AppError("Surat peringatan tidak ditemukan.", 404);
+  const current = await exports.getByIdForManage({ req, id, userId });
   const data = normalizePayload(payload, current);
-  await ensureReferences(data);
+  await ensureReferences(data, userId);
   const fileMeta =
     payload.file !== undefined && payload.file !== null
       ? persistDomainFile({
@@ -174,8 +227,8 @@ exports.update = async ({ req, id, payload, userId }) => {
   );
 };
 
-exports.delete = async ({ id, userId }) => {
-  await exports.getById({ req: null, id });
+exports.delete = async ({ req, id, userId }) => {
+  await exports.getByIdForManage({ req, id, userId });
   await repository.update(id, {
     deleted_at: new Date(),
     deleted_by: userId || null,

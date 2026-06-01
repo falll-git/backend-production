@@ -83,6 +83,10 @@ function shouldSendEmail(payload) {
   return EMAIL_EVENT_TYPES.has(payload.event_type);
 }
 
+function isDedupeConflict(error, payload) {
+  return Boolean(payload?.dedupe_key && error?.code === "P2002");
+}
+
 async function sendNotificationEmail(notification) {
   const recipient = notification.recipient;
   if (!recipient?.email) {
@@ -131,20 +135,31 @@ async function createNotification(payload) {
     if (existing) return existing;
   }
 
-  const notification = await repository.create({
-    recipient_id: payload.recipient_id,
-    module: normalizeText(payload.module, "SYSTEM"),
-    event_type: normalizeText(payload.event_type, "INFO"),
-    entity_type: normalizeText(payload.entity_type, "GENERAL"),
-    entity_id: normalizeText(payload.entity_id, "GENERAL"),
-    title: normalizeText(payload.title, "Notifikasi"),
-    message: normalizeText(payload.message),
-    link_url: payload.link_url || null,
-    priority: normalizeText(payload.priority, "NORMAL"),
-    email_status: shouldSendEmail(payload) ? "PENDING" : "SKIPPED",
-    dedupe_key: payload.dedupe_key || null,
-    created_by: payload.created_by || null,
-  });
+  let notification;
+
+  try {
+    notification = await repository.create({
+      recipient_id: payload.recipient_id,
+      module: normalizeText(payload.module, "SYSTEM"),
+      event_type: normalizeText(payload.event_type, "INFO"),
+      entity_type: normalizeText(payload.entity_type, "GENERAL"),
+      entity_id: normalizeText(payload.entity_id, "GENERAL"),
+      title: normalizeText(payload.title, "Notifikasi"),
+      message: normalizeText(payload.message),
+      link_url: payload.link_url || null,
+      priority: normalizeText(payload.priority, "NORMAL"),
+      email_status: shouldSendEmail(payload) ? "PENDING" : "SKIPPED",
+      dedupe_key: payload.dedupe_key || null,
+      created_by: payload.created_by || null,
+    });
+  } catch (error) {
+    if (isDedupeConflict(error, payload)) {
+      const existing = await repository.findByDedupeKey(payload.dedupe_key);
+      if (existing) return existing;
+    }
+
+    throw error;
+  }
 
   if (shouldSendEmail(payload)) {
     await sendNotificationEmail(notification);

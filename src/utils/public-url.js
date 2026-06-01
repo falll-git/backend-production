@@ -93,7 +93,8 @@ function buildPublicUrl(req, storedPath) {
 
       if (
         !isLoopbackHostname(parsed.hostname) &&
-        normalizedPath === `${parsed.pathname}${parsed.search}${parsed.hash}`
+        normalizedPath === `${parsed.pathname}${parsed.search}${parsed.hash}` &&
+        (!isServerRuntime() || parsed.protocol === "https:")
       ) {
         return rawValue;
       }

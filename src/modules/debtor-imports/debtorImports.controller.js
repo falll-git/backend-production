@@ -33,4 +33,12 @@ function createHandler(type) {
 exports.createMaster = createHandler("MASTER");
 exports.createCollectibility = createHandler("COLLECTIBILITY");
 exports.createSlik = createHandler("SLIK");
+exports.createIdeb = createHandler("IDEB");
 exports.createRestrik = createHandler("RESTRIK");
+exports.createDeprecated = async (_req, res) =>
+  res.status(410).json({
+    status: false,
+    success: false,
+    message:
+      "Endpoint import ini sudah digabung ke Import SLIK. Gunakan /api/debtor-imports/slik.",
+  });

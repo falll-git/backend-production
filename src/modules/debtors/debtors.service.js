@@ -2,6 +2,7 @@ const repository = require("./debtors.repository");
 const debtorContractsService = require("../debtor-contracts/debtorContracts.service");
 const { AppError } = require("../../utils/errors");
 const {
+  buildContractVisibilityWhere,
   buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
@@ -15,7 +16,22 @@ const {
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
 
-const SORTABLE_FIELDS = new Set(["debtor_number", "name", "status", "created_at", "updated_at"]);
+const SORTABLE_FIELDS = new Set([
+  "debtor_number",
+  "name",
+  "customer_type",
+  "status",
+  "created_at",
+  "updated_at",
+]);
+const CUSTOMER_TYPE_LABELS = {
+  INDIVIDUAL: "Perorangan",
+  LEGAL_ENTITY: "Badan Hukum/Yayasan",
+};
+const CUSTOMER_TYPE_STATUS_CODES = {
+  INDIVIDUAL: "I",
+  LEGAL_ENTITY: "B",
+};
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -34,6 +50,47 @@ function decimalToNumber(value) {
   return Number(value);
 }
 
+function parseNullableDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeDateField(value) {
+  if (value === undefined) return undefined;
+  return parseNullableDate(value);
+}
+
+function normalizeCustomerType(value) {
+  const normalized = normalizeUpper(value);
+  if (!normalized) return normalized;
+  if (["I", "INDIVIDUAL", "PERORANGAN"].includes(normalized)) return "INDIVIDUAL";
+  if (["B", "LEGAL_ENTITY", "BADAN_HUKUM", "BADAN HUKUM", "YAYASAN"].includes(normalized)) {
+    return "LEGAL_ENTITY";
+  }
+  return normalized;
+}
+
+function customerTypeLabel(value) {
+  const normalized = normalizeCustomerType(value);
+  return normalized ? CUSTOMER_TYPE_LABELS[normalized] || normalized : null;
+}
+
+function serializeIndividualProfile(profile) {
+  if (!profile) return null;
+  return {
+    ...profile,
+    annual_gross_income:
+      profile.annual_gross_income === null || profile.annual_gross_income === undefined
+        ? null
+        : decimalToNumber(profile.annual_gross_income),
+  };
+}
+
+function serializeLegalEntityProfile(profile) {
+  return profile || null;
+}
+
 function serializeUser(user) {
   if (!user) return null;
   return {
@@ -43,6 +100,65 @@ function serializeUser(user) {
     email: user.email,
     division_id: user.division_id,
     division_name: user.division?.name ?? null,
+  };
+}
+
+function serializeContractSnapshot(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    debtor_id: item.debtor_id,
+    contract_id: item.contract_id,
+    period_month: item.period_month,
+    facility_number: item.facility_number,
+    debtor_number: item.debtor_number,
+    credit_nature_code: item.credit_nature_code,
+    credit_type_code: item.credit_type_code,
+    financing_scheme_code: item.financing_scheme_code,
+    initial_akad_number: item.initial_akad_number,
+    initial_akad_date: item.initial_akad_date,
+    final_akad_number: item.final_akad_number,
+    final_akad_date: item.final_akad_date,
+    new_or_extension_code: item.new_or_extension_code,
+    credit_start_date: item.credit_start_date,
+    start_date: item.start_date,
+    due_date: item.due_date,
+    debtor_category_code: item.debtor_category_code,
+    usage_type_code: item.usage_type_code,
+    usage_orientation_code: item.usage_orientation_code,
+    economic_sector_code: item.economic_sector_code,
+    project_location_city_code: item.project_location_city_code,
+    project_value: decimalToNumber(item.project_value),
+    currency_code: item.currency_code,
+    interest_rate: decimalToNumber(item.interest_rate),
+    interest_type_code: item.interest_type_code,
+    government_program_code: item.government_program_code,
+    takeover_from: item.takeover_from,
+    source_of_funds_code: item.source_of_funds_code,
+    initial_plafond: decimalToNumber(item.initial_plafond),
+    plafond: decimalToNumber(item.plafond),
+    current_month_disbursement: decimalToNumber(item.current_month_disbursement),
+    penalty: decimalToNumber(item.penalty),
+    baki_debet: decimalToNumber(item.baki_debet),
+    original_currency_amount: decimalToNumber(item.original_currency_amount),
+    collectibility_code: item.collectibility_code,
+    default_date: item.default_date,
+    default_reason_code: item.default_reason_code,
+    principal_arrears: decimalToNumber(item.principal_arrears),
+    margin_arrears: decimalToNumber(item.margin_arrears),
+    days_past_due: item.days_past_due,
+    arrears_frequency: item.arrears_frequency,
+    restructuring_frequency: item.restructuring_frequency,
+    initial_restructuring_date: item.initial_restructuring_date,
+    final_restructuring_date: item.final_restructuring_date,
+    restructuring_method_code: item.restructuring_method_code,
+    condition_code: item.condition_code,
+    condition_date: item.condition_date,
+    description: item.description,
+    branch_code: item.branch_code,
+    operation_code: item.operation_code,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -65,6 +181,9 @@ function serializeContract(contract) {
       }))
     : [];
   const latestCollectibility = collectibilities[0] || null;
+  const slikSnapshots = Array.isArray(contract.slik_snapshots)
+    ? contract.slik_snapshots.map(serializeContractSnapshot).filter(Boolean)
+    : [];
 
   return {
     id: contract.id,
@@ -94,6 +213,8 @@ function serializeContract(contract) {
     marketing_user: serializeUser(contract.marketing_user),
     latest_collectibility: latestCollectibility,
     collectibilities,
+    latest_slik_snapshot: slikSnapshots[0] || null,
+    slik_snapshots: slikSnapshots,
     created_at: contract.created_at,
     updated_at: contract.updated_at,
   };
@@ -116,6 +237,13 @@ function serializeDebtor(debtor) {
     branch_id: debtor.branch_id,
     marketing_user_id: debtor.marketing_user_id,
     financing_number: debtor.financing_number,
+    customer_type: debtor.customer_type,
+    customer_type_label: customerTypeLabel(debtor.customer_type),
+    slik_segment: debtor.slik_segment,
+    slik_status_code: debtor.slik_status_code,
+    slik_operation_code: debtor.slik_operation_code,
+    individual_profile: serializeIndividualProfile(debtor.individual_profile),
+    legal_entity_profile: serializeLegalEntityProfile(debtor.legal_entity_profile),
     status: debtor.status,
     description: debtor.description,
     branch: debtor.branch || null,
@@ -148,6 +276,7 @@ function serializeDocument(req, document) {
       fallbackBaseName: document.document_type,
     }),
     document_checklist: document.document_checklist || null,
+    debtor: document.debtor ? serializeDebtor(document.debtor) : null,
     contract: document.contract || null,
     uploaded_by: document.uploaded_by,
     created_at: document.created_at,
@@ -427,7 +556,21 @@ function serializeIdeb(req, item, debtor, contracts) {
   return {
     ...item,
     summary_detail: buildIdebSummaryDetail(item, debtor, contracts),
-    file: serializeLegalFile(req, item, "ideb"),
+    file: serializeDebtorFile(req, item, "ideb"),
+  };
+}
+
+function serializeRestructuring(item) {
+  return {
+    ...item,
+    plafond_after:
+      item.plafond_after === null || item.plafond_after === undefined
+        ? null
+        : decimalToNumber(item.plafond_after),
+    outstanding_after:
+      item.outstanding_after === null || item.outstanding_after === undefined
+        ? null
+        : decimalToNumber(item.outstanding_after),
   };
 }
 
@@ -489,6 +632,60 @@ function serializeDeposit(item) {
           amount: decimalToNumber(transaction.amount),
         }))
       : [],
+  };
+}
+
+function serializeCollateral(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    debtor_id: item.debtor_id,
+    contract_id: item.contract_id,
+    collateral_number: item.collateral_number,
+    facility_number: item.facility_number,
+    facility_segment_code: item.facility_segment_code,
+    collateral_status_code: item.collateral_status_code,
+    collateral_type: item.collateral_type,
+    rating: item.rating,
+    rating_agency_code: item.rating_agency_code,
+    binding_type_code: item.binding_type_code,
+    binding_date: item.binding_date,
+    owner_name: item.owner_name,
+    proof_number: item.proof_number,
+    address: item.address,
+    location_city_code: item.location_city_code,
+    market_value:
+      item.market_value === null || item.market_value === undefined
+        ? null
+        : decimalToNumber(item.market_value),
+    appraisal_value:
+      item.appraisal_value === null || item.appraisal_value === undefined
+        ? null
+        : decimalToNumber(item.appraisal_value),
+    reporter_appraisal_date: item.reporter_appraisal_date,
+    independent_appraisal_value:
+      item.independent_appraisal_value === null ||
+      item.independent_appraisal_value === undefined
+        ? null
+        : decimalToNumber(item.independent_appraisal_value),
+    independent_appraiser_name: item.independent_appraiser_name,
+    independent_appraisal_date: item.independent_appraisal_date,
+    paripasu_status: item.paripasu_status,
+    paripasu_percentage:
+      item.paripasu_percentage === null || item.paripasu_percentage === undefined
+        ? null
+        : decimalToNumber(item.paripasu_percentage),
+    joint_credit_status: item.joint_credit_status,
+    insured_status: item.insured_status,
+    description: item.description,
+    branch_code: item.branch_code,
+    operation_code: item.operation_code,
+    period_month: item.period_month,
+    last_import_period_month: item.last_import_period_month,
+    debtor: item.debtor ? serializeDebtor(item.debtor) : null,
+    contract: item.contract || null,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -554,11 +751,199 @@ function buildDebtorWhere(query, scope) {
     clauses.push({ marketing_user_id: query.marketing_user_id });
   }
   if (query.status) clauses.push({ status: normalizeUpper(query.status) });
+  if (query.customer_type) {
+    clauses.push({ customer_type: normalizeCustomerType(query.customer_type) });
+  }
 
   return { AND: clauses.filter((item) => Object.keys(item).length > 0) };
 }
 
+function buildCollateralOrderBy(query) {
+  const sortBy = normalizeText(query.sort_by || query.sortBy);
+  const sortOrder =
+    String(query.sort_order || query.sortOrder || "asc").toLowerCase() ===
+    "desc"
+      ? "desc"
+      : "asc";
+  const sortable = new Set([
+    "collateral_number",
+    "facility_number",
+    "collateral_type",
+    "owner_name",
+    "market_value",
+    "appraisal_value",
+    "created_at",
+    "updated_at",
+  ]);
+
+  if (sortBy && sortable.has(sortBy)) return { [sortBy]: sortOrder };
+  return { created_at: "desc" };
+}
+
+function buildCollateralVisibilityWhere(scope) {
+  if (scope?.canManageAll) return {};
+  if (!scope?.userId) return { id: "__no_collateral_access__" };
+
+  return {
+    OR: [
+      {
+        debtor: {
+          is: buildDebtorVisibilityWhere(scope),
+        },
+      },
+      {
+        contract: {
+          is: buildContractVisibilityWhere(scope),
+        },
+      },
+    ],
+  };
+}
+
+function buildCollateralWhere(query, scope) {
+  const clauses = [{ deleted_at: null }, buildCollateralVisibilityWhere(scope)];
+  const search = normalizeText(query.search);
+
+  if (search) {
+    clauses.push({
+      OR: [
+        { collateral_number: { contains: search, mode: "insensitive" } },
+        { facility_number: { contains: search, mode: "insensitive" } },
+        { collateral_type: { contains: search, mode: "insensitive" } },
+        { owner_name: { contains: search, mode: "insensitive" } },
+        { proof_number: { contains: search, mode: "insensitive" } },
+        { address: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+        { debtor: { is: { name: { contains: search, mode: "insensitive" } } } },
+        {
+          debtor: {
+            is: { debtor_number: { contains: search, mode: "insensitive" } },
+          },
+        },
+        { contract: { is: { no_kontrak: { contains: search, mode: "insensitive" } } } },
+      ],
+    });
+  }
+
+  if (query.collateral_type) {
+    clauses.push({
+      collateral_type: { contains: normalizeText(query.collateral_type), mode: "insensitive" },
+    });
+  }
+  if (query.link_status === "linked") {
+    clauses.push({
+      OR: [{ debtor_id: { not: null } }, { contract_id: { not: null } }],
+    });
+  }
+  if (query.link_status === "unlinked") {
+    clauses.push({ debtor_id: null, contract_id: null });
+  }
+
+  return { AND: clauses.filter((item) => Object.keys(item).length > 0) };
+}
+
+function normalizeIndividualProfilePayload(payload = {}, userId = null) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  return compactUndefined({
+    identity_type_code: normalizeText(payload.identity_type_code),
+    name_as_identity: normalizeText(payload.name_as_identity),
+    full_name: normalizeText(payload.full_name),
+    education_degree_code: normalizeText(payload.education_degree_code),
+    gender: normalizeText(payload.gender),
+    birth_place: normalizeText(payload.birth_place),
+    birth_date: normalizeDateField(payload.birth_date),
+    tax_number: normalizeText(payload.tax_number),
+    address_detail: normalizeText(payload.address_detail),
+    village: normalizeText(payload.village),
+    district: normalizeText(payload.district),
+    city_code: normalizeText(payload.city_code),
+    postal_code: normalizeText(payload.postal_code),
+    phone: normalizeText(payload.phone),
+    mobile_phone: normalizeText(payload.mobile_phone),
+    email: normalizeText(payload.email),
+    domicile_country_code: normalizeText(payload.domicile_country_code),
+    occupation_code: normalizeText(payload.occupation_code),
+    workplace: normalizeText(payload.workplace),
+    workplace_business_field_code: normalizeText(payload.workplace_business_field_code),
+    workplace_address: normalizeText(payload.workplace_address),
+    annual_gross_income:
+      payload.annual_gross_income === undefined || payload.annual_gross_income === ""
+        ? undefined
+        : Number(payload.annual_gross_income || 0),
+    income_source_code: normalizeText(payload.income_source_code),
+    dependent_count:
+      payload.dependent_count === undefined || payload.dependent_count === ""
+        ? undefined
+        : Number(payload.dependent_count || 0),
+    relationship_with_reporter_code: normalizeText(payload.relationship_with_reporter_code),
+    debtor_group_code: normalizeText(payload.debtor_group_code),
+    marital_status_code: normalizeText(payload.marital_status_code),
+    spouse_identity_number: normalizeText(payload.spouse_identity_number),
+    spouse_name: normalizeText(payload.spouse_name),
+    spouse_birth_date: normalizeDateField(payload.spouse_birth_date),
+    separate_assets_agreement: normalizeText(payload.separate_assets_agreement),
+    violates_bmpk: normalizeText(payload.violates_bmpk),
+    exceeds_bmpk: normalizeText(payload.exceeds_bmpk),
+    mother_maiden_name: normalizeText(payload.mother_maiden_name),
+    branch_code: normalizeText(payload.branch_code),
+    operation_code: normalizeUpper(payload.operation_code),
+    status_code: normalizeUpper(payload.status_code),
+  });
+}
+
+function normalizeLegalEntityProfilePayload(payload = {}, userId = null) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  return compactUndefined({
+    business_identity_number: normalizeText(payload.business_identity_number),
+    business_name: normalizeText(payload.business_name),
+    legal_form_code: normalizeText(payload.legal_form_code),
+    establishment_place: normalizeText(payload.establishment_place),
+    establishment_deed_number: normalizeText(payload.establishment_deed_number),
+    establishment_deed_date: normalizeDateField(payload.establishment_deed_date),
+    latest_amendment_deed_number: normalizeText(payload.latest_amendment_deed_number),
+    latest_amendment_deed_date: normalizeDateField(payload.latest_amendment_deed_date),
+    phone: normalizeText(payload.phone),
+    mobile_phone: normalizeText(payload.mobile_phone),
+    email: normalizeText(payload.email),
+    address_detail: normalizeText(payload.address_detail),
+    village: normalizeText(payload.village),
+    district: normalizeText(payload.district),
+    city_code: normalizeText(payload.city_code),
+    postal_code: normalizeText(payload.postal_code),
+    domicile_country_code: normalizeText(payload.domicile_country_code),
+    business_field_code: normalizeText(payload.business_field_code),
+    relationship_with_reporter_code: normalizeText(payload.relationship_with_reporter_code),
+    violates_bmpk: normalizeText(payload.violates_bmpk),
+    exceeds_bmpk: normalizeText(payload.exceeds_bmpk),
+    go_public: normalizeText(payload.go_public),
+    debtor_group_code: normalizeText(payload.debtor_group_code),
+    rating: normalizeText(payload.rating),
+    rating_agency: normalizeText(payload.rating_agency),
+    rating_date: normalizeDateField(payload.rating_date),
+    debtor_group_name: normalizeText(payload.debtor_group_name),
+    branch_code: normalizeText(payload.branch_code),
+    operation_code: normalizeUpper(payload.operation_code),
+    status_code: normalizeUpper(payload.status_code),
+  });
+}
+
 function normalizeDebtorPayload(payload) {
+  const customerType = normalizeCustomerType(payload.customer_type);
+  const explicitSlikStatusCode = normalizeUpper(payload.slik_status_code);
+  const inferredSlikStatusCode = customerType
+    ? CUSTOMER_TYPE_STATUS_CODES[customerType]
+    : undefined;
+  if (
+    customerType &&
+    explicitSlikStatusCode &&
+    explicitSlikStatusCode !== inferredSlikStatusCode
+  ) {
+    throw new AppError(
+      `Status CIF ${explicitSlikStatusCode} tidak sesuai jenis CIF ${customerTypeLabel(customerType)}.`,
+      422,
+    );
+  }
+
   return {
     debtor_number: normalizeText(payload.debtor_number),
     identity_number: normalizeText(payload.identity_number),
@@ -568,6 +953,10 @@ function normalizeDebtorPayload(payload) {
     branch_id: normalizeText(payload.branch_id),
     marketing_user_id: normalizeText(payload.marketing_user_id),
     financing_number: normalizeText(payload.financing_number),
+    customer_type: customerType,
+    slik_segment: normalizeUpper(payload.slik_segment),
+    slik_status_code: explicitSlikStatusCode || inferredSlikStatusCode,
+    slik_operation_code: normalizeUpper(payload.slik_operation_code),
     status: normalizeUpper(payload.status || "ACTIVE"),
     description: normalizeText(payload.description),
   };
@@ -591,6 +980,33 @@ async function ensureDebtorReferences(payload) {
   }
 }
 
+async function syncDebtorProfiles(tx, debtorId, payload, normalized, userId) {
+  const customerType = normalizeCustomerType(normalized.customer_type);
+  if (customerType === "INDIVIDUAL" && payload.individual_profile) {
+    const profile = normalizeIndividualProfilePayload(payload.individual_profile, userId);
+    if (!profile.status_code) profile.status_code = "I";
+    if (Object.keys(profile).length > 0) {
+      await repository.upsertIndividualProfile(debtorId, {
+        ...profile,
+        created_by: userId || null,
+        updated_by: userId || null,
+      }, tx);
+    }
+  }
+
+  if (customerType === "LEGAL_ENTITY" && payload.legal_entity_profile) {
+    const profile = normalizeLegalEntityProfilePayload(payload.legal_entity_profile, userId);
+    if (!profile.status_code) profile.status_code = "B";
+    if (Object.keys(profile).length > 0) {
+      await repository.upsertLegalEntityProfile(debtorId, {
+        ...profile,
+        created_by: userId || null,
+        updated_by: userId || null,
+      }, tx);
+    }
+  }
+}
+
 exports.getAll = async ({ query, userId }) => {
   const scope = await getDebtorAccessScope(userId);
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
@@ -607,6 +1023,26 @@ exports.getAll = async ({ query, userId }) => {
 
   return {
     data: data.map(serializeDebtor),
+    meta: buildPaginationMeta(total, pagination),
+  };
+};
+
+exports.getCollaterals = async ({ query, userId }) => {
+  const scope = await getDebtorAccessScope(userId);
+  const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
+  const where = buildCollateralWhere(query, scope);
+  const [data, total] = await Promise.all([
+    repository.findCollaterals({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+      orderBy: buildCollateralOrderBy(query),
+    }),
+    repository.countCollaterals(where),
+  ]);
+
+  return {
+    data: data.map(serializeCollateral).filter(Boolean),
     meta: buildPaginationMeta(total, pagination),
   };
 };
@@ -640,10 +1076,18 @@ exports.getWorkflow = async ({ req, id, userId }) => {
     ? debtor.debtor_documents.map((item) => serializeDocument(req, item))
     : [];
   const canViewLegalWorkflow = await userHasAnyMenuRead(userId, LEGAL_DATA_SCOPE_URLS);
+  const canViewIdebWorkflow = await userHasAnyMenuRead(userId, [
+    "/dashboard/informasi-debitur/admin/upload-ideb",
+    ...LEGAL_DATA_SCOPE_URLS,
+  ]);
+  const canViewWarningLetters = await userHasAnyMenuRead(userId, [
+    "/dashboard/informasi-debitur",
+    "/dashboard/informasi-debitur/master-debitur",
+    "/dashboard/legal/cetak/surat-peringatan",
+  ]);
   const legalWorkflow = canViewLegalWorkflow
     ? {
         prints: workflow.prints.map((item) => serializePrint(req, item)),
-        warning_letters: workflow.warningLetters.map((item) => serializeWarningLetter(req, item)),
         notary_progress: workflow.notaryProgress.map((item) =>
           serializeProgress(req, item, item.deed_type),
         ),
@@ -658,13 +1102,15 @@ exports.getWorkflow = async ({ req, id, userId }) => {
       }
     : {
         prints: [],
-        warning_letters: [],
         notary_progress: [],
         insurance_progress: [],
         kjpp_progress: [],
         claims: [],
         deposits: [],
       };
+  legalWorkflow.warning_letters = canViewWarningLetters
+    ? workflow.warningLetters.map((item) => serializeWarningLetter(req, item))
+    : [];
 
   return {
     debtor: serializedDebtor,
@@ -677,12 +1123,18 @@ exports.getWorkflow = async ({ req, id, userId }) => {
       })),
     ),
     documents,
+    collaterals: Array.isArray(workflow.collaterals)
+      ? workflow.collaterals.map(serializeCollateral).filter(Boolean)
+      : [],
+    restructuring_records: Array.isArray(workflow.restructuringRecords)
+      ? workflow.restructuringRecords.map(serializeRestructuring)
+      : [],
     document_checklist_status: buildDocumentChecklistStatus(
       documentChecklists,
       documents,
     ),
     marketing: groupMarketingByKind(marketing, workflow.timelines || []),
-    ideb_uploads: canViewLegalWorkflow
+    ideb_uploads: canViewIdebWorkflow
       ? workflow.ideb.map((item) =>
           serializeIdeb(req, item, serializedDebtor, serializedDebtor.contracts),
         )
@@ -696,12 +1148,15 @@ exports.create = async ({ payload, userId }) => {
   await ensureDebtorReferences(normalized);
 
   try {
-    return serializeDebtor(
-      await repository.create({
+    const created = await repository.transaction(async (tx) => {
+      const debtor = await repository.create({
         ...normalized,
         created_by: userId || null,
-      }),
-    );
+      }, tx);
+      await syncDebtorProfiles(tx, debtor.id, payload, normalized, userId);
+      return repository.findById(debtor.id, {}, tx);
+    });
+    return serializeDebtor(created);
   } catch (error) {
     if (error?.code === "P2002") {
       throw new AppError("Nomor debitur atau nomor identitas sudah digunakan.", 409);
@@ -736,12 +1191,15 @@ exports.update = async ({ id, payload, userId }) => {
   await ensureDebtorReferences(normalized);
 
   try {
-    return serializeDebtor(
+    const updated = await repository.transaction(async (tx) => {
       await repository.update(id, {
         ...normalized,
         updated_by: userId || null,
-      }),
-    );
+      }, tx);
+      await syncDebtorProfiles(tx, id, payload, normalized, userId);
+      return repository.findById(id, {}, tx);
+    });
+    return serializeDebtor(updated);
   } catch (error) {
     if (error?.code === "P2002") {
       throw new AppError("Nomor debitur atau nomor identitas sudah digunakan.", 409);

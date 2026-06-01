@@ -2,18 +2,28 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
-const { uploadDomainFile } = require("../../middlewares/domain-upload.middleware");
+const {
+  uploadDomainFile,
+} = require("../../middlewares/domain-upload.middleware");
+const {
+  uploadSlikImportFiles,
+} = require("../../middlewares/slik-import-upload.middleware");
 const {
   normalizePersuratanMultipartBody,
 } = require("../../middlewares/persuratan-upload.middleware");
 const controller = require("./debtorImports.controller");
-const { importJobSchema } = require("./debtorImports.validation");
+const {
+  idebImportJobSchema,
+  importJobSchema,
+  restrikImportJobSchema,
+  slikImportJobSchema,
+} = require("./debtorImports.validation");
 
 const router = express.Router();
 const READ_URLS = [
-  "/dashboard/informasi-debitur/admin/import-debitur",
-  "/dashboard/informasi-debitur/admin/import-kolektibilitas",
   "/dashboard/informasi-debitur/admin/upload-slik",
+  "/dashboard/informasi-debitur/admin/monitoring-import",
+  "/dashboard/informasi-debitur/admin/upload-ideb",
   "/dashboard/informasi-debitur/admin/upload-restrik",
 ];
 
@@ -28,33 +38,46 @@ function uploadAndValidate(schema = importJobSchema) {
   ];
 }
 
+function uploadSlikAndValidate() {
+  return [
+    uploadSlikImportFiles("files", 20),
+    normalizePersuratanMultipartBody({}),
+    validate(slikImportJobSchema),
+  ];
+}
+
 router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);
 router.post(
   "/master",
   auth,
-  authorize("/dashboard/informasi-debitur/admin/import-debitur", "create"),
-  ...uploadAndValidate(),
-  controller.createMaster,
+  authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  controller.createDeprecated,
 );
 router.post(
   "/collectibility",
   auth,
-  authorize("/dashboard/informasi-debitur/admin/import-kolektibilitas", "create"),
-  ...uploadAndValidate(),
-  controller.createCollectibility,
+  authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  controller.createDeprecated,
 );
 router.post(
   "/slik",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
-  ...uploadAndValidate(),
+  ...uploadSlikAndValidate(),
   controller.createSlik,
+);
+router.post(
+  "/ideb",
+  auth,
+  authorize("/dashboard/informasi-debitur/admin/upload-ideb", "create"),
+  ...uploadAndValidate(idebImportJobSchema),
+  controller.createIdeb,
 );
 router.post(
   "/restrik",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-restrik", "create"),
-  ...uploadAndValidate(),
+  ...uploadAndValidate(restrikImportJobSchema),
   controller.createRestrik,
 );
 

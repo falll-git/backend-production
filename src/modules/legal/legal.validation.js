@@ -12,7 +12,7 @@ const fileSchema = Joi.object({
 
 exports.templateSchema = Joi.object({
   template_type: Joi.string()
-    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "FORMULIR_ASURANSI", "SKL", "SAMSAT")
+    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
     .required(),
   version: Joi.number().integer().min(1).default(1),
   title: Joi.string().trim().min(1).max(255).required(),
@@ -22,24 +22,14 @@ exports.templateSchema = Joi.object({
 });
 
 exports.printDocumentSchema = Joi.object({
-  template_id: optionalUuid.optional(),
+  template_id: uuid.required(),
   numbering_template_id: optionalUuid.optional(),
   contract_id: uuid.required(),
   document_type: Joi.string()
-    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "FORMULIR_ASURANSI", "SKL", "SAMSAT")
+    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
     .required(),
   payload_snapshot: Joi.object().optional(),
-  generated_number: Joi.string().trim().allow("", null).optional(),
-  file: fileSchema.optional(),
-});
-
-exports.idebSchema = Joi.object({
-  debtor_id: optionalUuid.optional(),
-  contract_id: optionalUuid.optional(),
-  month: Joi.number().integer().min(1).max(12).required(),
-  year: Joi.number().integer().min(2000).max(2100).required(),
-  status: Joi.string().trim().max(50).default("PENDING"),
-  result_summary: Joi.object().optional(),
+  generated_number: Joi.any().strip(),
   file: fileSchema.required(),
 });
 

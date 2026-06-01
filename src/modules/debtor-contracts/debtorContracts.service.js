@@ -68,10 +68,84 @@ function serializeCollectibility(item) {
   };
 }
 
+function serializeContractSnapshot(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    debtor_id: item.debtor_id,
+    contract_id: item.contract_id,
+    period_month: item.period_month,
+    facility_number: item.facility_number,
+    debtor_number: item.debtor_number,
+    credit_nature_code: item.credit_nature_code,
+    credit_type_code: item.credit_type_code,
+    financing_scheme_code: item.financing_scheme_code,
+    initial_akad_number: item.initial_akad_number,
+    initial_akad_date: item.initial_akad_date,
+    final_akad_number: item.final_akad_number,
+    final_akad_date: item.final_akad_date,
+    new_or_extension_code: item.new_or_extension_code,
+    credit_start_date: item.credit_start_date,
+    start_date: item.start_date,
+    due_date: item.due_date,
+    debtor_category_code: item.debtor_category_code,
+    usage_type_code: item.usage_type_code,
+    usage_orientation_code: item.usage_orientation_code,
+    economic_sector_code: item.economic_sector_code,
+    project_location_city_code: item.project_location_city_code,
+    project_value: item.project_value === null || item.project_value === undefined ? null : number(item.project_value),
+    currency_code: item.currency_code,
+    interest_rate: item.interest_rate === null || item.interest_rate === undefined ? null : number(item.interest_rate),
+    interest_type_code: item.interest_type_code,
+    government_program_code: item.government_program_code,
+    takeover_from: item.takeover_from,
+    source_of_funds_code: item.source_of_funds_code,
+    initial_plafond: item.initial_plafond === null || item.initial_plafond === undefined ? null : number(item.initial_plafond),
+    plafond: item.plafond === null || item.plafond === undefined ? null : number(item.plafond),
+    current_month_disbursement:
+      item.current_month_disbursement === null || item.current_month_disbursement === undefined
+        ? null
+        : number(item.current_month_disbursement),
+    penalty: item.penalty === null || item.penalty === undefined ? null : number(item.penalty),
+    baki_debet: item.baki_debet === null || item.baki_debet === undefined ? null : number(item.baki_debet),
+    original_currency_amount:
+      item.original_currency_amount === null || item.original_currency_amount === undefined
+        ? null
+        : number(item.original_currency_amount),
+    collectibility_code: item.collectibility_code,
+    default_date: item.default_date,
+    default_reason_code: item.default_reason_code,
+    principal_arrears:
+      item.principal_arrears === null || item.principal_arrears === undefined
+        ? null
+        : number(item.principal_arrears),
+    margin_arrears:
+      item.margin_arrears === null || item.margin_arrears === undefined
+        ? null
+        : number(item.margin_arrears),
+    days_past_due: item.days_past_due,
+    arrears_frequency: item.arrears_frequency,
+    restructuring_frequency: item.restructuring_frequency,
+    initial_restructuring_date: item.initial_restructuring_date,
+    final_restructuring_date: item.final_restructuring_date,
+    restructuring_method_code: item.restructuring_method_code,
+    condition_code: item.condition_code,
+    condition_date: item.condition_date,
+    description: item.description,
+    branch_code: item.branch_code,
+    operation_code: item.operation_code,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
 function serializeContract(contract) {
   if (!contract) return null;
   const collectibilities = Array.isArray(contract.collectibilities)
     ? contract.collectibilities.map(serializeCollectibility)
+    : [];
+  const slikSnapshots = Array.isArray(contract.slik_snapshots)
+    ? contract.slik_snapshots.map(serializeContractSnapshot).filter(Boolean)
     : [];
 
   return {
@@ -112,6 +186,8 @@ function serializeContract(contract) {
     marketing_user: serializeUser(contract.marketing_user),
     latest_collectibility: collectibilities[0] || null,
     collectibilities,
+    latest_slik_snapshot: slikSnapshots[0] || null,
+    slik_snapshots: slikSnapshots,
     created_at: contract.created_at,
     updated_at: contract.updated_at,
   };
@@ -153,6 +229,49 @@ function buildWhere(query, scope) {
     if (query[field]) clauses.push({ [field]: query[field] });
   }
   if (query.status) clauses.push({ status: normalizeUpper(query.status) });
+  if (query.period_month || query.periodMonth) {
+    const periodMonth = normalizeText(query.period_month || query.periodMonth);
+    clauses.push({
+      OR: [
+        {
+          slik_snapshots: {
+            some: {
+              deleted_at: null,
+              period_month: periodMonth,
+            },
+          },
+        },
+        {
+          collectibilities: {
+            some: {
+              deleted_at: null,
+              period_month: periodMonth,
+            },
+          },
+        },
+      ],
+    });
+  }
+  if (query.collectibility_level || query.kol_level || query.kol) {
+    const rawLevel = normalizeText(
+      query.collectibility_level || query.kol_level || query.kol,
+    );
+    const level = Number(rawLevel);
+    if (Number.isFinite(level)) {
+      clauses.push({
+        collectibilities: {
+          some: {
+            deleted_at: null,
+            kol_level: {
+              is: {
+                level,
+              },
+            },
+          },
+        },
+      });
+    }
+  }
 
   return { AND: clauses.filter((item) => Object.keys(item).length > 0) };
 }

@@ -1,7 +1,7 @@
 const repository = require("./storageUsage.repository");
 const { resolveStoredFileSizeBytes } = require("../../utils/storage-usage-files");
 
-const DEFAULT_FREE_QUOTA_GB = 500;
+const DEFAULT_FREE_QUOTA_GB = 100;
 const DEFAULT_OVERAGE_PRICE_PER_GB = 0.0023;
 const DEFAULT_CURRENCY = "USD";
 const GB_BYTES = 1024 ** 3;

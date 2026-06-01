@@ -4,6 +4,7 @@ loadEnv();
 validateEnv();
 
 const app = require("./app");
+const prisma = require("./config/prisma");
 const { runStartupTasks } = require("./startup-tasks");
 
 function resolvePort(value) {
@@ -27,13 +28,27 @@ function startServer() {
 
   const shutdown = (signal) => {
     console.log(`${signal} received. Closing HTTP server.`);
-    server.close((error) => {
+    const forceExitTimer = setTimeout(() => {
+      console.error("Graceful shutdown timed out.");
+      process.exit(1);
+    }, 10000);
+
+    server.close(async (error) => {
       if (error) {
+        clearTimeout(forceExitTimer);
         console.error("HTTP server close failed", error);
         process.exit(1);
       }
 
-      process.exit(0);
+      try {
+        await prisma.$disconnect();
+        clearTimeout(forceExitTimer);
+        process.exit(0);
+      } catch (disconnectError) {
+        clearTimeout(forceExitTimer);
+        console.error("Prisma disconnect failed", disconnectError);
+        process.exit(1);
+      }
     });
   };
 

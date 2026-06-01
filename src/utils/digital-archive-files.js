@@ -57,6 +57,8 @@ function inferMimeTypeFromFileName(fileName) {
   if (normalized.endsWith(".xlsx")) {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
+  if (normalized.endsWith(".csv")) return "text/csv";
+  if (normalized.endsWith(".json")) return "application/json";
 
   return null;
 }
@@ -73,6 +75,10 @@ const MIME_TO_EXTENSION = {
     "pptx",
   "application/vnd.ms-excel": "xls",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/csv": "csv",
+  "application/csv": "csv",
+  "application/json": "json",
+  "text/json": "json",
 };
 
 function inferMimeType({ fileName, mimeType }) {
@@ -413,4 +419,5 @@ module.exports = {
   deriveDocumentFileName,
   getStoredFileSizeBytes,
   persistDigitalArchiveFile,
+  resolveStoredFilePath,
 };

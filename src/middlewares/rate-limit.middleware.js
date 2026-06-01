@@ -46,6 +46,11 @@ function createRateLimiter({
   };
 }
 
+function readPositiveIntEnv(key, fallback) {
+  const value = Number(process.env[key]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 function authKeyGenerator(req) {
   const identity =
     req.body?.username || req.body?.email || req.user?.id || "anonymous";
@@ -53,12 +58,22 @@ function authKeyGenerator(req) {
 }
 
 const authRateLimit = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 25,
+  windowMs: readPositiveIntEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  max: readPositiveIntEnv("AUTH_RATE_LIMIT_MAX", 25),
   keyGenerator: authKeyGenerator,
 });
 
+const authRefreshRateLimit = createRateLimiter({
+  windowMs: readPositiveIntEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  max: readPositiveIntEnv("AUTH_REFRESH_RATE_LIMIT_MAX", 1000),
+  keyGenerator(req) {
+    return `${req.ip || "unknown"}:${req.path}:refresh`;
+  },
+  message: "Terlalu banyak pembaruan sesi. Silakan coba lagi nanti.",
+});
+
 module.exports = {
+  authRefreshRateLimit,
   authRateLimit,
   createRateLimiter,
 };
