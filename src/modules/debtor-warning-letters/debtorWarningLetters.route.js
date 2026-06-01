@@ -13,13 +13,17 @@ const {
 } = require("./debtorWarningLetters.validation");
 
 const router = express.Router();
-const MENU_URL = "/dashboard/informasi-debitur/marketing/langkah-penanganan";
+const READ_MENU_URLS = [
+  "/dashboard/informasi-debitur",
+  "/dashboard/informasi-debitur/master-debitur",
+];
+const MANAGE_MENU_URL = "/dashboard/informasi-debitur/master-debitur";
 const uploadBody = [uploadDomainFile("file"), normalizePersuratanMultipartBody({})];
 
-router.get("/", auth, authorize(MENU_URL, "read"), controller.getAll);
-router.post("/", auth, authorize(MENU_URL, "create"), ...uploadBody, validate(createWarningLetterSchema), controller.create);
-router.get("/:id", auth, authorize(MENU_URL, "read"), controller.getById);
-router.put("/:id", auth, authorize(MENU_URL, "update"), ...uploadBody, validate(updateWarningLetterSchema), controller.update);
-router.delete("/:id", auth, authorize(MENU_URL, "delete"), controller.delete);
+router.get("/", auth, authorize(READ_MENU_URLS, "read"), controller.getAll);
+router.post("/", auth, authorize(MANAGE_MENU_URL, "create"), ...uploadBody, validate(createWarningLetterSchema), controller.create);
+router.get("/:id", auth, authorize(READ_MENU_URLS, "read"), controller.getById);
+router.put("/:id", auth, authorize(MANAGE_MENU_URL, "update"), ...uploadBody, validate(updateWarningLetterSchema), controller.update);
+router.delete("/:id", auth, authorize(MANAGE_MENU_URL, "delete"), controller.delete);
 
 module.exports = router;

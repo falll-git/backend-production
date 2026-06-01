@@ -3,8 +3,8 @@ loadEnv();
 
 const express = require("express");
 const cors = require("cors");
+const requestId = require("./middlewares/request-id.middleware");
 const securityHeaders = require("./middlewares/security-headers.middleware");
-const { authRateLimit } = require("./middlewares/rate-limit.middleware");
 const authRoutes = require("./modules/auth/auth.route");
 const roleRoutes = require("./modules/role/role.route");
 const divisionRoutes = require("./modules/division/division.route");
@@ -32,6 +32,10 @@ const thirdPartyRoutes = require("./modules/third-parties/thirdParties.route");
 const documentChecklistRoutes = require("./modules/document-checklists/documentChecklists.route");
 const numberingTemplateRoutes = require("./modules/numbering-templates/numberingTemplates.route");
 const depositTypeRoutes = require("./modules/deposit-types/depositTypes.route");
+const mailDeliveryMediaRoutes = require("./modules/mail-delivery-media/mailDeliveryMedia.route");
+const collateralTypeRoutes = require("./modules/collateral-types/collateralTypes.route");
+const restructuringTypeRoutes = require("./modules/restructuring-types/restructuringTypes.route");
+const legalProcessTypeRoutes = require("./modules/legal-process-types/legalProcessTypes.route");
 const debtorRoutes = require("./modules/debtors/debtors.route");
 const debtorContractRoutes = require("./modules/debtor-contracts/debtorContracts.route");
 const debtorImportRoutes = require("./modules/debtor-imports/debtorImports.route");
@@ -63,9 +67,15 @@ function parseCorsOrigins() {
     .filter(Boolean);
 }
 
+function getBodyLimit(key, fallback) {
+  const value = process.env[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(securityHeaders);
+app.use(requestId);
 
 const allowedCorsOrigins = parseCorsOrigins();
 app.use(
@@ -86,8 +96,13 @@ app.use(
       : undefined,
   ),
 );
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: getBodyLimit("JSON_BODY_LIMIT", "1mb") }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: getBodyLimit("URLENCODED_BODY_LIMIT", "1mb"),
+  }),
+);
 
 const staticStorageMounts = [
   {
@@ -140,7 +155,7 @@ function healthCheck(req, res) {
 
 app.get("/health", healthCheck);
 app.get("/api/health", healthCheck);
-app.use("/api/auth", authRateLimit, authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/divisions", divisionRoutes);
 app.use("/api/letter-priorities", letterPriorityRoutes);
@@ -170,6 +185,10 @@ app.use("/api/third-parties", thirdPartyRoutes);
 app.use("/api/document-checklists", documentChecklistRoutes);
 app.use("/api/numbering-templates", numberingTemplateRoutes);
 app.use("/api/deposit-types", depositTypeRoutes);
+app.use("/api/mail-delivery-media", mailDeliveryMediaRoutes);
+app.use("/api/collateral-types", collateralTypeRoutes);
+app.use("/api/restructuring-types", restructuringTypeRoutes);
+app.use("/api/legal-process-types", legalProcessTypeRoutes);
 app.use("/api/debtors", debtorRoutes);
 app.use("/api/debtor-contracts", debtorContractRoutes);
 app.use("/api/debtor-imports", debtorImportRoutes);
@@ -188,12 +207,20 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || err.status || 500;
+  const requestId = req.requestId || null;
+
   if (statusCode >= 500) {
-    console.error("Unhandled request error:", err);
+    console.error("Unhandled request error:", {
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      error: err,
+    });
   }
 
   res.status(statusCode).json({
     status: false,
+    request_id: requestId,
     message: statusCode >= 500
       ? "Internal server error"
       : err.message || "Internal server error",

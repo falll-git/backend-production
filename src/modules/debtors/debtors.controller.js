@@ -22,6 +22,18 @@ exports.getById = async (req, res) => {
   }
 };
 
+exports.getCollaterals = async (req, res) => {
+  try {
+    const result = await service.getCollaterals({
+      query: req.query,
+      userId: req.user?.id,
+    });
+    return paginatedResponse(res, result.data, result.meta);
+  } catch (error) {
+    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+  }
+};
+
 exports.getWorkflow = async (req, res) => {
   try {
     return successResponse(

@@ -1,4 +1,5 @@
 const repository = require("./outgoingMails.repository");
+const prisma = require("../../config/prisma");
 const notificationService = require("../notifications/notifications.service");
 const {
   deleteReplacedStoredFile,
@@ -34,6 +35,34 @@ const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 
 const OUTGOING_MAIL_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar";
+
+async function resolveActiveDeliveryMedia(value) {
+  const deliveryMedia = normalizeDeliveryMedia(value);
+
+  if (!deliveryMedia) {
+    throw new AppError("Media pengiriman surat tidak valid.", 422);
+  }
+
+  const parameter = await prisma.mail_delivery_media.findFirst({
+    where: {
+      code: deliveryMedia,
+      is_active: true,
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!parameter) {
+    throw new AppError(
+      "Media pengiriman surat tidak aktif atau belum terdaftar di Parameter.",
+      422,
+    );
+  }
+
+  return deliveryMedia;
+}
 
 async function queueOutgoingMailWatermark(entityId) {
   try {
@@ -261,6 +290,7 @@ exports.getById = async ({ req, id, userId }) => {
 
 exports.create = async ({ req, payload, userId }) => {
   const storageId = await resolveActiveStorageId(payload.storage_id);
+  const deliveryMedia = await resolveActiveDeliveryMedia(payload.delivery_media);
   const storedFile = persistPersuratanFile({
     entity: "outgoing-mails",
     input: payload.file,
@@ -277,7 +307,7 @@ exports.create = async ({ req, payload, userId }) => {
     created = await repository.create({
       letter_prioritie_id: payload.letter_prioritie_id,
       storage_id: storageId,
-      delivery_media: normalizeDeliveryMedia(payload.delivery_media),
+      delivery_media: deliveryMedia,
       name: normalizeText(payload.name),
       send_date: normalizeDate(payload.send_date),
       send_due_date: normalizeOptionalDate(payload.send_due_date),
@@ -354,7 +384,9 @@ exports.update = async ({ req, id, payload, userId }) => {
     updateData.storage_id = nextStorageId;
   }
   if (payload.delivery_media !== undefined) {
-    updateData.delivery_media = normalizeDeliveryMedia(payload.delivery_media);
+    updateData.delivery_media = await resolveActiveDeliveryMedia(
+      payload.delivery_media,
+    );
   }
   if (payload.name !== undefined) {
     updateData.name = normalizeText(payload.name);

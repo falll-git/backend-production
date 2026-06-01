@@ -10,6 +10,7 @@ const {
   REPORT_ALL_FEATURE,
   RETURN_FEATURE,
   VIEW_DIVISION_FEATURE,
+  getMenuCapabilities,
   getMenuFeatures,
   normalizeFeatures,
 } = require("../../src/utils/menu-access");
@@ -50,10 +51,10 @@ const URLS = {
     "/dashboard/informasi-debitur/marketing/hasil-kunjungan",
   debtorHandlingStep:
     "/dashboard/informasi-debitur/marketing/langkah-penanganan",
-  debtorImportMaster: "/dashboard/informasi-debitur/admin/import-debitur",
-  debtorImportCollectibility:
-    "/dashboard/informasi-debitur/admin/import-kolektibilitas",
   debtorUploadSlik: "/dashboard/informasi-debitur/admin/upload-slik",
+  debtorImportMonitoring:
+    "/dashboard/informasi-debitur/admin/monitoring-import",
+  debtorUploadIdeb: "/dashboard/informasi-debitur/admin/upload-ideb",
   debtorUploadRestrik: "/dashboard/informasi-debitur/admin/upload-restrik",
   debtorReportNpf: "/dashboard/informasi-debitur/laporan/npf",
   debtorReportMarketingActivity:
@@ -63,9 +64,10 @@ const URLS = {
   legalPrintAkad: "/dashboard/legal/cetak/akad",
   legalPrintHaftsheet: "/dashboard/legal/cetak/haftsheet",
   legalPrintWarningLetter: "/dashboard/legal/cetak/surat-peringatan",
-  legalPrintInsuranceForm: "/dashboard/legal/cetak/formulir-asuransi",
+  legalPrintCoverLetter: "/dashboard/legal/cetak/surat-pengantar",
   legalPrintSkl: "/dashboard/legal/cetak/keterangan-lunas",
   legalPrintSamsat: "/dashboard/legal/cetak/surat-samsat",
+  legalPrintOther: "/dashboard/legal/cetak/dokumen-lainnya",
   legalDepositInsurance: "/dashboard/legal/titipan/asuransi",
   legalDepositNotary: "/dashboard/legal/titipan/notaris",
   legalDepositInstallment: "/dashboard/legal/titipan/angsuran",
@@ -73,7 +75,6 @@ const URLS = {
   legalProgressInsurance: "/dashboard/legal/progress/asuransi",
   legalProgressKjpp: "/dashboard/legal/progress/kjpp",
   legalProgressClaim: "/dashboard/legal/progress/klaim",
-  legalUploadIdeb: "/dashboard/legal/upload-ideb",
   legalReport: "/dashboard/legal/laporan",
   legalReportThirdPartyDocuments:
     "/dashboard/legal/laporan/pihak-ketiga/dokumen",
@@ -87,6 +88,7 @@ const URLS = {
   documentType: "/dashboard/parameter/jenis-dokumen",
   storage: "/dashboard/parameter/tempat-penyimpanan",
   letterPriority: "/dashboard/parameter/prioritas-surat",
+  mailDeliveryMedia: "/dashboard/parameter/media-pengiriman-surat",
   thirdPartyNotary: "/dashboard/parameter/pihak-ketiga/notaris",
   thirdPartyInsurance:
     "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
@@ -97,8 +99,11 @@ const URLS = {
   contractType: "/dashboard/parameter/jenis-akad",
   collectibility: "/dashboard/parameter/kolektibilitas",
   branch: "/dashboard/parameter/cabang",
+  collateralType: "/dashboard/parameter/jenis-agunan",
+  restructuringType: "/dashboard/parameter/jenis-restrukturisasi",
   depositType: "/dashboard/parameter/jenis-titipan",
   watermarkSettings: "/dashboard/parameter/watermark-dokumen",
+  legalProcessType: "/dashboard/parameter/jenis-proses-legal",
 };
 const CORE_PARAMETER_URLS = [
   URLS.users,
@@ -108,6 +113,7 @@ const CORE_PARAMETER_URLS = [
   URLS.documentType,
   URLS.storage,
   URLS.letterPriority,
+  URLS.mailDeliveryMedia,
 ];
 const EXTENDED_PARAMETER_URLS = [
   URLS.thirdPartyNotary,
@@ -119,7 +125,10 @@ const EXTENDED_PARAMETER_URLS = [
   URLS.contractType,
   URLS.collectibility,
   URLS.branch,
+  URLS.collateralType,
+  URLS.restructuringType,
   URLS.depositType,
+  URLS.legalProcessType,
 ];
 const DEBTOR_CRUD_URLS = [
   URLS.debtorMaster,
@@ -128,9 +137,8 @@ const DEBTOR_CRUD_URLS = [
   URLS.debtorHandlingStep,
 ];
 const DEBTOR_IMPORT_URLS = [
-  URLS.debtorImportMaster,
-  URLS.debtorImportCollectibility,
   URLS.debtorUploadSlik,
+  URLS.debtorUploadIdeb,
   URLS.debtorUploadRestrik,
 ];
 const DEBTOR_REPORT_URLS = [
@@ -147,15 +155,15 @@ const LEGAL_CRUD_URLS = [
   URLS.legalProgressInsurance,
   URLS.legalProgressKjpp,
   URLS.legalProgressClaim,
-  URLS.legalUploadIdeb,
 ];
 const LEGAL_PRINT_URLS = [
   URLS.legalPrintAkad,
   URLS.legalPrintHaftsheet,
   URLS.legalPrintWarningLetter,
-  URLS.legalPrintInsuranceForm,
+  URLS.legalPrintCoverLetter,
   URLS.legalPrintSkl,
   URLS.legalPrintSamsat,
+  URLS.legalPrintOther,
 ];
 const LEGAL_REPORT_URLS = [
   URLS.legalOverview,
@@ -279,18 +287,23 @@ const ROLE_MENU_POLICIES = {
     {
       url: URLS.debtorList,
       permissions: ["read"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
+      features: [MANAGE_ALL_FEATURE],
     },
     ...DEBTOR_CRUD_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update", "delete"],
-      features: [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
+      features: [MANAGE_ALL_FEATURE],
     })),
     ...DEBTOR_IMPORT_URLS.map((url) => ({
       url,
       permissions: ["create", "read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [MANAGE_ALL_FEATURE],
     })),
+    {
+      url: URLS.debtorImportMonitoring,
+      permissions: ["read"],
+      features: [MANAGE_ALL_FEATURE],
+    },
     ...DEBTOR_REPORT_URLS.map((url) => ({
       url,
       permissions: ["read"],
@@ -300,12 +313,12 @@ const ROLE_MENU_POLICIES = {
     ...LEGAL_CRUD_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update", "delete"],
-      features: [REPORT_ALL_FEATURE, MANAGE_ALL_FEATURE],
+      features: [MANAGE_ALL_FEATURE],
     })),
     ...LEGAL_PRINT_URLS.map((url) => ({
       url,
       permissions: ["create", "read"],
-      features: [REPORT_ALL_FEATURE],
+      features: [MANAGE_ALL_FEATURE],
     })),
     ...LEGAL_REPORT_URLS.map((url) => ({
       url,
@@ -414,6 +427,38 @@ const ROLE_MENU_POLICIES = {
       features: [VIEW_DIVISION_FEATURE],
     },
 
+    {
+      url: URLS.debtorList,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    },
+    ...DEBTOR_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...DEBTOR_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+
+    ...LEGAL_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...LEGAL_PRINT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...LEGAL_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+
     ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
       url,
       permissions: ["read"],
@@ -510,6 +555,42 @@ const ROLE_MENU_POLICIES = {
       features: [VIEW_DIVISION_FEATURE],
     },
 
+    {
+      url: URLS.debtorList,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    },
+    ...DEBTOR_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read", "update"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...DEBTOR_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+
+    {
+      url: URLS.legalTemplate,
+      permissions: ["read"],
+    },
+    ...LEGAL_CRUD_URLS.filter((url) => url !== URLS.legalTemplate).map((url) => ({
+      url,
+      permissions: ["create", "read", "update"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...LEGAL_PRINT_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+    ...LEGAL_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+      features: [VIEW_DIVISION_FEATURE],
+    })),
+
     ...DASHBOARD_REPORT_WIDGET_URLS.map((url) => ({
       url,
       permissions: ["read"],
@@ -542,18 +623,43 @@ const ROLE_MENU_POLICIES = {
     },
     { url: URLS.correspondenceReport, permissions: ["read"] },
     { url: URLS.correspondencePrint, permissions: ["read"] },
+
+    { url: URLS.debtorList, permissions: ["read"] },
+    ...DEBTOR_CRUD_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read", "update"],
+    })),
+    ...DEBTOR_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+    })),
+
+    { url: URLS.legalTemplate, permissions: ["read"] },
+    ...LEGAL_CRUD_URLS.filter((url) => url !== URLS.legalTemplate).map((url) => ({
+      url,
+      permissions: ["create", "read", "update"],
+    })),
+    ...LEGAL_PRINT_URLS.map((url) => ({
+      url,
+      permissions: ["create", "read"],
+    })),
+    ...LEGAL_REPORT_URLS.map((url) => ({
+      url,
+      permissions: ["read"],
+    })),
   ],
 };
 
 function buildPermission({ permissions = ["read"], features = [], url } = {}) {
   const permissionSet = new Set(permissions);
+  const allowedCapabilities = new Set(getMenuCapabilities(url));
   const allowedFeatures = new Set(getMenuFeatures(url));
 
   return {
-    can_create: permissionSet.has("create"),
-    can_read: permissionSet.has("read"),
-    can_update: permissionSet.has("update"),
-    can_delete: permissionSet.has("delete"),
+    can_create: permissionSet.has("create") && allowedCapabilities.has("create"),
+    can_read: permissionSet.has("read") && allowedCapabilities.has("read"),
+    can_update: permissionSet.has("update") && allowedCapabilities.has("update"),
+    can_delete: permissionSet.has("delete") && allowedCapabilities.has("delete"),
     features: normalizeFeatures(features).filter((feature) =>
       allowedFeatures.has(feature),
     ),

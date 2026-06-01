@@ -6,6 +6,7 @@ const {
 } = require("../../utils/debtor-access");
 const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
 const { roleHasFeature } = require("../../utils/rbac");
+const { serializeFile } = require("../../utils/domain-files");
 
 const REPORT_URLS = {
   summary: "/dashboard/informasi-debitur/laporan",
@@ -27,6 +28,60 @@ function parseDate(value, endOfDay = false) {
   if (Number.isNaN(date.getTime())) return null;
   if (endOfDay) date.setHours(23, 59, 59, 999);
   return date;
+}
+
+function normalizeText(value) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim().replace(/\s+/g, " ");
+  return normalized || null;
+}
+
+function normalizeMarketingKind(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "ACTION_PLAN") return "ACTION_PLAN";
+  if (normalized === "VISIT_RESULT" || normalized === "HASIL_KUNJUNGAN") {
+    return "VISIT_RESULT";
+  }
+  if (normalized === "HANDLING_STEP" || normalized === "LANGKAH_PENANGANAN") {
+    return "HANDLING_STEP";
+  }
+  return null;
+}
+
+function normalizeMarketingSort(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  return ["OLDEST", "TERLAMA", "ASC"].includes(normalized) ? "oldest" : "newest";
+}
+
+function normalizeLimit(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 50;
+  return Math.min(Math.max(Math.trunc(numeric), 1), 100);
+}
+
+function serializeMarketingReportActivity(req, item) {
+  return {
+    id: item.id,
+    activity_kind: item.activity_kind,
+    status: item.status,
+    activity_date: item.activity_date,
+    target_date: item.target_date,
+    debtor: item.debtor,
+    contract: item.contract,
+    action_plan: item.action_plan,
+    visit_address: item.visit_address,
+    visit_result: item.visit_result,
+    conclusion: item.conclusion,
+    handling_step: item.handling_step,
+    handling_result: item.handling_result,
+    notes: item.notes,
+    file: serializeFile(req, item, {
+      module: "debtor_information",
+      entityId: item.id,
+      fallbackBaseName: item.activity_kind,
+    }),
+    created_at: item.created_at,
+  };
 }
 
 function calculateRemainingMonths(value) {
@@ -195,14 +250,29 @@ exports.getNpf = async (query = {}, userId = null) => {
   };
 };
 
-exports.getMarketingActivity = async (query = {}, userId = null) => {
+exports.getMarketingActivity = async (req, query = {}, userId = null) => {
   const fromDate = parseDate(query.from_date);
   const toDate = parseDate(query.to_date, true);
+  const activityKind = normalizeMarketingKind(query.activity_kind);
+  const status = normalizeText(query.status)?.toUpperCase() || null;
+  const search = normalizeText(query.search);
+  const sort = normalizeMarketingSort(query.sort);
+  const limit = normalizeLimit(query.limit);
   const scope = await getReportScope(userId, REPORT_URLS.marketingActivity);
   const debtorWhere = buildDebtorVisibilityWhere(scope);
+  const reportParams = {
+    fromDate,
+    toDate,
+    debtorWhere,
+    activityKind,
+    status,
+    search,
+    sort,
+    limit,
+  };
   const [groups, recent] = await Promise.all([
-    repository.groupMarketingActivities({ fromDate, toDate, debtorWhere }),
-    repository.findRecentMarketingActivities({ fromDate, toDate, debtorWhere }),
+    repository.groupMarketingActivities(reportParams),
+    repository.findRecentMarketingActivities(reportParams),
   ]);
 
   return {
@@ -211,17 +281,9 @@ exports.getMarketingActivity = async (query = {}, userId = null) => {
       status: item.status,
       total: item._count.id,
     })),
-    recent_activities: recent.map((item) => ({
-      id: item.id,
-      activity_kind: item.activity_kind,
-      status: item.status,
-      activity_date: item.activity_date,
-      target_date: item.target_date,
-      debtor: item.debtor,
-      contract: item.contract,
-      notes: item.notes,
-      created_at: item.created_at,
-    })),
+    recent_activities: recent.map((item) =>
+      serializeMarketingReportActivity(req, item),
+    ),
     scope: {
       can_report_all: scope.canReportAll,
       can_view_division: scope.canViewDivision,

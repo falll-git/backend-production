@@ -9,6 +9,16 @@ const STARTUP_TASKS = [
       await recoverPendingWatermarkJobs();
     },
   },
+  {
+    name: "debtor-import-job-recovery",
+    run: async () => {
+      const {
+        recoverPendingDebtorImportJobs,
+      } = require("./modules/debtor-imports/debtorImports.service");
+
+      await recoverPendingDebtorImportJobs();
+    },
+  },
 ];
 
 async function runStartupTasks({ logger = console } = {}) {

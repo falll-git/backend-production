@@ -12,9 +12,13 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/zip",
+  "application/x-zip-compressed",
   "text/plain",
   "text/csv",
   "application/csv",
+  "application/json",
+  "text/json",
   "image/png",
   "image/jpeg",
   "image/jpg",
@@ -27,8 +31,10 @@ const ALLOWED_EXTENSIONS = new Set([
   "pptx",
   "xls",
   "xlsx",
+  "zip",
   "txt",
   "csv",
+  "json",
   "jpg",
   "jpeg",
   "png",
@@ -58,7 +64,7 @@ const upload = multer({
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
-          "Format file harus PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT, CSV, JPG, JPEG, atau PNG.",
+          "Format file harus PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT, CSV, JSON, JPG, JPEG, atau PNG.",
         ),
       );
     }
@@ -105,6 +111,54 @@ function uploadDomainFile(fieldName = "file") {
   };
 }
 
+function uploadDomainFiles(fieldName = "files", maxCount = 20) {
+  return (req, res, next) => {
+    const fields =
+      fieldName === "file"
+        ? [{ name: "file", maxCount }]
+        : [
+            { name: fieldName, maxCount },
+            { name: "file", maxCount: 1 },
+          ];
+
+    upload.fields(fields)(req, res, (error) => {
+      if (error) {
+        if (error instanceof multer.MulterError) {
+          if (error.code === "LIMIT_FILE_SIZE") {
+            return res.status(413).json({
+              status: false,
+              message: `Ukuran file maksimal ${DOCUMENT_UPLOAD_MAX_SIZE_LABEL}.`,
+            });
+          }
+
+          return res.status(400).json({
+            status: false,
+            message: error.field || error.message || "File tidak valid.",
+          });
+        }
+
+        return res.status(400).json({
+          status: false,
+          message: error.message || "Gagal memproses upload file.",
+        });
+      }
+
+      const uploadedFiles = Object.values(req.files || {}).flat();
+      if (uploadedFiles.length > 0) {
+        req.body.files = uploadedFiles.map((file) => ({
+          buffer: file.buffer,
+          name: file.originalname,
+          mime_type: file.mimetype,
+          size_bytes: file.size,
+        }));
+      }
+
+      return next();
+    });
+  };
+}
+
 module.exports = {
   uploadDomainFile,
+  uploadDomainFiles,
 };

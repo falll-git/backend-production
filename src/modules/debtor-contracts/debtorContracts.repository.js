@@ -28,6 +28,15 @@ const CONTRACT_INCLUDE = {
       kol_level: true,
     },
   },
+  slik_snapshots: {
+    where: {
+      deleted_at: null,
+    },
+    orderBy: {
+      period_month: "desc",
+    },
+    take: 3,
+  },
 };
 
 function findMany({ where, skip, take, orderBy }) {

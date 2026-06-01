@@ -61,6 +61,13 @@ async function seedDebtorLegalParameters() {
     { code: "QARDH", name: "Qardh", is_active: true },
   ]);
 
+  await createMissing("mail_delivery_media", [
+    { code: "EMAIL", name: "Email", is_active: true },
+    { code: "POS", name: "Pos", is_active: true },
+    { code: "KURIR", name: "Kurir", is_active: true },
+    { code: "LANGSUNG", name: "Langsung", is_active: true },
+  ]);
+
   await createMissing("document_checklists", [
     {
       code: "KTP",
@@ -104,6 +111,20 @@ async function seedDebtorLegalParameters() {
     },
   ]);
 
+  await createMissing("restructuring_types", [
+    { code: "PENJADWALAN_ULANG", name: "Penjadwalan Ulang", is_active: true },
+    { code: "PERSYARATAN_KEMBALI", name: "Persyaratan Kembali", is_active: true },
+    { code: "PENATAAN_KEMBALI", name: "Penataan Kembali", is_active: true },
+  ]);
+
+  await createMissing("collateral_types", [
+    { code: "RUMAH_TINGGAL", name: "Rumah Tinggal", is_active: true },
+    { code: "TANAH", name: "Tanah", is_active: true },
+    { code: "KENDARAAN", name: "Kendaraan", is_active: true },
+    { code: "DEPOSITO", name: "Deposito", is_active: true },
+    { code: "LAINNYA", name: "Lainnya", is_active: true },
+  ]);
+
   await createMissing("numbering_templates", [
     {
       code: "LEGAL_AKAD",
@@ -136,11 +157,11 @@ async function seedDebtorLegalParameters() {
       is_active: true,
     },
     {
-      code: "LEGAL_ASURANSI",
-      name: "Penomoran Formulir Asuransi",
+      code: "LEGAL_SURAT_PENGANTAR",
+      name: "Penomoran Surat Pengantar",
       module: "LEGAL",
-      document_type: "FORMULIR_ASURANSI",
-      prefix_template: "ASR/{YYYY}/{MM}/{SEQ}",
+      document_type: "SURAT_PENGANTAR",
+      prefix_template: "SPG/{YYYY}/{MM}/{SEQ}",
       sequence_padding: 4,
       reset_period: "MONTHLY",
       is_active: true,
@@ -165,12 +186,86 @@ async function seedDebtorLegalParameters() {
       reset_period: "MONTHLY",
       is_active: true,
     },
+    {
+      code: "LEGAL_DOKUMEN_LAINNYA",
+      name: "Penomoran Dokumen Lainnya",
+      module: "LEGAL",
+      document_type: "DOKUMEN_LAINNYA",
+      prefix_template: "DOK/{YYYY}/{MM}/{SEQ}",
+      sequence_padding: 4,
+      reset_period: "MONTHLY",
+      is_active: true,
+    },
   ]);
 
   await createMissing("deposit_types", [
     { code: "NOTARIS", name: "Titipan Notaris", category: "NOTARIS", is_active: true },
     { code: "ASURANSI", name: "Titipan Asuransi", category: "ASURANSI", is_active: true },
     { code: "ANGSURAN", name: "Titipan Angsuran", category: "ANGSURAN", is_active: true },
+  ]);
+
+  await createMissing("legal_process_types", [
+    { code: "AKAD", name: "Akad", category: "NOTARY_DEED", is_active: true },
+    { code: "APHT", name: "APHT", category: "NOTARY_DEED", is_active: true },
+    { code: "SKMHT", name: "SKMHT", category: "NOTARY_DEED", is_active: true },
+    { code: "ROYA", name: "Roya", category: "NOTARY_DEED", is_active: true },
+    { code: "COVERNOTE", name: "Covernote", category: "NOTARY_DEED", is_active: true },
+    { code: "JIWA", name: "Asuransi Jiwa", category: "INSURANCE_TYPE", is_active: true },
+    {
+      code: "KEBAKARAN",
+      name: "Asuransi Kebakaran",
+      category: "INSURANCE_TYPE",
+      is_active: true,
+    },
+    {
+      code: "KENDARAAN",
+      name: "Asuransi Kendaraan",
+      category: "INSURANCE_TYPE",
+      is_active: true,
+    },
+    { code: "AGUNAN", name: "Asuransi Agunan", category: "INSURANCE_TYPE", is_active: true },
+    {
+      code: "APPRAISAL_AWAL",
+      name: "Appraisal Awal",
+      category: "KJPP_APPRAISAL",
+      is_active: true,
+    },
+    {
+      code: "REVIEW_APPRAISAL",
+      name: "Review Appraisal",
+      category: "KJPP_APPRAISAL",
+      is_active: true,
+    },
+    {
+      code: "REAPPRAISAL",
+      name: "Re-appraisal",
+      category: "KJPP_APPRAISAL",
+      is_active: true,
+    },
+    {
+      code: "MENINGGAL_DUNIA",
+      name: "Meninggal Dunia",
+      category: "INSURANCE_CLAIM",
+      is_active: true,
+    },
+    {
+      code: "KLAIM_KEBAKARAN",
+      name: "Kebakaran",
+      category: "INSURANCE_CLAIM",
+      is_active: true,
+    },
+    {
+      code: "KLAIM_KEHILANGAN",
+      name: "Kehilangan",
+      category: "INSURANCE_CLAIM",
+      is_active: true,
+    },
+    {
+      code: "KLAIM_KECELAKAAN",
+      name: "Kecelakaan",
+      category: "INSURANCE_CLAIM",
+      is_active: true,
+    },
   ]);
 
   console.log("Debtor/legal parameters seeded!");

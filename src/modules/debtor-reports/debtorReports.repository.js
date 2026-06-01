@@ -1,5 +1,46 @@
 const prisma = require("../../config/prisma");
 
+function buildMarketingWhere({
+  fromDate,
+  toDate,
+  debtorWhere = {},
+  activityKind = null,
+  status = null,
+  search = null,
+} = {}) {
+  const where = {
+    deleted_at: null,
+    ...(activityKind ? { activity_kind: activityKind } : {}),
+    ...(status ? { status } : {}),
+    ...(fromDate || toDate
+      ? {
+          activity_date: {
+            ...(fromDate ? { gte: fromDate } : {}),
+            ...(toDate ? { lte: toDate } : {}),
+          },
+        }
+      : {}),
+    ...(Object.keys(debtorWhere).length > 0 ? { debtor: debtorWhere } : {}),
+  };
+
+  if (search) {
+    where.OR = [
+      { action_plan: { contains: search, mode: "insensitive" } },
+      { visit_address: { contains: search, mode: "insensitive" } },
+      { visit_result: { contains: search, mode: "insensitive" } },
+      { conclusion: { contains: search, mode: "insensitive" } },
+      { handling_step: { contains: search, mode: "insensitive" } },
+      { handling_result: { contains: search, mode: "insensitive" } },
+      { notes: { contains: search, mode: "insensitive" } },
+      { debtor: { name: { contains: search, mode: "insensitive" } } },
+      { debtor: { debtor_number: { contains: search, mode: "insensitive" } } },
+      { contract: { no_kontrak: { contains: search, mode: "insensitive" } } },
+    ];
+  }
+
+  return where;
+}
+
 exports.countDebtors = (where = {}) => prisma.digital_debtors.count({ where });
 
 exports.countContracts = (where = {}) => prisma.debtor_contracts.count({ where });
@@ -64,47 +105,21 @@ exports.findCollectibilityTrendRows = ({ from, to, contractWhere = {} } = {}) =>
     },
   });
 
-exports.groupMarketingActivities = ({ fromDate, toDate, debtorWhere = {} } = {}) =>
+exports.groupMarketingActivities = (params = {}) =>
   prisma.debtor_marketing_activities.groupBy({
     by: ["activity_kind", "status"],
-    where: {
-      deleted_at: null,
-      ...(fromDate || toDate
-        ? {
-            activity_date: {
-              ...(fromDate ? { gte: fromDate } : {}),
-              ...(toDate ? { lte: toDate } : {}),
-            },
-          }
-        : {}),
-      ...(Object.keys(debtorWhere).length > 0
-        ? { debtor: debtorWhere }
-        : {}),
-    },
+    where: buildMarketingWhere(params),
     _count: {
       id: true,
     },
   });
 
-exports.findRecentMarketingActivities = ({ fromDate, toDate, debtorWhere = {} } = {}) =>
+exports.findRecentMarketingActivities = (params = {}) =>
   prisma.debtor_marketing_activities.findMany({
-    where: {
-      deleted_at: null,
-      ...(fromDate || toDate
-        ? {
-            activity_date: {
-              ...(fromDate ? { gte: fromDate } : {}),
-              ...(toDate ? { lte: toDate } : {}),
-            },
-          }
-        : {}),
-      ...(Object.keys(debtorWhere).length > 0
-        ? { debtor: debtorWhere }
-        : {}),
-    },
-    take: 20,
+    where: buildMarketingWhere(params),
+    take: params.limit || 20,
     orderBy: {
-      created_at: "desc",
+      activity_date: params.sort === "oldest" ? "asc" : "desc",
     },
     include: {
       debtor: {
@@ -112,12 +127,14 @@ exports.findRecentMarketingActivities = ({ fromDate, toDate, debtorWhere = {} } 
           id: true,
           name: true,
           debtor_number: true,
+          identity_number: true,
         },
       },
       contract: {
         select: {
           id: true,
           no_kontrak: true,
+          status: true,
         },
       },
     },

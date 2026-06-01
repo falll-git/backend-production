@@ -62,6 +62,28 @@ exports.findThirdPartyById = (id, tx) =>
     },
   });
 
+exports.findDepositTypeById = (id, tx) =>
+  client(tx).deposit_types.findFirst({
+    where: {
+      id,
+      is_active: true,
+      deleted_at: null,
+    },
+  });
+
+exports.findLegalProcessType = ({ value, category }, tx) =>
+  client(tx).legal_process_types.findFirst({
+    where: {
+      category,
+      is_active: true,
+      deleted_at: null,
+      OR: [
+        { code: String(value || "").trim().toUpperCase() },
+        { name: { equals: String(value || "").trim(), mode: "insensitive" } },
+      ],
+    },
+  });
+
 exports.findThirdPartiesByIds = (ids, tx) =>
   client(tx).third_parties.findMany({
     where: {
@@ -112,20 +134,6 @@ function includeFor(modelName) {
       return {
         template: true,
         numbering_template: true,
-        contract: {
-          select: CONTRACT_SELECT,
-        },
-      };
-    case "legal_ideb_uploads":
-      return {
-        debtor: {
-          select: {
-            id: true,
-            debtor_number: true,
-            identity_number: true,
-            name: true,
-          },
-        },
         contract: {
           select: CONTRACT_SELECT,
         },

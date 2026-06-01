@@ -19,6 +19,8 @@ const DEBTOR_INCLUDE = {
   marketing_user: {
     select: USER_SELECT,
   },
+  individual_profile: true,
+  legal_entity_profile: true,
   contracts: {
     where: {
       deleted_at: null,
@@ -45,6 +47,15 @@ const DEBTOR_INCLUDE = {
         include: {
           kol_level: true,
         },
+      },
+      slik_snapshots: {
+        where: {
+          deleted_at: null,
+        },
+        orderBy: {
+          period_month: "desc",
+        },
+        take: 3,
       },
     },
   },
@@ -73,8 +84,39 @@ function count(where) {
   return prisma.digital_debtors.count({ where });
 }
 
-function findById(id, where = {}) {
-  return prisma.digital_debtors.findFirst({
+function findCollaterals({ where, skip, take, orderBy }) {
+  return prisma.debtor_collaterals.findMany({
+    where,
+    skip,
+    take,
+    orderBy,
+    include: {
+      debtor: {
+        include: {
+          branch: true,
+          marketing_user: {
+            select: USER_SELECT,
+          },
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
+function countCollaterals(where) {
+  return prisma.debtor_collaterals.count({ where });
+}
+
+function findById(id, where = {}, db = prisma) {
+  return db.digital_debtors.findFirst({
     where: {
       id,
       ...where,
@@ -106,6 +148,15 @@ function findById(id, where = {}) {
               kol_level: true,
             },
           },
+          slik_snapshots: {
+            where: {
+              deleted_at: null,
+            },
+            orderBy: {
+              period_month: "desc",
+            },
+            take: 3,
+          },
         },
       },
       debtor_documents: {
@@ -131,18 +182,46 @@ function findById(id, where = {}) {
   });
 }
 
-function create(data) {
-  return prisma.digital_debtors.create({
+function create(data, db = prisma) {
+  return db.digital_debtors.create({
     data,
     include: DEBTOR_INCLUDE,
   });
 }
 
-function update(id, data) {
-  return prisma.digital_debtors.update({
+function update(id, data, db = prisma) {
+  return db.digital_debtors.update({
     where: { id },
     data,
     include: DEBTOR_INCLUDE,
+  });
+}
+
+function transaction(callback) {
+  return prisma.$transaction(callback);
+}
+
+function upsertIndividualProfile(debtorId, data, db = prisma) {
+  const { created_by, ...updateData } = data;
+  return db.debtor_individual_profiles.upsert({
+    where: { debtor_id: debtorId },
+    update: updateData,
+    create: {
+      ...data,
+      debtor_id: debtorId,
+    },
+  });
+}
+
+function upsertLegalEntityProfile(debtorId, data, db = prisma) {
+  const { created_by, ...updateData } = data;
+  return db.debtor_legal_entity_profiles.upsert({
+    where: { debtor_id: debtorId },
+    update: updateData,
+    create: {
+      ...data,
+      debtor_id: debtorId,
+    },
   });
 }
 
@@ -219,6 +298,45 @@ function findDocumentsByDebtorId(debtorId, { where, skip, take, orderBy }) {
   });
 }
 
+function findDocuments({ where, skip, take, orderBy }) {
+  return prisma.debtor_documents.findMany({
+    where,
+    skip,
+    take,
+    orderBy,
+    include: {
+      document_checklist: true,
+      debtor: {
+        select: {
+          id: true,
+          debtor_number: true,
+          identity_number: true,
+          name: true,
+          customer_type: true,
+          slik_segment: true,
+          slik_status_code: true,
+          branch: true,
+          marketing_user: {
+            select: USER_SELECT,
+          },
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
+function countDocuments(where = {}) {
+  return prisma.debtor_documents.count({ where });
+}
+
 function countDocumentsByDebtorId(debtorId, where = {}) {
   return prisma.debtor_documents.count({
     where: {
@@ -260,6 +378,8 @@ async function findWorkflowData(debtorId, contractIds = []) {
     kjppProgress,
     claims,
     deposits,
+    restructuringRecords,
+    collaterals,
   ] = await Promise.all([
     prisma.debtor_marketing_timelines.findMany({
       where: {
@@ -312,7 +432,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
         },
       },
     }),
-    prisma.legal_ideb_uploads.findMany({
+    prisma.debtor_ideb_uploads.findMany({
       where: {
         deleted_at: null,
         OR: [
@@ -492,10 +612,50 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
         })
       : [],
+    contractFilter
+      ? prisma.debtor_restructuring_records.findMany({
+          where: {
+            deleted_at: null,
+            ...contractFilter,
+          },
+          orderBy: [{ period_month: "desc" }, { restructuring_date: "desc" }, { created_at: "desc" }],
+          include: {
+            contract: {
+              select: {
+                id: true,
+                debtor_id: true,
+                no_kontrak: true,
+                status: true,
+              },
+            },
+          },
+        })
+      : [],
+    prisma.debtor_collaterals.findMany({
+      where: {
+        deleted_at: null,
+        OR: [
+          { debtor_id: debtorId },
+          ...(contractFilter ? [contractFilter] : []),
+        ],
+      },
+      orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
+      include: {
+        contract: {
+          select: {
+            id: true,
+            debtor_id: true,
+            no_kontrak: true,
+            status: true,
+          },
+        },
+      },
+    }),
   ]);
 
   return {
     claims,
+    collaterals,
     deposits,
     ideb,
     insuranceProgress,
@@ -504,6 +664,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
     timelines,
     notaryProgress,
     prints,
+    restructuringRecords,
     warningLetters,
   };
 }
@@ -511,6 +672,8 @@ async function findWorkflowData(debtorId, contractIds = []) {
 module.exports = {
   USER_SELECT,
   count,
+  countCollaterals,
+  countDocuments,
   countDocumentsByDebtorId,
   create,
   createDocument,
@@ -519,9 +682,14 @@ module.exports = {
   findActiveUserById,
   findBranchById,
   findById,
+  findCollaterals,
   findContractById,
   findDocumentChecklistById,
+  findDocuments,
   findDocumentsByDebtorId,
   findMany,
+  transaction,
   update,
+  upsertIndividualProfile,
+  upsertLegalEntityProfile,
 };

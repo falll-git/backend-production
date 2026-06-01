@@ -7,7 +7,7 @@ function status(error, fallback = 400) {
 
 exports.getAll = async (req, res) => {
   try {
-    const result = await service.getAll({ req, query: req.query });
+    const result = await service.getAll({ req, query: req.query, userId: req.user?.id });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
@@ -16,7 +16,7 @@ exports.getAll = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    return successResponse(res, await service.getById({ req, id: req.params.id }));
+    return successResponse(res, await service.getById({ req, id: req.params.id, userId: req.user?.id }));
   } catch (error) {
     return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
   }
@@ -45,7 +45,7 @@ exports.update = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    await service.delete({ id: req.params.id, userId: req.user?.id });
+    await service.delete({ req, id: req.params.id, userId: req.user?.id });
     return successResponse(res, null, "Surat peringatan berhasil dihapus.");
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });

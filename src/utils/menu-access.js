@@ -78,9 +78,9 @@ const MENU_CAPABILITIES = {
   "/dashboard/informasi-debitur/marketing/hasil-kunjungan": CRUD,
   "/dashboard/informasi-debitur/marketing/langkah-penanganan": CRUD,
   "/dashboard/informasi-debitur/admin/upload-slik": READ_CREATE,
+  "/dashboard/informasi-debitur/admin/monitoring-import": READ_ONLY,
+  "/dashboard/informasi-debitur/admin/upload-ideb": READ_CREATE,
   "/dashboard/informasi-debitur/admin/upload-restrik": READ_CREATE,
-  "/dashboard/informasi-debitur/admin/import-debitur": READ_CREATE,
-  "/dashboard/informasi-debitur/admin/import-kolektibilitas": READ_CREATE,
   "/dashboard/informasi-debitur/laporan": READ_ONLY,
   "/dashboard/informasi-debitur/laporan/npf": READ_ONLY,
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": READ_ONLY,
@@ -90,9 +90,10 @@ const MENU_CAPABILITIES = {
   "/dashboard/legal/cetak/akad": READ_CREATE,
   "/dashboard/legal/cetak/haftsheet": READ_CREATE,
   "/dashboard/legal/cetak/surat-peringatan": READ_CREATE,
-  "/dashboard/legal/cetak/formulir-asuransi": READ_CREATE,
+  "/dashboard/legal/cetak/surat-pengantar": READ_CREATE,
   "/dashboard/legal/cetak/keterangan-lunas": READ_CREATE,
   "/dashboard/legal/cetak/surat-samsat": READ_CREATE,
+  "/dashboard/legal/cetak/dokumen-lainnya": READ_CREATE,
   "/dashboard/legal/titipan/asuransi": CRUD,
   "/dashboard/legal/titipan/notaris": CRUD,
   "/dashboard/legal/titipan/angsuran": CRUD,
@@ -100,7 +101,6 @@ const MENU_CAPABILITIES = {
   "/dashboard/legal/progress/asuransi": CRUD,
   "/dashboard/legal/progress/kjpp": CRUD,
   "/dashboard/legal/progress/klaim": CRUD,
-  "/dashboard/legal/upload-ideb": CRUD,
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": READ_ONLY,
   "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": READ_ONLY,
   "/dashboard/legal/laporan": READ_ONLY,
@@ -112,6 +112,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/jenis-dokumen": CRUD,
   "/dashboard/parameter/tempat-penyimpanan": CRUD,
   "/dashboard/parameter/prioritas-surat": CRUD,
+  "/dashboard/parameter/media-pengiriman-surat": CRUD,
   "/dashboard/parameter/pihak-ketiga/notaris": CRUD,
   "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi": CRUD,
   "/dashboard/parameter/pihak-ketiga/kjpp": CRUD,
@@ -121,7 +122,10 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/jenis-akad": CRUD,
   "/dashboard/parameter/kolektibilitas": CRUD,
   "/dashboard/parameter/cabang": CRUD,
+  "/dashboard/parameter/jenis-agunan": CRUD,
+  "/dashboard/parameter/jenis-restrukturisasi": CRUD,
   "/dashboard/parameter/jenis-titipan": CRUD,
+  "/dashboard/parameter/jenis-proses-legal": CRUD,
   "/dashboard/parameter/watermark-dokumen": READ_UPDATE,
 };
 
@@ -208,7 +212,10 @@ const MENU_FEATURES = {
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
   ],
-  "/dashboard/informasi-debitur/laporan": [REPORT_ALL_FEATURE],
+  "/dashboard/informasi-debitur/laporan": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/informasi-debitur": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
@@ -230,14 +237,16 @@ const MENU_FEATURES = {
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/informasi-debitur/admin/upload-slik": [MANAGE_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/monitoring-import": [MANAGE_ALL_FEATURE],
+  "/dashboard/informasi-debitur/admin/upload-ideb": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/upload-restrik": [MANAGE_ALL_FEATURE],
-  "/dashboard/informasi-debitur/admin/import-debitur": [MANAGE_ALL_FEATURE],
-  "/dashboard/informasi-debitur/admin/import-kolektibilitas": [
-    MANAGE_ALL_FEATURE,
+  "/dashboard/informasi-debitur/laporan/npf": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
   ],
-  "/dashboard/informasi-debitur/laporan/npf": [REPORT_ALL_FEATURE],
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": [
     REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
   ],
   "/dashboard/legal": [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
   "/dashboard/legal/cetak/akad": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
@@ -246,7 +255,7 @@ const MENU_FEATURES = {
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
-  "/dashboard/legal/cetak/formulir-asuransi": [
+  "/dashboard/legal/cetak/surat-pengantar": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
@@ -255,6 +264,10 @@ const MENU_FEATURES = {
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/legal/cetak/surat-samsat": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/cetak/dokumen-lainnya": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
@@ -286,7 +299,6 @@ const MENU_FEATURES = {
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
-  "/dashboard/legal/upload-ideb": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
   "/dashboard/legal/laporan": [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": [
     REPORT_ALL_FEATURE,
