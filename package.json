@@ -7,9 +7,12 @@
     "worker:slik-import": "node src/workers/slik-import.worker.js",
     "dev": "nodemon src/server.js",
     "build": "node scripts/check-js-syntax.js",
+    "test:slik-reference": "node --test src/utils/slik-reference-dictionary.test.js",
+    "check:slik-reference-coverage": "node scripts/check-slik-reference-coverage.js",
     "prisma:generate": "prisma generate",
     "migrate:status": "prisma migrate status",
     "migrate:deploy": "prisma migrate deploy",
+    "apply:server": "prisma migrate deploy && node prisma/seed-system.js",
     "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
     "seed:system": "node prisma/seed-system.js",
     "seed": "prisma db seed"

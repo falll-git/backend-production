@@ -20,6 +20,10 @@ const {
   prepareParseOptions,
   streamSlikTextFile,
 } = require("../../utils/slik-import");
+const {
+  collectUnmappedSlikReferences,
+  mergeUnmappedSlikReferences,
+} = require("../../utils/slik-reference-dictionary");
 
 const IMPORT_TYPES = new Set(["SLIK", "RESTRIK", "IDEB"]);
 const SLIK_IMPORT_SEGMENTS = new Set(["D01", "D02", "F01", "A01"]);
@@ -1265,6 +1269,73 @@ async function upsertContract(tx, summary, debtor, periodMonth, userId, context 
   return cacheContract(context, contract);
 }
 
+async function reconcilePendingCollateralsForContract(
+  tx,
+  contract,
+  summary,
+  periodMonth,
+  userId,
+) {
+  const facilityNumber =
+    normalizeText(summary.facility_number) ||
+    normalizeText(summary.contract_number) ||
+    normalizeText(contract?.no_kontrak);
+  if (!contract?.id || !facilityNumber || !periodMonth) return 0;
+
+  const pendingCollaterals = await tx.debtor_collaterals.findMany({
+    where: {
+      facility_number: facilityNumber,
+      period_month: periodMonth,
+      contract_id: null,
+      deleted_at: null,
+      OR: [
+        { debtor_id: null },
+        { debtor_id: contract.debtor_id },
+      ],
+    },
+    select: {
+      id: true,
+      collateral_number: true,
+    },
+  });
+  if (pendingCollaterals.length === 0) return 0;
+
+  const collateralIds = pendingCollaterals.map((item) => item.id);
+  const collateralNumbers = pendingCollaterals
+    .map((item) => normalizeText(item.collateral_number))
+    .filter(Boolean);
+
+  await tx.debtor_collaterals.updateMany({
+    where: {
+      id: { in: collateralIds },
+    },
+    data: {
+      debtor_id: contract.debtor_id,
+      contract_id: contract.id,
+      updated_by: userId || null,
+    },
+  });
+
+  if (collateralNumbers.length > 0) {
+    await tx.debtor_slik_records.updateMany({
+      where: {
+        segment: "A01",
+        period_month: periodMonth,
+        raw_key: { in: collateralNumbers },
+        status: "MATCH_PENDING",
+      },
+      data: {
+        debtor_id: contract.debtor_id,
+        contract_id: contract.id,
+        status: "IMPORTED",
+        error_message: null,
+      },
+    });
+  }
+
+  return pendingCollaterals.length;
+}
+
 async function upsertCollectibility(tx, summary, contract, periodMonth, userId, context = null) {
   const kolLevel = await findOrCreateCollectibility(
     tx,
@@ -1621,6 +1692,7 @@ function createImportProgress(job, config) {
       collaterals: 0,
       raw_records: 0,
     },
+    unmappedReferences: [],
   };
 }
 
@@ -1638,6 +1710,7 @@ function getPublicProgress(progress) {
     failed_rows: progress.failedRows,
     segments: progress.segments,
     imported: progress.stats,
+    unmapped_reference_codes: progress.unmappedReferences,
   };
 }
 
@@ -1757,12 +1830,18 @@ async function processRowsChunk({ tx, job, segment, rows, periodMonth, userId, c
   };
   const rawRecords = [];
   const errors = [];
+  let unmappedReferences = [];
   let successRows = 0;
   let failedRows = 0;
 
   await prefetchRows(tx, segment.segment, rows, context);
 
   for (const row of rows) {
+    unmappedReferences = mergeUnmappedSlikReferences(
+      unmappedReferences,
+      collectUnmappedSlikReferences(segment.segment, row.summary),
+    );
+
     if (["D01", "D02"].includes(segment.segment)) {
       try {
         const debtor = await upsertDebtor(tx, row.summary, userId, context);
@@ -1808,6 +1887,13 @@ async function processRowsChunk({ tx, job, segment, rows, periodMonth, userId, c
           periodMonth,
           userId,
           context,
+        );
+        await reconcilePendingCollateralsForContract(
+          tx,
+          contract,
+          row.summary,
+          periodMonth,
+          userId,
         );
         await upsertCollectibility(tx, row.summary, contract, periodMonth, userId, context);
         await upsertContractSnapshot(tx, row.summary, contract, periodMonth, userId, row.fields);
@@ -1894,6 +1980,7 @@ async function processRowsChunk({ tx, job, segment, rows, periodMonth, userId, c
     failedRows,
     errors,
     stats,
+    unmappedReferences,
   };
 }
 
@@ -1913,6 +2000,11 @@ function mergeChunkResult(progress, result, segment) {
   for (const [key, value] of Object.entries(result.stats || {})) {
     progress.stats[key] = (progress.stats[key] || 0) + value;
   }
+
+  progress.unmappedReferences = mergeUnmappedSlikReferences(
+    progress.unmappedReferences,
+    result.unmappedReferences || [],
+  );
 
   addProgressErrors(progress, result.errors || []);
 }

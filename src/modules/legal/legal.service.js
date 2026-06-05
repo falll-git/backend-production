@@ -1,5 +1,6 @@
 const repository = require("./legal.repository");
 const { AppError } = require("../../utils/errors");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const {
   PAGINATION_PROFILES,
   buildPaginationMeta,
@@ -40,6 +41,55 @@ const LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY = {
   INSURANCE: "INSURANCE_TYPE",
   KJPP: "KJPP_APPRAISAL",
 };
+const LEGAL_DOCUMENT_GENERATOR = "legal_document_generator_v1";
+const LEGAL_PLACEHOLDERS = [
+  "legal.generated_number",
+  "legal.document_type",
+  "legal.printed_at",
+  "debtor.name",
+  "debtor.debtor_number",
+  "debtor.identity_number",
+  "debtor.address",
+  "debtor.phone",
+  "debtor.customer_type",
+  "debtor.branch",
+  "debtor.marketing_user",
+  "contract.no_kontrak",
+  "contract.status",
+  "contract.tanggal_akad",
+  "contract.tanggal_jatuh_tempo",
+  "contract.plafond",
+  "contract.pokok",
+  "contract.margin",
+  "contract.tenor",
+  "contract.outstanding_pokok",
+  "contract.outstanding_margin",
+  "contract.total_outstanding",
+  "contract.objek_pembiayaan",
+  "contract.agunan",
+  "contract.product",
+  "contract.akad_type",
+  "contract.branch",
+  "contract.marketing_user",
+  "collateral.collateral_number",
+  "collateral.facility_number",
+  "collateral.collateral_type",
+  "collateral.binding_type",
+  "collateral.binding_date",
+  "collateral.owner_name",
+  "collateral.proof_number",
+  "collateral.address",
+  "collateral.market_value",
+  "collateral.appraisal_value",
+  "collateral.insured_status",
+  "collaterals.count",
+  "collaterals.summary",
+];
+const LEGAL_PLACEHOLDER_SET = new Set(LEGAL_PLACEHOLDERS);
+const LEGAL_DOCUMENT_SOURCE = {
+  AUTO_GENERATED_PDF: "AUTO_GENERATED_PDF",
+  UPLOADED_FILE: "UPLOADED_FILE",
+};
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -55,6 +105,242 @@ function normalizeUpper(value) {
 
 function number(value) {
   return Number(value || 0);
+}
+
+function toJsonSafe(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object" && typeof value.toNumber === "function") {
+    return value.toNumber();
+  }
+  if (Array.isArray(value)) return value.map(toJsonSafe);
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, toJsonSafe(nested)]),
+    );
+  }
+  return value;
+}
+
+function formatDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatCurrency(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function valueOrDash(value) {
+  if (value === undefined || value === null) return "-";
+  const text = String(value).trim();
+  return text || "-";
+}
+
+function compactData(data) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  );
+}
+
+function collateralLabel(collateral) {
+  if (!collateral) return null;
+  return [
+    collateral.collateral_number,
+    collateral.collateral_type,
+    collateral.owner_name ? `a.n. ${collateral.owner_name}` : null,
+    collateral.proof_number,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function buildCollateralSummary(collaterals = []) {
+  if (!Array.isArray(collaterals) || collaterals.length === 0) return null;
+  return collaterals
+    .map((collateral, index) => `${index + 1}. ${collateralLabel(collateral) || collateral.id}`)
+    .join("\n");
+}
+
+function normalizePdfText(value) {
+  return String(value || "")
+    .replace(/\u2013|\u2014/g, "-")
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/\u201c|\u201d/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "?");
+}
+
+function extractTemplatePlaceholders(template = "") {
+  const placeholders = new Set();
+  const pattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+  let match;
+  while ((match = pattern.exec(template)) !== null) {
+    placeholders.add(match[1]);
+  }
+  return [...placeholders];
+}
+
+function assertTemplatePlaceholdersAllowed(template) {
+  const unknown = extractTemplatePlaceholders(template).filter(
+    (placeholder) => !LEGAL_PLACEHOLDER_SET.has(placeholder),
+  );
+  if (unknown.length > 0) {
+    throw new AppError(
+      `Placeholder template legal tidak dikenal: ${unknown.join(", ")}.`,
+      422,
+    );
+  }
+}
+
+function renderTemplate(template, values) {
+  const missingFields = new Set();
+  const rendered = String(template || "").replace(
+    /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g,
+    (_match, key) => {
+      if (!LEGAL_PLACEHOLDER_SET.has(key)) {
+        throw new AppError(`Placeholder template legal tidak dikenal: ${key}.`, 422);
+      }
+      const value = values[key];
+      if (value === undefined || value === null || String(value).trim() === "") {
+        missingFields.add(key);
+        return "-";
+      }
+      return String(value);
+    },
+  );
+  return {
+    rendered,
+    missingFields: [...missingFields],
+  };
+}
+
+function collectMissingFieldsForTemplate(template, values) {
+  const missingFields = new Set();
+  for (const key of extractTemplatePlaceholders(template)) {
+    if (!LEGAL_PLACEHOLDER_SET.has(key)) {
+      throw new AppError(`Placeholder template legal tidak dikenal: ${key}.`, 422);
+    }
+    const value = values[key];
+    if (value === undefined || value === null || String(value).trim() === "") {
+      missingFields.add(key);
+    }
+  }
+  return [...missingFields];
+}
+
+function buildGeneratedPdfInput(buffer, generatedNumber, documentType) {
+  const safeName = String(generatedNumber || documentType || "dokumen-legal")
+    .trim()
+    .replace(/[<>:"/\\|?*]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return {
+    buffer,
+    name: `${safeName || "dokumen-legal"}.pdf`,
+    mime_type: "application/pdf",
+    size_bytes: buffer.length,
+  };
+}
+
+function buildPrintSnapshot({ payloadSnapshot, source, missingFields, context }) {
+  return {
+    ...(payloadSnapshot && typeof payloadSnapshot === "object" ? payloadSnapshot : {}),
+    generator: LEGAL_DOCUMENT_GENERATOR,
+    source,
+    missing_fields: missingFields,
+    context,
+  };
+}
+
+function wrapText(text, font, fontSize, maxWidth) {
+  const words = normalizePdfText(text).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(next, fontSize) <= maxWidth) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+async function renderLegalPdf({ title, documentNumber, content }) {
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const pageSize = [595.28, 841.89];
+  const margin = 48;
+  const fontSize = 11;
+  const lineHeight = 16;
+  let page = pdfDoc.addPage(pageSize);
+  let y = pageSize[1] - margin;
+  const maxWidth = pageSize[0] - margin * 2;
+
+  function ensureSpace() {
+    if (y >= margin + lineHeight) return;
+    page = pdfDoc.addPage(pageSize);
+    y = pageSize[1] - margin;
+  }
+
+  const header = normalizePdfText(title || "Dokumen Legal");
+  page.drawText(header, {
+    x: margin,
+    y,
+    size: 15,
+    font: boldFont,
+    color: rgb(0.05, 0.12, 0.22),
+  });
+  y -= 22;
+  page.drawText(normalizePdfText(documentNumber || "-"), {
+    x: margin,
+    y,
+    size: 10,
+    font: regularFont,
+    color: rgb(0.3, 0.35, 0.42),
+  });
+  y -= 28;
+
+  for (const paragraph of normalizePdfText(content).split(/\r?\n/)) {
+    const lines = wrapText(paragraph, regularFont, fontSize, maxWidth);
+    for (const line of lines) {
+      ensureSpace();
+      page.drawText(line, {
+        x: margin,
+        y,
+        size: fontSize,
+        font: regularFont,
+        color: rgb(0.08, 0.1, 0.14),
+      });
+      y -= lineHeight;
+    }
+    y -= 6;
+  }
+
+  return Buffer.from(await pdfDoc.save());
 }
 
 function decimalField(data, field) {
@@ -91,6 +377,7 @@ function listWhere(query, extra = {}, fields = [], options = {}) {
     clauses.push({ template_type: normalizeUpper(query.template_type) });
   }
   if (query.contract_id) clauses.push({ contract_id: query.contract_id });
+  if (query.collateral_id) clauses.push({ collateral_id: query.collateral_id });
   if (query.third_party_id) clauses.push({ third_party_id: query.third_party_id });
   if (query.type) clauses.push({ type: normalizeUpper(query.type) });
 
@@ -224,6 +511,20 @@ async function ensureContract(contractId, userId, tx) {
   return contract;
 }
 
+async function ensureCollateralForContract(collateralId, contractId, tx) {
+  const id = normalizeText(collateralId);
+  if (!id) return null;
+
+  const collateral = await repository.findCollateralById(id, tx);
+  if (!collateral) {
+    throw new AppError("Agunan tidak ditemukan.", 404);
+  }
+  if (collateral.contract_id !== contractId) {
+    throw new AppError("Agunan tidak sesuai dengan kontrak.", 422);
+  }
+  return collateral;
+}
+
 async function ensureDebtor(debtorId, userId, tx) {
   if (!debtorId) return null;
   const scope = await getLegalAccessScope(userId);
@@ -347,11 +648,11 @@ async function ensureNumberingTemplate(documentType, numberingTemplateId, tx) {
   return assertNumberingTemplateMatches(template, documentType);
 }
 
-async function ensureLegalTemplate(templateId, documentType) {
+async function ensureLegalTemplate(templateId, documentType, tx) {
   const id = normalizeText(templateId);
   if (!id) return null;
 
-  const template = await repository.findTemplateById(id);
+  const template = await repository.findTemplateById(id, tx);
   if (!template || !template.is_active) {
     throw new AppError("Template legal aktif tidak ditemukan.", 404);
   }
@@ -361,6 +662,168 @@ async function ensureLegalTemplate(templateId, documentType) {
   }
 
   return template;
+}
+
+function serializeCollateralSnapshot(collateral) {
+  if (!collateral) return null;
+  return {
+    id: collateral.id,
+    debtor_id: collateral.debtor_id,
+    contract_id: collateral.contract_id,
+    collateral_number: collateral.collateral_number,
+    facility_number: collateral.facility_number,
+    collateral_status_code: collateral.collateral_status_code,
+    collateral_type: collateral.collateral_type,
+    binding_type_code: collateral.binding_type_code,
+    binding_date: toJsonSafe(collateral.binding_date),
+    owner_name: collateral.owner_name,
+    proof_number: collateral.proof_number,
+    address: collateral.address,
+    location_city_code: collateral.location_city_code,
+    market_value: toJsonSafe(collateral.market_value),
+    appraisal_value: toJsonSafe(collateral.appraisal_value),
+    insured_status: collateral.insured_status,
+    description: collateral.description,
+    period_month: collateral.period_month,
+  };
+}
+
+function buildLegalContextValues({ contract, collateral, generatedNumber, documentType, printedAt }) {
+  const debtor = contract.debtor || {};
+  const collaterals = Array.isArray(contract.collaterals) ? contract.collaterals : [];
+  const totalOutstanding = number(contract.outstanding_pokok) + number(contract.outstanding_margin);
+
+  return {
+    "legal.generated_number": generatedNumber,
+    "legal.document_type": documentType,
+    "legal.printed_at": formatDate(printedAt),
+    "debtor.name": debtor.name,
+    "debtor.debtor_number": debtor.debtor_number,
+    "debtor.identity_number": debtor.identity_number,
+    "debtor.address": debtor.address,
+    "debtor.phone": debtor.phone,
+    "debtor.customer_type": debtor.customer_type_label || debtor.customer_type,
+    "debtor.branch": debtor.branch?.name || contract.branch?.name,
+    "debtor.marketing_user": debtor.marketing_user?.name || contract.marketing_user?.name,
+    "contract.no_kontrak": contract.no_kontrak,
+    "contract.status": contract.status,
+    "contract.tanggal_akad": formatDate(contract.tanggal_akad),
+    "contract.tanggal_jatuh_tempo": formatDate(contract.tanggal_jatuh_tempo),
+    "contract.plafond": formatCurrency(contract.plafond),
+    "contract.pokok": formatCurrency(contract.pokok),
+    "contract.margin": formatCurrency(contract.margin),
+    "contract.tenor": contract.tenor,
+    "contract.outstanding_pokok": formatCurrency(contract.outstanding_pokok),
+    "contract.outstanding_margin": formatCurrency(contract.outstanding_margin),
+    "contract.total_outstanding": formatCurrency(totalOutstanding),
+    "contract.objek_pembiayaan": contract.objek_pembiayaan,
+    "contract.agunan": contract.agunan,
+    "contract.product": contract.product?.name,
+    "contract.akad_type": contract.akad_type?.name,
+    "contract.branch": contract.branch?.name || debtor.branch?.name,
+    "contract.marketing_user": contract.marketing_user?.name || debtor.marketing_user?.name,
+    "collateral.collateral_number": collateral?.collateral_number,
+    "collateral.facility_number": collateral?.facility_number,
+    "collateral.collateral_type": collateral?.collateral_type,
+    "collateral.binding_type": collateral?.binding_type_code,
+    "collateral.binding_date": formatDate(collateral?.binding_date),
+    "collateral.owner_name": collateral?.owner_name,
+    "collateral.proof_number": collateral?.proof_number,
+    "collateral.address": collateral?.address,
+    "collateral.market_value": formatCurrency(collateral?.market_value),
+    "collateral.appraisal_value": formatCurrency(collateral?.appraisal_value),
+    "collateral.insured_status": collateral?.insured_status,
+    "collaterals.count": collaterals.length,
+    "collaterals.summary": buildCollateralSummary(collaterals),
+  };
+}
+
+function buildLegalContextSnapshot({ contract, collateral, generatedNumber, documentType, printedAt }) {
+  const debtor = contract.debtor || {};
+  return {
+    legal: {
+      generated_number: generatedNumber,
+      document_type: documentType,
+      printed_at: toJsonSafe(printedAt),
+    },
+    debtor: compactData({
+      id: debtor.id,
+      debtor_number: debtor.debtor_number,
+      identity_number: debtor.identity_number,
+      name: debtor.name,
+      address: debtor.address,
+      phone: debtor.phone,
+      customer_type: debtor.customer_type,
+      branch: debtor.branch?.name,
+      marketing_user: debtor.marketing_user?.name,
+    }),
+    contract: compactData({
+      id: contract.id,
+      no_kontrak: contract.no_kontrak,
+      status: contract.status,
+      tanggal_akad: toJsonSafe(contract.tanggal_akad),
+      tanggal_jatuh_tempo: toJsonSafe(contract.tanggal_jatuh_tempo),
+      plafond: toJsonSafe(contract.plafond),
+      pokok: toJsonSafe(contract.pokok),
+      margin: toJsonSafe(contract.margin),
+      tenor: contract.tenor,
+      outstanding_pokok: toJsonSafe(contract.outstanding_pokok),
+      outstanding_margin: toJsonSafe(contract.outstanding_margin),
+      objek_pembiayaan: contract.objek_pembiayaan,
+      agunan: contract.agunan,
+      product: contract.product?.name,
+      akad_type: contract.akad_type?.name,
+      branch: contract.branch?.name,
+      marketing_user: contract.marketing_user?.name,
+    }),
+    selected_collateral: serializeCollateralSnapshot(collateral),
+    collaterals: Array.isArray(contract.collaterals)
+      ? contract.collaterals.map(serializeCollateralSnapshot)
+      : [],
+  };
+}
+
+async function buildLegalDocumentContext({
+  contractId,
+  collateralId,
+  documentType,
+  generatedNumber = null,
+  userId,
+  tx,
+}) {
+  const scope = await getLegalAccessScope(userId);
+  const contract = await repository.findContractDocumentContextById(
+    contractId,
+    tx,
+    buildContractManageWhere(scope),
+  );
+  if (!contract) {
+    throw new AppError("Kontrak tidak ditemukan atau tidak bisa diakses.", 404);
+  }
+  const selectedCollateral = await ensureCollateralForContract(
+    collateralId,
+    contract.id,
+    tx,
+  );
+  const printedAt = new Date();
+  return {
+    contract,
+    selectedCollateral,
+    values: buildLegalContextValues({
+      contract,
+      collateral: selectedCollateral,
+      generatedNumber,
+      documentType,
+      printedAt,
+    }),
+    snapshot: buildLegalContextSnapshot({
+      contract,
+      collateral: selectedCollateral,
+      generatedNumber,
+      documentType,
+      printedAt,
+    }),
+  };
 }
 
 async function listModel({
@@ -403,6 +866,7 @@ exports.listTemplates = ({ req, query }) =>
 exports.createTemplate = async ({ req, payload, userId }) => {
   const type = normalizeUpper(payload.template_type);
   if (!LEGAL_TYPES.has(type)) throw new AppError("Jenis template legal tidak valid.", 422);
+  assertTemplatePlaceholdersAllowed(payload.content_template || "");
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: "legal/templates",
@@ -436,6 +900,9 @@ exports.updateTemplate = async ({ req, id, payload, userId }) => {
     deleted_at: null,
   });
   if (!current) throw new AppError("Template legal tidak ditemukan.", 404);
+  if (payload.content_template !== undefined) {
+    assertTemplatePlaceholdersAllowed(payload.content_template || "");
+  }
   const fileMeta =
     payload.file !== undefined && payload.file !== null
       ? persistDomainFile({
@@ -548,25 +1015,78 @@ exports.listPrints = async ({ req, query, userId }) =>
     serializer: serializePrint,
   });
 
+exports.getPrintDocumentContext = async ({ query, userId }) => {
+  const documentType = assertLegalDocumentType(query.document_type);
+  const context = await buildLegalDocumentContext({
+    contractId: query.contract_id,
+    collateralId: query.collateral_id,
+    documentType,
+    userId,
+  });
+
+  return {
+    placeholders: LEGAL_PLACEHOLDERS,
+    values: context.values,
+    missing_fields: Object.entries(context.values)
+      .filter(([key, value]) => key !== "legal.generated_number" && !value)
+      .map(([key]) => key),
+    context: context.snapshot,
+  };
+};
+
 exports.createPrint = async ({ req, payload, userId }) => {
   const documentType = assertLegalDocumentType(payload.document_type);
-  await ensureContract(payload.contract_id, userId);
-  await ensureLegalTemplate(payload.template_id, documentType);
-
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity: "legal/generated",
-        input: payload.file,
-        fallbackBaseName: documentType,
-      })
-    : null;
-
   const print = await repository.transaction(async (tx) => {
     const generated = await generateDocumentNumber(
       documentType,
       payload.numbering_template_id,
       tx,
     );
+    const template = await ensureLegalTemplate(payload.template_id, documentType, tx);
+    const context = await buildLegalDocumentContext({
+      contractId: payload.contract_id,
+      collateralId: payload.collateral_id,
+      documentType,
+      generatedNumber: generated.generatedNumber,
+      userId,
+      tx,
+    });
+    let generatedFileMeta = null;
+    let missingFields = [];
+
+    if (payload.file) {
+      missingFields = collectMissingFieldsForTemplate(
+        template.content_template || "",
+        context.values,
+      );
+      generatedFileMeta = persistDomainFile({
+        entity: "legal/generated",
+        input: payload.file,
+        fallbackBaseName: generated.generatedNumber || documentType,
+      });
+    } else {
+      if (!normalizeText(template.content_template)) {
+        throw new AppError(
+          "Isi template legal wajib diisi untuk generate PDF otomatis.",
+          422,
+        );
+      }
+      const { rendered, missingFields: renderedMissingFields } = renderTemplate(
+        template.content_template,
+        context.values,
+      );
+      missingFields = renderedMissingFields;
+      const pdfBuffer = await renderLegalPdf({
+        title: template.title,
+        documentNumber: generated.generatedNumber,
+        content: rendered,
+      });
+      generatedFileMeta = persistDomainFile({
+        entity: "legal/generated",
+        input: buildGeneratedPdfInput(pdfBuffer, generated.generatedNumber, documentType),
+        fallbackBaseName: generated.generatedNumber || documentType,
+      });
+    }
 
     return repository.create(
       "legal_print_histories",
@@ -576,13 +1096,20 @@ exports.createPrint = async ({ req, payload, userId }) => {
         contract_id: payload.contract_id,
         document_type: documentType,
         generated_number: generated.generatedNumber,
-        payload_snapshot: payload.payload_snapshot || undefined,
-        ...(fileMeta
+        payload_snapshot: buildPrintSnapshot({
+          payloadSnapshot: payload.payload_snapshot,
+          source: payload.file
+            ? LEGAL_DOCUMENT_SOURCE.UPLOADED_FILE
+            : LEGAL_DOCUMENT_SOURCE.AUTO_GENERATED_PDF,
+          missingFields,
+          context: context.snapshot,
+        }),
+        ...(generatedFileMeta
           ? {
-              generated_file_path: fileMeta.file_path,
-              generated_file_name: fileMeta.file_name,
-              generated_mime_type: fileMeta.mime_type,
-              generated_size_bytes: fileMeta.size_bytes,
+              generated_file_path: generatedFileMeta.file_path,
+              generated_file_name: generatedFileMeta.file_name,
+              generated_mime_type: generatedFileMeta.mime_type,
+              generated_size_bytes: generatedFileMeta.size_bytes,
             }
           : {}),
         printed_by: userId || null,
@@ -597,6 +1124,7 @@ exports.createPrint = async ({ req, payload, userId }) => {
 
 async function createProgress({ req, modelName, payload, userId, category, entity }) {
   await ensureContract(payload.contract_id, userId);
+  await ensureCollateralForContract(payload.collateral_id, payload.contract_id);
   await ensureThirdParty(payload.third_party_id, category);
   const fileMeta = payload.file
     ? persistDomainFile({
@@ -607,6 +1135,9 @@ async function createProgress({ req, modelName, payload, userId, category, entit
     : null;
   const data = { ...payload };
   delete data.file;
+  if (data.collateral_id !== undefined) {
+    data.collateral_id = normalizeText(data.collateral_id);
+  }
   const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
   if (processCategory && data.deed_type !== undefined) {
     data.deed_type = await resolveLegalProcessType(
@@ -652,6 +1183,12 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
   const next = { ...current, ...payload };
   await ensureContract(current.contract_id, userId);
   await ensureContract(next.contract_id, userId);
+  await ensureCollateralForContract(
+    payload.collateral_id !== undefined
+      ? payload.collateral_id
+      : current.collateral_id,
+    next.contract_id,
+  );
   await ensureThirdParty(next.third_party_id, category);
   const fileMeta =
     payload.file !== undefined && payload.file !== null
@@ -664,6 +1201,9 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
       : null;
   const data = { ...payload };
   delete data.file;
+  if (data.collateral_id !== undefined) {
+    data.collateral_id = normalizeText(data.collateral_id);
+  }
   const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
   if (processCategory && data.deed_type !== undefined) {
     data.deed_type = await resolveLegalProcessType(
@@ -828,18 +1368,29 @@ exports.listClaims = async ({ req, query, userId }) =>
 
 exports.createClaim = async ({ req, payload, userId }) => {
   await ensureContract(payload.contract_id, userId);
+  let insuranceProgress = null;
   if (payload.insurance_progress_id) {
-    const progress = await repository.findById(
+    insuranceProgress = await repository.findById(
       "legal_insurance_progress",
       payload.insurance_progress_id,
       { deleted_at: null },
     );
-    if (!progress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
-    await ensureContract(progress.contract_id, userId);
-    if (progress.contract_id !== payload.contract_id) {
+    if (!insuranceProgress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
+    await ensureContract(insuranceProgress.contract_id, userId);
+    if (insuranceProgress.contract_id !== payload.contract_id) {
       throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
     }
   }
+  const requestedCollateralId = normalizeText(payload.collateral_id);
+  const claimCollateralId = requestedCollateralId || insuranceProgress?.collateral_id || null;
+  if (
+    insuranceProgress?.collateral_id &&
+    requestedCollateralId &&
+    requestedCollateralId !== insuranceProgress.collateral_id
+  ) {
+    throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
+  }
+  await ensureCollateralForContract(claimCollateralId, payload.contract_id);
   const fileMeta = payload.file
     ? persistDomainFile({
         entity: "legal/claims",
@@ -849,6 +1400,7 @@ exports.createClaim = async ({ req, payload, userId }) => {
     : null;
   const data = { ...payload };
   delete data.file;
+  data.collateral_id = claimCollateralId;
   data.claim_type = await resolveLegalProcessType(
     data.claim_type,
     "INSURANCE_CLAIM",
@@ -883,6 +1435,7 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
       : null;
   const data = { ...payload };
   delete data.file;
+  const targetContractId = data.contract_id || current.contract_id;
   if (data.claim_type !== undefined) {
     data.claim_type = await resolveLegalProcessType(
       data.claim_type,
@@ -892,18 +1445,41 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   }
   if (data.status) data.status = normalizeUpper(data.status);
   if (data.contract_id) await ensureContract(data.contract_id, userId);
-  if (data.insurance_progress_id) {
-    const progress = await repository.findById(
+  const targetInsuranceProgressId =
+    data.insurance_progress_id !== undefined
+      ? normalizeText(data.insurance_progress_id)
+      : current.insurance_progress_id;
+  let insuranceProgress = null;
+  if (targetInsuranceProgressId) {
+    insuranceProgress = await repository.findById(
       "legal_insurance_progress",
-      data.insurance_progress_id,
+      targetInsuranceProgressId,
       { deleted_at: null },
     );
-    if (!progress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
-    await ensureContract(progress.contract_id, userId);
-    const targetContractId = data.contract_id || current.contract_id;
-    if (progress.contract_id !== targetContractId) {
+    if (!insuranceProgress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
+    await ensureContract(insuranceProgress.contract_id, userId);
+    if (insuranceProgress.contract_id !== targetContractId) {
       throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
     }
+  }
+  const requestedCollateralId =
+    data.collateral_id !== undefined
+      ? normalizeText(data.collateral_id)
+      : current.collateral_id;
+  const claimCollateralId = requestedCollateralId || insuranceProgress?.collateral_id || null;
+  if (
+    insuranceProgress?.collateral_id &&
+    requestedCollateralId &&
+    requestedCollateralId !== insuranceProgress.collateral_id
+  ) {
+    throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
+  }
+  await ensureCollateralForContract(claimCollateralId, targetContractId);
+  if (data.collateral_id !== undefined || insuranceProgress?.collateral_id) {
+    data.collateral_id = claimCollateralId;
+  }
+  if (data.insurance_progress_id !== undefined) {
+    data.insurance_progress_id = normalizeText(data.insurance_progress_id);
   }
   if (data.submitted_at) data.submitted_at = new Date(data.submitted_at);
   if (data.disbursed_at !== undefined) {

@@ -69,6 +69,19 @@ exports.deleteTemplate = async (req, res) => {
 };
 
 exports.listPrints = list("listPrints");
+exports.printDocumentContext = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.getPrintDocumentContext({
+        query: req.query,
+        userId: req.user?.id,
+      }),
+    );
+  } catch (error) {
+    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+  }
+};
 exports.createPrint = create("createPrint", "Dokumen legal berhasil dicetak.");
 
 exports.listNotaryProgress = list("listNotaryProgress");

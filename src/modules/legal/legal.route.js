@@ -76,6 +76,13 @@ router.delete(
   controller.deleteTemplate,
 );
 
+router.get(
+  "/print-documents/context",
+  auth,
+  authorize(PRINT_URLS, "read"),
+  validate(validation.printDocumentContextQuerySchema, { source: "query" }),
+  controller.printDocumentContext,
+);
 router.get("/print-documents", auth, authorize(PRINT_URLS, "read"), controller.listPrints);
 router.post(
   "/print-documents",

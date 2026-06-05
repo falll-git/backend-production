@@ -12,6 +12,10 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
+const {
+  SLIK_REFERENCE_FIELD_MAPPINGS,
+  withSlikReferenceFields,
+} = require("../../utils/slik-reference-dictionary");
 
 const SORTABLE_FIELDS = new Set([
   "no_kontrak",
@@ -70,7 +74,7 @@ function serializeCollectibility(item) {
 
 function serializeContractSnapshot(item) {
   if (!item) return null;
-  return {
+  return withSlikReferenceFields({
     id: item.id,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
@@ -136,7 +140,7 @@ function serializeContractSnapshot(item) {
     operation_code: item.operation_code,
     created_at: item.created_at,
     updated_at: item.updated_at,
-  };
+  }, SLIK_REFERENCE_FIELD_MAPPINGS.contractSnapshot);
 }
 
 function serializeContract(contract) {

@@ -84,6 +84,122 @@ function count(where) {
   return prisma.digital_debtors.count({ where });
 }
 
+function buildDefaultDebtorAggregate() {
+  return {
+    contracts_count: 0,
+    collaterals_count: 0,
+    documents_count: 0,
+    digital_documents_count: 0,
+    total_outstanding: 0,
+    latest_slik_period_month: null,
+    latest_collectibility_code: null,
+  };
+}
+
+async function findListAggregates(debtorIds = []) {
+  const ids = [...new Set(debtorIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+
+  const aggregates = new Map(ids.map((id) => [id, buildDefaultDebtorAggregate()]));
+  const [
+    contractGroups,
+    collateralGroups,
+    debtorDocumentGroups,
+    digitalDocumentGroups,
+    latestSnapshots,
+  ] = await Promise.all([
+    prisma.debtor_contracts.groupBy({
+      by: ["debtor_id"],
+      where: {
+        debtor_id: { in: ids },
+        deleted_at: null,
+      },
+      _count: {
+        _all: true,
+      },
+      _sum: {
+        outstanding_pokok: true,
+        outstanding_margin: true,
+      },
+    }),
+    prisma.debtor_collaterals.groupBy({
+      by: ["debtor_id"],
+      where: {
+        debtor_id: { in: ids },
+        deleted_at: null,
+      },
+      _count: {
+        _all: true,
+      },
+    }),
+    prisma.debtor_documents.groupBy({
+      by: ["debtor_id"],
+      where: {
+        debtor_id: { in: ids },
+        deleted_at: null,
+      },
+      _count: {
+        _all: true,
+      },
+    }),
+    prisma.digital_documents.groupBy({
+      by: ["debtor_id"],
+      where: {
+        debtor_id: { in: ids },
+        deleted_at: null,
+      },
+      _count: {
+        _all: true,
+      },
+    }),
+    prisma.debtor_contract_slik_snapshots.findMany({
+      where: {
+        debtor_id: { in: ids },
+        deleted_at: null,
+      },
+      orderBy: [{ period_month: "desc" }, { updated_at: "desc" }],
+      select: {
+        debtor_id: true,
+        period_month: true,
+        collectibility_code: true,
+      },
+    }),
+  ]);
+
+  for (const group of contractGroups) {
+    const current = aggregates.get(group.debtor_id);
+    if (!current) continue;
+    current.contracts_count = group._count?._all || 0;
+    current.total_outstanding =
+      Number(group._sum?.outstanding_pokok || 0) +
+      Number(group._sum?.outstanding_margin || 0);
+  }
+
+  for (const group of collateralGroups) {
+    const current = aggregates.get(group.debtor_id);
+    if (current) current.collaterals_count = group._count?._all || 0;
+  }
+
+  for (const group of debtorDocumentGroups) {
+    const current = aggregates.get(group.debtor_id);
+    if (current) current.documents_count = group._count?._all || 0;
+  }
+
+  for (const group of digitalDocumentGroups) {
+    const current = aggregates.get(group.debtor_id);
+    if (current) current.digital_documents_count = group._count?._all || 0;
+  }
+
+  for (const snapshot of latestSnapshots) {
+    const current = aggregates.get(snapshot.debtor_id);
+    if (!current || current.latest_slik_period_month) continue;
+    current.latest_slik_period_month = snapshot.period_month;
+    current.latest_collectibility_code = snapshot.collectibility_code;
+  }
+
+  return aggregates;
+}
+
 function findCollaterals({ where, skip, take, orderBy }) {
   return prisma.debtor_collaterals.findMany({
     where,
@@ -510,6 +626,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           orderBy: [{ received_at: "desc" }, { created_at: "desc" }],
           include: {
             third_party: true,
+            collateral: true,
             contract: {
               select: {
                 id: true,
@@ -530,6 +647,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           orderBy: [{ period_start: "desc" }, { created_at: "desc" }],
           include: {
             third_party: true,
+            collateral: true,
             contract: {
               select: {
                 id: true,
@@ -550,6 +668,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           orderBy: [{ received_at: "desc" }, { created_at: "desc" }],
           include: {
             third_party: true,
+            collateral: true,
             contract: {
               select: {
                 id: true,
@@ -569,6 +688,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: [{ submitted_at: "desc" }, { created_at: "desc" }],
           include: {
+            collateral: true,
             contract: {
               select: {
                 id: true,
@@ -579,6 +699,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
             },
             insurance_progress: {
               include: {
+                collateral: true,
                 third_party: true,
               },
             },
@@ -687,6 +808,7 @@ module.exports = {
   findDocumentChecklistById,
   findDocuments,
   findDocumentsByDebtorId,
+  findListAggregates,
   findMany,
   transaction,
   update,
