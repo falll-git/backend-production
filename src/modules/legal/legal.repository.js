@@ -24,6 +24,27 @@ const THIRD_PARTY_SELECT = {
   contact_person: true,
 };
 
+const COLLATERAL_SELECT = {
+  id: true,
+  debtor_id: true,
+  contract_id: true,
+  collateral_number: true,
+  facility_number: true,
+  collateral_status_code: true,
+  collateral_type: true,
+  binding_type_code: true,
+  binding_date: true,
+  owner_name: true,
+  proof_number: true,
+  address: true,
+  location_city_code: true,
+  market_value: true,
+  appraisal_value: true,
+  insured_status: true,
+  description: true,
+  period_month: true,
+};
+
 function client(tx) {
   return tx || prisma;
 }
@@ -42,6 +63,43 @@ exports.findContractById = (id, tx, extraWhere = {}) =>
       product: true,
       akad_type: true,
     },
+  });
+
+exports.findContractDocumentContextById = (id, tx, extraWhere = {}) =>
+  client(tx).debtor_contracts.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+      ...extraWhere,
+    },
+    include: {
+      debtor: {
+        include: {
+          branch: true,
+          marketing_user: true,
+          individual_profile: true,
+          legal_entity_profile: true,
+        },
+      },
+      product: true,
+      akad_type: true,
+      branch: true,
+      marketing_user: true,
+      collaterals: {
+        where: { deleted_at: null },
+        orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
+        select: COLLATERAL_SELECT,
+      },
+    },
+  });
+
+exports.findCollateralById = (id, tx) =>
+  client(tx).debtor_collaterals.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+    },
+    select: COLLATERAL_SELECT,
   });
 
 exports.findDebtorById = (id, tx, extraWhere = {}) =>
@@ -145,6 +203,9 @@ function includeFor(modelName) {
         contract: {
           select: CONTRACT_SELECT,
         },
+        collateral: {
+          select: COLLATERAL_SELECT,
+        },
         third_party: {
           select: THIRD_PARTY_SELECT,
         },
@@ -154,8 +215,14 @@ function includeFor(modelName) {
         contract: {
           select: CONTRACT_SELECT,
         },
+        collateral: {
+          select: COLLATERAL_SELECT,
+        },
         insurance_progress: {
           include: {
+            collateral: {
+              select: COLLATERAL_SELECT,
+            },
             third_party: {
               select: THIRD_PARTY_SELECT,
             },

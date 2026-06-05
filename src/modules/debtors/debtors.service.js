@@ -15,6 +15,11 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  SLIK_REFERENCE_FIELD_MAPPINGS,
+  resolveSlikReference,
+  withSlikReferenceFields,
+} = require("../../utils/slik-reference-dictionary");
 
 const SORTABLE_FIELDS = new Set([
   "debtor_number",
@@ -76,19 +81,45 @@ function customerTypeLabel(value) {
   return normalized ? CUSTOMER_TYPE_LABELS[normalized] || normalized : null;
 }
 
+function collectibilityDisplayFromCode(code) {
+  return resolveSlikReference("collectibility_code", code)?.display ?? null;
+}
+
+function collectibilityDisplayFromRecord(collectibility) {
+  if (!collectibility) return null;
+  const code = collectibility.code || collectibility.level;
+  return (
+    collectibilityDisplayFromCode(code) ||
+    [collectibility.code, collectibility.name].filter(Boolean).join(" - ") ||
+    collectibility.name ||
+    null
+  );
+}
+
+function latestSlikPeriodFromContracts(contracts) {
+  const periods = contracts
+    .flatMap((contract) => contract.slik_snapshots || [])
+    .map((snapshot) => snapshot.period_month)
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  return periods[0] || null;
+}
+
 function serializeIndividualProfile(profile) {
   if (!profile) return null;
-  return {
+  return withSlikReferenceFields({
     ...profile,
     annual_gross_income:
       profile.annual_gross_income === null || profile.annual_gross_income === undefined
         ? null
         : decimalToNumber(profile.annual_gross_income),
-  };
+  }, SLIK_REFERENCE_FIELD_MAPPINGS.individualProfile);
 }
 
 function serializeLegalEntityProfile(profile) {
-  return profile || null;
+  if (!profile) return null;
+  return withSlikReferenceFields(profile, SLIK_REFERENCE_FIELD_MAPPINGS.legalEntityProfile);
 }
 
 function serializeUser(user) {
@@ -105,7 +136,7 @@ function serializeUser(user) {
 
 function serializeContractSnapshot(item) {
   if (!item) return null;
-  return {
+  return withSlikReferenceFields({
     id: item.id,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
@@ -159,7 +190,7 @@ function serializeContractSnapshot(item) {
     operation_code: item.operation_code,
     created_at: item.created_at,
     updated_at: item.updated_at,
-  };
+  }, SLIK_REFERENCE_FIELD_MAPPINGS.contractSnapshot);
 }
 
 function serializeContract(contract) {
@@ -220,14 +251,31 @@ function serializeContract(contract) {
   };
 }
 
-function serializeDebtor(debtor) {
+function serializeDebtor(debtor, aggregate = null) {
   if (!debtor) return null;
   const contracts = Array.isArray(debtor.contracts)
     ? debtor.contracts.map(serializeContract)
     : [];
   const latestContract = contracts[0] || null;
+  const fallbackDocumentsCount = Array.isArray(debtor.debtor_documents)
+    ? debtor.debtor_documents.length
+    : Array.isArray(debtor.documents)
+      ? debtor.documents.length
+      : 0;
+  const totalOutstanding =
+    aggregate?.total_outstanding ??
+    contracts.reduce((total, contract) => total + decimalToNumber(contract.total_outstanding), 0);
+  const latestSlikPeriodMonth =
+    aggregate?.latest_slik_period_month ||
+    latestSlikPeriodFromContracts(contracts) ||
+    latestContract?.latest_collectibility?.period_month ||
+    null;
+  const latestCollectibilityDisplay =
+    collectibilityDisplayFromCode(aggregate?.latest_collectibility_code) ||
+    latestContract?.latest_slik_snapshot?.collectibility_display ||
+    collectibilityDisplayFromRecord(latestContract?.latest_collectibility);
 
-  return {
+  return withSlikReferenceFields({
     id: debtor.id,
     debtor_number: debtor.debtor_number,
     identity_number: debtor.identity_number,
@@ -250,15 +298,19 @@ function serializeDebtor(debtor) {
     marketing_user: serializeUser(debtor.marketing_user),
     latest_contract: latestContract,
     contracts,
-    contracts_count: contracts.length,
-    documents_count: Array.isArray(debtor.debtor_documents)
-      ? debtor.debtor_documents.length
-      : Array.isArray(debtor.documents)
-        ? debtor.documents.length
-        : 0,
+    contracts_count: aggregate?.contracts_count ?? contracts.length,
+    collaterals_count: aggregate?.collaterals_count ?? 0,
+    documents_count: Math.max(
+      aggregate?.documents_count ?? 0,
+      aggregate?.digital_documents_count ?? 0,
+      fallbackDocumentsCount,
+    ),
+    total_outstanding: totalOutstanding,
+    latest_slik_period_month: latestSlikPeriodMonth,
+    latest_collectibility_display: latestCollectibilityDisplay,
     created_at: debtor.created_at,
     updated_at: debtor.updated_at,
-  };
+  }, SLIK_REFERENCE_FIELD_MAPPINGS.debtor);
 }
 
 function serializeDocument(req, document) {
@@ -596,6 +648,9 @@ function serializeProgress(req, item, fallbackBaseName) {
         ? null
         : decimalToNumber(serialized.appraisal_value);
   }
+  if (serialized.collateral) {
+    serialized.collateral = serializeCollateral(serialized.collateral);
+  }
 
   return serialized;
 }
@@ -610,6 +665,15 @@ function serializeWarningLetter(req, item) {
 function serializeClaim(req, item) {
   return {
     ...item,
+    collateral: item.collateral ? serializeCollateral(item.collateral) : null,
+    insurance_progress: item.insurance_progress
+      ? {
+          ...item.insurance_progress,
+          collateral: item.insurance_progress.collateral
+            ? serializeCollateral(item.insurance_progress.collateral)
+            : null,
+        }
+      : item.insurance_progress,
     claim_amount: decimalToNumber(item.claim_amount),
     approved_amount:
       item.approved_amount === null ? null : decimalToNumber(item.approved_amount),
@@ -637,7 +701,7 @@ function serializeDeposit(item) {
 
 function serializeCollateral(item) {
   if (!item) return null;
-  return {
+  return withSlikReferenceFields({
     id: item.id,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
@@ -686,7 +750,7 @@ function serializeCollateral(item) {
     contract: item.contract || null,
     created_at: item.created_at,
     updated_at: item.updated_at,
-  };
+  }, SLIK_REFERENCE_FIELD_MAPPINGS.collateral);
 }
 
 function groupMarketingByKind(items, timelines = []) {
@@ -830,6 +894,8 @@ function buildCollateralWhere(query, scope) {
       collateral_type: { contains: normalizeText(query.collateral_type), mode: "insensitive" },
     });
   }
+  if (query.debtor_id) clauses.push({ debtor_id: query.debtor_id });
+  if (query.contract_id) clauses.push({ contract_id: query.contract_id });
   if (query.link_status === "linked") {
     clauses.push({
       OR: [{ debtor_id: { not: null } }, { contract_id: { not: null } }],
@@ -1020,9 +1086,10 @@ exports.getAll = async ({ query, userId }) => {
     }),
     repository.count(where),
   ]);
+  const aggregates = await repository.findListAggregates(data.map((item) => item.id));
 
   return {
-    data: data.map(serializeDebtor),
+    data: data.map((item) => serializeDebtor(item, aggregates.get(item.id))),
     meta: buildPaginationMeta(total, pagination),
   };
 };
@@ -1054,7 +1121,8 @@ exports.getById = async ({ id, userId }) => {
     ...buildDebtorVisibilityWhere(scope),
   });
   if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
-  return serializeDebtor(debtor);
+  const aggregates = await repository.findListAggregates([debtor.id]);
+  return serializeDebtor(debtor, aggregates.get(debtor.id));
 };
 
 exports.getWorkflow = async ({ req, id, userId }) => {
@@ -1065,7 +1133,8 @@ exports.getWorkflow = async ({ req, id, userId }) => {
   });
   if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
 
-  const serializedDebtor = serializeDebtor(debtor);
+  const aggregates = await repository.findListAggregates([debtor.id]);
+  const serializedDebtor = serializeDebtor(debtor, aggregates.get(debtor.id));
   const contractIds = serializedDebtor.contracts.map((contract) => contract.id);
   const [workflow, documentChecklists] = await Promise.all([
     repository.findWorkflowData(id, contractIds),

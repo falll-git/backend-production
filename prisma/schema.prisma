@@ -1400,6 +1400,10 @@ model debtor_collaterals {
 
   debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
   contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  legal_notary_progress legal_notary_progress[]
+  legal_insurance_progress legal_insurance_progress[]
+  legal_kjpp_progress legal_kjpp_progress[]
+  legal_claims legal_claims[]
 
   @@index([collateral_number, facility_number])
   @@index([debtor_id])
@@ -1796,6 +1800,7 @@ model debtor_restructuring_records {
 model legal_notary_progress {
   id                     String    @id @default(uuid())
   contract_id            String
+  collateral_id          String?
   third_party_id         String
   deed_type              String
   received_at            DateTime
@@ -1817,9 +1822,11 @@ model legal_notary_progress {
   updated_at             DateTime  @updatedAt
 
   contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
 
   @@index([contract_id])
+  @@index([collateral_id])
   @@index([third_party_id])
   @@index([status])
   @@index([deleted_at])
@@ -1828,6 +1835,7 @@ model legal_notary_progress {
 model legal_insurance_progress {
   id              String    @id @default(uuid())
   contract_id     String
+  collateral_id   String?
   third_party_id  String
   insurance_type  String
   coverage_amount Decimal   @default(0) @db.Decimal(18, 2)
@@ -1849,10 +1857,12 @@ model legal_insurance_progress {
   updated_at      DateTime  @updatedAt
 
   contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
   claims      legal_claims[]
 
   @@index([contract_id])
+  @@index([collateral_id])
   @@index([third_party_id])
   @@index([policy_number])
   @@index([status])
@@ -1862,6 +1872,7 @@ model legal_insurance_progress {
 model legal_kjpp_progress {
   id                     String    @id @default(uuid())
   contract_id            String
+  collateral_id          String?
   third_party_id         String
   appraisal_type         String
   received_at            DateTime
@@ -1885,9 +1896,11 @@ model legal_kjpp_progress {
   updated_at             DateTime  @updatedAt
 
   contract    debtor_contracts @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
 
   @@index([contract_id])
+  @@index([collateral_id])
   @@index([third_party_id])
   @@index([status])
   @@index([deleted_at])
@@ -1896,6 +1909,7 @@ model legal_kjpp_progress {
 model legal_claims {
   id                    String    @id @default(uuid())
   contract_id           String
+  collateral_id         String?
   insurance_progress_id String?
   policy_number         String?
   claim_type            String
@@ -1920,9 +1934,11 @@ model legal_claims {
   updated_at            DateTime  @updatedAt
 
   contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
+  collateral         debtor_collaterals?       @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   insurance_progress legal_insurance_progress? @relation(fields: [insurance_progress_id], references: [id], onDelete: SetNull)
 
   @@index([contract_id])
+  @@index([collateral_id])
   @@index([insurance_progress_id])
   @@index([policy_number])
   @@index([status])

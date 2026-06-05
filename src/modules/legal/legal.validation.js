@@ -25,16 +25,26 @@ exports.printDocumentSchema = Joi.object({
   template_id: uuid.required(),
   numbering_template_id: optionalUuid.optional(),
   contract_id: uuid.required(),
+  collateral_id: optionalUuid.optional(),
   document_type: Joi.string()
     .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
     .required(),
   payload_snapshot: Joi.object().optional(),
   generated_number: Joi.any().strip(),
-  file: fileSchema.required(),
+  file: fileSchema.optional(),
+});
+
+exports.printDocumentContextQuerySchema = Joi.object({
+  contract_id: uuid.required(),
+  document_type: Joi.string()
+    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
+    .required(),
+  collateral_id: optionalUuid.optional(),
 });
 
 exports.notaryProgressSchema = Joi.object({
   contract_id: uuid.required(),
+  collateral_id: optionalUuid.optional(),
   third_party_id: uuid.required(),
   deed_type: Joi.string().trim().min(1).max(100).required(),
   received_at: Joi.date().required(),
@@ -48,6 +58,7 @@ exports.notaryProgressSchema = Joi.object({
 
 exports.insuranceProgressSchema = Joi.object({
   contract_id: uuid.required(),
+  collateral_id: optionalUuid.optional(),
   third_party_id: uuid.required(),
   insurance_type: Joi.string().trim().min(1).max(100).required(),
   coverage_amount: amount.default(0),
@@ -61,6 +72,7 @@ exports.insuranceProgressSchema = Joi.object({
 
 exports.kjppProgressSchema = Joi.object({
   contract_id: uuid.required(),
+  collateral_id: optionalUuid.optional(),
   third_party_id: uuid.required(),
   appraisal_type: Joi.string().trim().min(1).max(100).required(),
   received_at: Joi.date().required(),
@@ -76,6 +88,7 @@ exports.kjppProgressSchema = Joi.object({
 
 exports.claimSchema = Joi.object({
   contract_id: uuid.required(),
+  collateral_id: optionalUuid.optional(),
   insurance_progress_id: optionalUuid.optional(),
   policy_number: Joi.string().trim().allow("", null).optional(),
   claim_type: Joi.string().trim().min(1).max(100).required(),
