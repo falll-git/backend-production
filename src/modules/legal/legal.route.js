@@ -23,16 +23,18 @@ const DEPOSIT_URLS = [
   "/dashboard/legal/titipan/asuransi",
   "/dashboard/legal/titipan/notaris",
   "/dashboard/legal/titipan/angsuran",
+  "/dashboard/legal/titipan/lainnya",
 ];
 const uploadBody = [
   uploadDomainFile("file"),
   normalizePersuratanMultipartBody({
-    jsonFields: ["payload_snapshot", "result_summary"],
+    jsonFields: ["payload_snapshot", "result_summary", "opening_transaction"],
     numberFields: [
       "version",
       "month",
       "year",
       "coverage_amount",
+      "premium_amount",
       "appraisal_value",
       "claim_amount",
       "approved_amount",
@@ -209,6 +211,7 @@ router.post(
   "/deposits",
   auth,
   authorize(DEPOSIT_URLS, "create"),
+  ...uploadBody,
   validate(validation.depositSchema),
   controller.createDeposit,
 );
@@ -236,6 +239,7 @@ router.post(
   "/deposit-transactions",
   auth,
   authorize(DEPOSIT_URLS, "create"),
+  ...uploadBody,
   validate(validation.depositTransactionSchema),
   controller.createDepositTransaction,
 );

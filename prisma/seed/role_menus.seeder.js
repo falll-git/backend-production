@@ -55,7 +55,6 @@ const URLS = {
   debtorImportMonitoring:
     "/dashboard/informasi-debitur/admin/monitoring-import",
   debtorUploadIdeb: "/dashboard/informasi-debitur/admin/upload-ideb",
-  debtorUploadRestrik: "/dashboard/informasi-debitur/admin/upload-restrik",
   debtorReportNpf: "/dashboard/informasi-debitur/laporan/npf",
   debtorReportMarketingActivity:
     "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
@@ -71,6 +70,7 @@ const URLS = {
   legalDepositInsurance: "/dashboard/legal/titipan/asuransi",
   legalDepositNotary: "/dashboard/legal/titipan/notaris",
   legalDepositInstallment: "/dashboard/legal/titipan/angsuran",
+  legalDepositOther: "/dashboard/legal/titipan/lainnya",
   legalProgressNotary: "/dashboard/legal/progress/notaris",
   legalProgressInsurance: "/dashboard/legal/progress/asuransi",
   legalProgressKjpp: "/dashboard/legal/progress/kjpp",
@@ -100,7 +100,6 @@ const URLS = {
   collectibility: "/dashboard/parameter/kolektibilitas",
   branch: "/dashboard/parameter/cabang",
   collateralType: "/dashboard/parameter/jenis-agunan",
-  restructuringType: "/dashboard/parameter/jenis-restrukturisasi",
   depositType: "/dashboard/parameter/jenis-titipan",
   watermarkSettings: "/dashboard/parameter/watermark-dokumen",
   legalProcessType: "/dashboard/parameter/jenis-proses-legal",
@@ -126,7 +125,6 @@ const EXTENDED_PARAMETER_URLS = [
   URLS.collectibility,
   URLS.branch,
   URLS.collateralType,
-  URLS.restructuringType,
   URLS.depositType,
   URLS.legalProcessType,
 ];
@@ -139,7 +137,6 @@ const DEBTOR_CRUD_URLS = [
 const DEBTOR_IMPORT_URLS = [
   URLS.debtorUploadSlik,
   URLS.debtorUploadIdeb,
-  URLS.debtorUploadRestrik,
 ];
 const DEBTOR_REPORT_URLS = [
   URLS.debtorReport,
@@ -151,6 +148,7 @@ const LEGAL_CRUD_URLS = [
   URLS.legalDepositInsurance,
   URLS.legalDepositNotary,
   URLS.legalDepositInstallment,
+  URLS.legalDepositOther,
   URLS.legalProgressNotary,
   URLS.legalProgressInsurance,
   URLS.legalProgressKjpp,

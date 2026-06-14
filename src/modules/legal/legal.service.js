@@ -36,6 +36,8 @@ const DEPOSIT_THIRD_PARTY_CATEGORY_BY_TYPE = {
   NOTARIS: "NOTARY",
   ASURANSI: "INSURANCE",
 };
+const DEPOSIT_TYPES = new Set(["NOTARIS", "ASURANSI", "ANGSURAN", "LAINNYA"]);
+const DEPOSIT_TRANSACTION_ACTIONS = new Set(["TITIPAN", "PEMBAYARAN", "REFUND"]);
 const LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY = {
   NOTARY: "NOTARY_DEED",
   INSURANCE: "INSURANCE_TYPE",
@@ -422,19 +424,145 @@ function serializeWithFile(req, item, fallbackBaseName = "dokumen") {
   };
 }
 
-function serializeDeposit(item) {
+function normalizeDepositAction(action) {
+  const normalized = normalizeUpper(action);
+  if (!normalized) return null;
+  if (normalized === "TITIPAN") return "TITIPAN";
+  if (["PEMBAYARAN", "BAYAR", "PAID", "PROSES", "PROCESS", "KOREKSI"].includes(normalized)) {
+    return "PEMBAYARAN";
+  }
+  if (normalized === "REFUND") return "REFUND";
+  return normalized;
+}
+
+function assertDepositType(value) {
+  const type = normalizeUpper(value);
+  if (!DEPOSIT_TYPES.has(type)) {
+    throw new AppError("Tipe dana titipan tidak valid.", 422);
+  }
+  return type;
+}
+
+function assertDepositTransactionAction(value) {
+  const action = normalizeDepositAction(value);
+  if (!DEPOSIT_TRANSACTION_ACTIONS.has(action)) {
+    throw new AppError("Jenis transaksi dana titipan tidak valid.", 422);
+  }
+  return action;
+}
+
+function depositTransactionFile(req, item) {
+  return serializeFile(req, item, {
+    module: "legal_management",
+    entityId: item.id,
+    fallbackBaseName: `bukti-${normalizeDepositAction(item.action) || "titipan"}`,
+  });
+}
+
+function depositTransactionFileFields(fileMeta) {
+  if (!fileMeta) return {};
+  return {
+    file_path: fileMeta.file_path,
+    file_name: fileMeta.file_name,
+    mime_type: fileMeta.mime_type,
+    size_bytes: fileMeta.size_bytes,
+  };
+}
+
+function serializeDepositTransaction(req, item) {
+  const action = normalizeDepositAction(item.action) || item.action;
   return {
     ...item,
-    nominal: number(item.nominal),
-    paid_amount: number(item.paid_amount),
-    processed_amount: number(item.processed_amount),
-    remaining_amount: number(item.remaining_amount),
+    action,
+    raw_action: item.action,
+    amount: number(item.amount),
+    file: depositTransactionFile(req, item),
+  };
+}
+
+function calculateDepositLedgerTotals(transactions = []) {
+  const totals = {
+    total_deposit_amount: 0,
+    total_payment_amount: 0,
+    total_refund_amount: 0,
+    balance_amount: 0,
+  };
+
+  for (const transaction of transactions) {
+    const action = normalizeDepositAction(transaction.action);
+    const amount = number(transaction.amount);
+    if (action === "TITIPAN") totals.total_deposit_amount += amount;
+    if (action === "PEMBAYARAN") totals.total_payment_amount += amount;
+    if (action === "REFUND") totals.total_refund_amount += amount;
+  }
+
+  totals.balance_amount = Math.max(
+    totals.total_deposit_amount -
+      totals.total_payment_amount -
+      totals.total_refund_amount,
+    0,
+  );
+  return totals;
+}
+
+function resolveDepositStatus(totals) {
+  const hasActivity =
+    totals.total_deposit_amount > 0 ||
+    totals.total_payment_amount > 0 ||
+    totals.total_refund_amount > 0;
+  if (!hasActivity) return "PENDING";
+  return totals.balance_amount > 0 ? "AKTIF" : "SELESAI";
+}
+
+function normalizeInsuranceStatus(status) {
+  const normalized = normalizeUpper(status);
+  if (!normalized || normalized === "PROSES") return "AKTIF";
+  return normalized;
+}
+
+function serializeInsuranceProgress(req, item) {
+  return {
+    ...serializeWithFile(req, item, item.insurance_type),
+    status: normalizeInsuranceStatus(item.status),
+    coverage_amount: number(item.coverage_amount),
+    premium_amount: number(item.premium_amount),
+  };
+}
+
+function serializeDeposit(req, item) {
+  const totalDeposit = number(item.total_deposit_amount ?? item.nominal);
+  const totalPayment = number(item.total_payment_amount ?? item.paid_amount);
+  const totalRefund = number(item.total_refund_amount ?? item.processed_amount);
+  const balance = number(item.balance_amount ?? item.remaining_amount);
+  return {
+    ...item,
+    nominal: totalDeposit,
+    paid_amount: totalPayment,
+    processed_amount: totalRefund,
+    remaining_amount: balance,
+    total_deposit_amount: totalDeposit,
+    total_payment_amount: totalPayment,
+    total_refund_amount: totalRefund,
+    balance_amount: balance,
+    transactions: Array.isArray(item.transactions)
+      ? item.transactions.map((transaction) => serializeDepositTransaction(req, transaction))
+      : [],
   };
 }
 
 function serializeClaim(req, item) {
+  const insuranceProgress = item.insurance_progress
+    ? {
+        ...item.insurance_progress,
+        status: normalizeInsuranceStatus(item.insurance_progress.status),
+        coverage_amount: number(item.insurance_progress.coverage_amount),
+        premium_amount: number(item.insurance_progress.premium_amount),
+      }
+    : item.insurance_progress;
+
   return {
     ...serializeWithFile(req, item, item.claim_type),
+    insurance_progress: insuranceProgress,
     claim_amount: number(item.claim_amount),
     approved_amount:
       item.approved_amount === null ? null : number(item.approved_amount),
@@ -574,7 +702,10 @@ async function ensureDepositThirdParty(thirdPartyId, depositType) {
   const type = normalizeUpper(depositType);
   const expectedCategory = DEPOSIT_THIRD_PARTY_CATEGORY_BY_TYPE[type];
   if (!expectedCategory) {
-    throw new AppError("Pihak ketiga tidak boleh diisi untuk dana titipan angsuran.", 422);
+    if (type === "ANGSURAN") {
+      throw new AppError("Pihak ketiga tidak boleh diisi untuk dana titipan angsuran.", 422);
+    }
+    return ensureThirdParty(id);
   }
 
   return ensureThirdParty(id, expectedCategory);
@@ -601,20 +732,35 @@ async function resolveLegalProcessType(value, category, label) {
   return processType.name;
 }
 
-function calculateRemaining(payload) {
-  const nominal = number(payload.nominal);
-  const paid = number(payload.paid_amount);
-  const processed = number(payload.processed_amount);
-  const used = paid + processed;
+async function recalculateDepositLedger(depositId, userId, tx) {
+  const transactions = await repository.findDepositTransactionsByDepositId(depositId, tx);
+  const totals = calculateDepositLedgerTotals(transactions);
+  const status = resolveDepositStatus(totals);
+  await repository.update(
+    "legal_deposits",
+    depositId,
+    {
+      nominal: totals.total_deposit_amount,
+      paid_amount: totals.total_payment_amount,
+      processed_amount: totals.total_refund_amount,
+      remaining_amount: totals.balance_amount,
+      status,
+      updated_by: userId || null,
+    },
+    tx,
+  );
+  return totals;
+}
 
-  if (used - nominal > 0.000001) {
+function assertDepositCanDecreaseBalance(deposit, action, amount) {
+  if (action === "TITIPAN") return;
+  const balance = number(deposit.remaining_amount);
+  if (amount - balance > 0.000001) {
     throw new AppError(
-      "Nominal dana titipan yang sudah dibayar/diproses tidak boleh melebihi nominal.",
+      "Nominal pembayaran/refund tidak boleh melebihi saldo dana titipan.",
       422,
     );
   }
-
-  return Math.max(nominal - used, 0);
 }
 
 function assertLegalDocumentType(value) {
@@ -1165,16 +1311,15 @@ async function createProgress({ req, modelName, payload, userId, category, entit
       data[key] = data[key] ? new Date(data[key]) : null;
     }
   }
-  return serializeWithFile(
-    req,
-    await repository.create(modelName, {
-      ...data,
-      status: normalizeUpper(data.status),
-      ...(fileMeta || {}),
-      created_by: userId || null,
-    }),
-    category,
-  );
+  const saved = await repository.create(modelName, {
+    ...data,
+    status: normalizeUpper(data.status),
+    ...(fileMeta || {}),
+    created_by: userId || null,
+  });
+  return category === "INSURANCE"
+    ? serializeInsuranceProgress(req, saved)
+    : serializeWithFile(req, saved, category);
 }
 
 async function updateProgress({ req, modelName, id, payload, userId, category, entity }) {
@@ -1232,15 +1377,14 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
     }
   }
   if (data.status) data.status = normalizeUpper(data.status);
-  return serializeWithFile(
-    req,
-    await repository.update(modelName, id, {
-      ...data,
-      ...(fileMeta || {}),
-      updated_by: userId || null,
-    }),
-    category,
-  );
+  const saved = await repository.update(modelName, id, {
+    ...data,
+    ...(fileMeta || {}),
+    updated_by: userId || null,
+  });
+  return category === "INSURANCE"
+    ? serializeInsuranceProgress(req, saved)
+    : serializeWithFile(req, saved, category);
 }
 
 async function attachThirdPartyNames(rows) {
@@ -1264,6 +1408,27 @@ async function attachThirdPartyNames(rows) {
       third_party_name: thirdParty?.name || row.third_party_id,
     };
   });
+}
+
+function combineInsuranceStatusGroups(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const status = normalizeInsuranceStatus(row.status);
+    const key = `${row.third_party_id || ""}:${status}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing._count = {
+        ...(existing._count || {}),
+        id: number(existing._count?.id) + number(row._count?.id),
+      };
+    } else {
+      grouped.set(key, {
+        ...row,
+        status,
+      });
+    }
+  }
+  return Array.from(grouped.values());
 }
 
 exports.listNotaryProgress = async ({ req, query, userId }) =>
@@ -1297,7 +1462,7 @@ exports.listInsuranceProgress = async ({ req, query, userId }) =>
     query,
     searchFields: ["insurance_type", "policy_number", "status", "notes"],
     extraWhere: await buildContractAccessWhere(userId),
-    serializer: (request, item) => serializeWithFile(request, item, item.insurance_type),
+    serializer: serializeInsuranceProgress,
   });
 exports.createInsuranceProgress = (args) =>
   createProgress({
@@ -1495,75 +1660,127 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   );
 };
 
-exports.listDeposits = async ({ query, userId }) =>
+exports.listDeposits = async ({ req, query, userId }) =>
   listModel({
-    req: null,
+    req,
     modelName: "legal_deposits",
     query,
     searchFields: ["type", "status", "notes"],
     extraWhere: await buildContractAccessWhere(userId),
-    serializer: (_request, item) => serializeDeposit(item),
+    serializer: serializeDeposit,
   });
 
-exports.createDeposit = async ({ payload, userId }) => {
-  const type = normalizeUpper(payload.type);
+exports.createDeposit = async ({ req, payload, userId }) => {
+  const type = assertDepositType(payload.type);
   const depositTypeId = normalizeText(payload.deposit_type_id);
   const thirdPartyId = normalizeText(payload.third_party_id);
+  const openingTransaction = payload.opening_transaction || null;
 
   await ensureContract(payload.contract_id, userId);
   await ensureDepositType(depositTypeId, type);
   await ensureDepositThirdParty(thirdPartyId, type);
 
-  const remaining = calculateRemaining(payload);
-  const paidAmount = number(payload.paid_amount);
-  const processedAmount = number(payload.processed_amount);
-  return serializeDeposit(
-    await repository.create("legal_deposits", {
-      deposit_type_id: depositTypeId,
-      type,
-      contract_id: payload.contract_id,
-      third_party_id: thirdPartyId,
-      nominal: decimalField(payload, "nominal"),
-      paid_amount: paidAmount,
-      processed_amount: processedAmount,
-      remaining_amount: remaining,
-      status: normalizeUpper(payload.status || "PENDING"),
-      notes: normalizeText(payload.notes),
-      created_by: userId || null,
-    }),
-  );
+  if (payload.file && !openingTransaction) {
+    throw new AppError(
+      "File pendukung hanya bisa diunggah bersama transaksi awal titipan.",
+      422,
+    );
+  }
+
+  return repository.transaction(async (tx) => {
+    const deposit = await repository.create(
+      "legal_deposits",
+      {
+        deposit_type_id: depositTypeId,
+        type,
+        contract_id: payload.contract_id,
+        third_party_id: thirdPartyId,
+        nominal: 0,
+        paid_amount: 0,
+        processed_amount: 0,
+        remaining_amount: 0,
+        status: "PENDING",
+        notes: normalizeText(payload.notes),
+        created_by: userId || null,
+      },
+      tx,
+    );
+
+    if (openingTransaction) {
+      const action = assertDepositTransactionAction(openingTransaction.action || "TITIPAN");
+      if (action !== "TITIPAN") {
+        throw new AppError("Transaksi awal dana titipan wajib berupa TITIPAN.", 422);
+      }
+      const fileMeta = payload.file
+        ? persistDomainFile({
+            entity: "legal/deposit-transactions",
+            input: payload.file,
+            fallbackBaseName: `bukti-titipan-${deposit.id}`,
+          })
+        : null;
+      await repository.create(
+        "legal_deposit_transactions",
+        {
+          deposit_id: deposit.id,
+          transaction_date: new Date(openingTransaction.transaction_date),
+          action,
+          amount: openingTransaction.amount,
+          notes: normalizeText(openingTransaction.notes),
+          ...depositTransactionFileFields(fileMeta),
+          created_by: userId || null,
+        },
+        tx,
+      );
+      await recalculateDepositLedger(deposit.id, userId, tx);
+    }
+
+    return serializeDeposit(
+      req,
+      await repository.findById("legal_deposits", deposit.id, { deleted_at: null }, tx),
+    );
+  });
 };
 
-exports.updateDeposit = async ({ id, payload, userId }) => {
+exports.updateDeposit = async ({ req, id, payload, userId }) => {
   const current = await repository.findById("legal_deposits", id, { deleted_at: null });
   if (!current) throw new AppError("Dana titipan tidak ditemukan.", 404);
   await ensureContract(current.contract_id, userId);
+  const nextType =
+    payload.type !== undefined ? assertDepositType(payload.type) : current.type;
+  const nextContractId = payload.contract_id || current.contract_id;
+  const nextDepositTypeId =
+    payload.deposit_type_id !== undefined
+      ? normalizeText(payload.deposit_type_id)
+      : current.deposit_type_id;
+  const nextThirdPartyId =
+    payload.third_party_id !== undefined
+      ? normalizeText(payload.third_party_id)
+      : current.third_party_id;
+
+  await ensureContract(nextContractId, userId);
+  await ensureDepositType(nextDepositTypeId, nextType);
+  await ensureDepositThirdParty(nextThirdPartyId, nextType);
+
   const next = {
-    deposit_type_id:
-      payload.deposit_type_id !== undefined
-        ? normalizeText(payload.deposit_type_id)
-        : current.deposit_type_id,
-    type: normalizeUpper(payload.type) || current.type,
-    contract_id: payload.contract_id || current.contract_id,
-    third_party_id:
-      payload.third_party_id !== undefined
-        ? normalizeText(payload.third_party_id)
-        : current.third_party_id,
-    nominal: payload.nominal ?? current.nominal,
-    paid_amount: payload.paid_amount ?? current.paid_amount,
-    processed_amount: payload.processed_amount ?? current.processed_amount,
-    status: normalizeUpper(payload.status) || current.status,
+    deposit_type_id: nextDepositTypeId,
+    type: nextType,
+    contract_id: nextContractId,
+    third_party_id: nextThirdPartyId,
     notes: payload.notes !== undefined ? normalizeText(payload.notes) : current.notes,
     updated_by: userId || null,
   };
-  next.remaining_amount = calculateRemaining(next);
-  await ensureContract(next.contract_id, userId);
-  await ensureDepositType(next.deposit_type_id, next.type);
-  await ensureDepositThirdParty(next.third_party_id, next.type);
-  return serializeDeposit(await repository.update("legal_deposits", id, next));
+
+  return repository.transaction(async (tx) => {
+    await repository.update("legal_deposits", id, next, tx);
+    await recalculateDepositLedger(id, userId, tx);
+    return serializeDeposit(
+      req,
+      await repository.findById("legal_deposits", id, { deleted_at: null }, tx),
+    );
+  });
 };
 
-exports.listDepositTransactions = async ({ query, userId }) => {
+exports.listDepositTransactions = async ({ req, query, userId }) => {
   const {
     type,
     contract_id: contractId,
@@ -1579,7 +1796,7 @@ exports.listDepositTransactions = async ({ query, userId }) => {
   };
 
   return listModel({
-    req: null,
+    req,
     modelName: "legal_deposit_transactions",
     query: transactionQuery,
     searchFields: ["action", "notes"],
@@ -1588,23 +1805,35 @@ exports.listDepositTransactions = async ({ query, userId }) => {
       ...(isEmptyObject(depositWhere) ? {} : { deposit: { is: depositWhere } }),
     },
     includeSoftDeleteFilter: false,
-    serializer: (_request, item) => ({
-      ...item,
-      amount: number(item.amount),
-    }),
+    serializer: serializeDepositTransaction,
   });
 };
 
-exports.createDepositTransaction = async ({ payload, userId }) => {
+exports.createDepositTransaction = async ({ req, payload, userId }) => {
   const deposit = await repository.findById("legal_deposits", payload.deposit_id, {
     deleted_at: null,
   });
   if (!deposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
   await ensureContract(deposit.contract_id, userId);
-  const action = normalizeUpper(payload.action);
+  const action = assertDepositTransactionAction(payload.action);
   const amountValue = number(payload.amount);
 
   return repository.transaction(async (tx) => {
+    const currentDeposit = await repository.findById(
+      "legal_deposits",
+      payload.deposit_id,
+      { deleted_at: null },
+      tx,
+    );
+    if (!currentDeposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
+    assertDepositCanDecreaseBalance(currentDeposit, action, amountValue);
+    const fileMeta = payload.file
+      ? persistDomainFile({
+          entity: "legal/deposit-transactions",
+          input: payload.file,
+          fallbackBaseName: `bukti-${action.toLowerCase()}-${payload.deposit_id}`,
+        })
+      : null;
     const transaction = await repository.create(
       "legal_deposit_transactions",
       {
@@ -1613,38 +1842,13 @@ exports.createDepositTransaction = async ({ payload, userId }) => {
         action,
         amount: payload.amount,
         notes: normalizeText(payload.notes),
+        ...depositTransactionFileFields(fileMeta),
         created_by: userId || null,
       },
       tx,
     );
-    const paidDelta =
-      action.includes("BAYAR") || action.includes("PAID") ? amountValue : 0;
-    const processedDelta =
-      action.includes("PROSES") || action.includes("PROCESS")
-        ? amountValue
-        : 0;
-    const paidAmount = number(deposit.paid_amount) + paidDelta;
-    const processedAmount = number(deposit.processed_amount) + processedDelta;
-    const remainingAmount = calculateRemaining({
-      nominal: deposit.nominal,
-      paid_amount: paidAmount,
-      processed_amount: processedAmount,
-    });
-    await repository.update(
-      "legal_deposits",
-      deposit.id,
-      {
-        paid_amount: paidAmount,
-        processed_amount: processedAmount,
-        remaining_amount: remainingAmount,
-        updated_by: userId || null,
-      },
-      tx,
-    );
-    return {
-      ...transaction,
-      amount: number(transaction.amount),
-    };
+    await recalculateDepositLedger(payload.deposit_id, userId, tx);
+    return serializeDepositTransaction(req, transaction);
   });
 };
 
@@ -1735,7 +1939,7 @@ exports.getThirdPartyDocumentsReport = async (_query = {}, userId = null) => {
   ]);
   return {
     notary: await attachThirdPartyNames(notary),
-    insurance: await attachThirdPartyNames(insurance),
+    insurance: await attachThirdPartyNames(combineInsuranceStatusGroups(insurance)),
     kjpp: await attachThirdPartyNames(kjpp),
     claims,
     scope: {
@@ -1765,6 +1969,10 @@ exports.getThirdPartyDepositFundsReport = async (_query = {}, userId = null) => 
       paid_amount: number(item._sum.paid_amount),
       processed_amount: number(item._sum.processed_amount),
       remaining_amount: number(item._sum.remaining_amount),
+      total_deposit_amount: number(item._sum.nominal),
+      total_payment_amount: number(item._sum.paid_amount),
+      total_refund_amount: number(item._sum.processed_amount),
+      balance_amount: number(item._sum.remaining_amount),
     })),
     scope: {
       can_report_all: scope.canReportAll,

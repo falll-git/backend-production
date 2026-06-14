@@ -339,6 +339,22 @@ model storage_usage_configs {
   @@index([is_active])
 }
 
+model storage_usage_daily_snapshots {
+  id            String   @id @default(uuid())
+  snapshot_date DateTime @unique @db.Date
+  used_bytes    BigInt   @default(0)
+  used_gb       Float    @default(0)
+  file_count    Int      @default(0)
+  breakdown     Json     @default("[]")
+  source        String   @default("database_file_size")
+  is_estimated  Boolean  @default(false)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([snapshot_date])
+  @@index([is_estimated])
+}
+
 model storage_offices {
   id         String             @id @default(uuid())
   code       String             @unique
@@ -584,7 +600,6 @@ model digital_debtors {
   marketing_timelines debtor_marketing_timelines[]
   warning_letters     debtor_warning_letters[]
   ideb_uploads        debtor_ideb_uploads[]
-  restructuring_records debtor_restructuring_records[]
 
   @@index([name])
   @@index([financing_number])
@@ -1166,23 +1181,6 @@ model collateral_types {
   @@index([deleted_at])
 }
 
-model restructuring_types {
-  id          String    @id @default(uuid())
-  code        String    @unique
-  name        String    @unique
-  description String?
-  is_active   Boolean   @default(true)
-  created_by  String?
-  updated_by  String?
-  deleted_by  String?
-  deleted_at  DateTime?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-
-  @@index([is_active])
-  @@index([deleted_at])
-}
-
 model legal_process_types {
   id          String    @id @default(uuid())
   code        String    @unique
@@ -1245,7 +1243,6 @@ model debtor_contracts {
   warning_letters     debtor_warning_letters[]
   legal_prints        legal_print_histories[]
   ideb_uploads        debtor_ideb_uploads[]
-  restructuring_records debtor_restructuring_records[]
   notary_progress     legal_notary_progress[]
   insurance_progress  legal_insurance_progress[]
   kjpp_progress       legal_kjpp_progress[]
@@ -1443,7 +1440,7 @@ model debtor_import_jobs {
   records      debtor_external_records[]
   segments     debtor_import_segments[]
   slik_records debtor_slik_records[]
-  restructuring_records debtor_restructuring_records[]
+  ideb_uploads debtor_ideb_uploads[]
 
   @@index([type, status])
   @@index([period_month])
@@ -1729,6 +1726,7 @@ model legal_print_histories {
 
 model debtor_ideb_uploads {
   id             String    @id @default(uuid())
+  import_job_id  String?
   debtor_id      String?
   contract_id    String?
   month          Int
@@ -1748,51 +1746,14 @@ model debtor_ideb_uploads {
   created_at     DateTime  @default(now())
   updated_at     DateTime  @updatedAt
 
+  import_job debtor_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
   debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
   contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
 
-  @@index([debtor_id])
-  @@index([contract_id])
-  @@index([year, month])
-  @@index([status])
-  @@index([deleted_at])
-}
-
-model debtor_restructuring_records {
-  id                    String    @id @default(uuid())
-  import_job_id         String?
-  debtor_id             String?
-  contract_id           String?
-  period_month          String
-  restructuring_date    DateTime?
-  restructuring_type    String?
-  reason                String?
-  plafond_after         Decimal?  @db.Decimal(18, 2)
-  outstanding_after     Decimal?  @db.Decimal(18, 2)
-  tenor_after           Int?
-  new_due_date          DateTime?
-  collectibility_before String?
-  collectibility_after  String?
-  status                String    @default("AKTIF")
-  description           String?
-  raw_data              Json?
-  row_hash              String
-  created_by            String?
-  updated_by            String?
-  deleted_by            String?
-  deleted_at            DateTime?
-  created_at            DateTime  @default(now())
-  updated_at            DateTime  @updatedAt
-
-  import_job debtor_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
-  debtor     digital_debtors?    @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract   debtor_contracts?   @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-
-  @@unique([period_month, row_hash])
   @@index([import_job_id])
   @@index([debtor_id])
   @@index([contract_id])
-  @@index([period_month])
+  @@index([year, month])
   @@index([status])
   @@index([deleted_at])
 }
@@ -1839,10 +1800,11 @@ model legal_insurance_progress {
   third_party_id  String
   insurance_type  String
   coverage_amount Decimal   @default(0) @db.Decimal(18, 2)
+  premium_amount  Decimal   @default(0) @db.Decimal(18, 2)
   period_start    DateTime
   period_end      DateTime?
   policy_number   String?
-  status          String    @default("PROSES")
+  status          String    @default("AKTIF")
   notes           String?
   file_path       String?
   file_name       String?
@@ -1984,6 +1946,10 @@ model legal_deposit_transactions {
   action           String
   amount           Decimal  @default(0) @db.Decimal(18, 2)
   notes            String?
+  file_path        String?
+  file_name        String?
+  mime_type        String?
+  size_bytes       Int?
   created_by       String?
   created_at       DateTime @default(now())
 

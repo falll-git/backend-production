@@ -65,6 +65,66 @@ exports.upsertDefaultConfig = ({
   });
 };
 
+exports.findLatestSnapshotBefore = (snapshotDate) => {
+  return prisma.storage_usage_daily_snapshots.findFirst({
+    where: {
+      snapshot_date: {
+        lt: snapshotDate,
+      },
+    },
+    orderBy: {
+      snapshot_date: "desc",
+    },
+  });
+};
+
+exports.findDailySnapshotsBetween = (startDate, endDate) => {
+  return prisma.storage_usage_daily_snapshots.findMany({
+    where: {
+      snapshot_date: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+    orderBy: {
+      snapshot_date: "asc",
+    },
+  });
+};
+
+exports.upsertDailySnapshot = ({
+  snapshotDate,
+  usedBytes,
+  usedGb,
+  fileCount,
+  breakdown,
+  source,
+  isEstimated,
+}) => {
+  return prisma.storage_usage_daily_snapshots.upsert({
+    where: {
+      snapshot_date: snapshotDate,
+    },
+    update: {
+      used_bytes: BigInt(usedBytes),
+      used_gb: usedGb,
+      file_count: fileCount,
+      breakdown,
+      source,
+      is_estimated: isEstimated,
+    },
+    create: {
+      snapshot_date: snapshotDate,
+      used_bytes: BigInt(usedBytes),
+      used_gb: usedGb,
+      file_count: fileCount,
+      breakdown,
+      source,
+      is_estimated: isEstimated,
+    },
+  });
+};
+
 exports.findDigitalDocumentUsageRecords = () => {
   return prisma.digital_documents.findMany({
     where: documentFileWhere,

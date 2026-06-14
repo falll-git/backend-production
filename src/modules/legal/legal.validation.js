@@ -3,12 +3,15 @@ const Joi = require("joi");
 const uuid = Joi.string().uuid();
 const optionalUuid = uuid.allow("", null);
 const amount = Joi.number().min(0).precision(2);
+const positiveAmount = Joi.number().greater(0).precision(2);
 const fileSchema = Joi.object({
   buffer: Joi.any().required(),
   name: Joi.string().trim().required(),
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
 }).unknown(true);
+const depositType = Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN", "LAINNYA");
+const depositTransactionAction = Joi.string().valid("TITIPAN", "PEMBAYARAN", "REFUND");
 
 exports.templateSchema = Joi.object({
   template_type: Joi.string()
@@ -62,10 +65,11 @@ exports.insuranceProgressSchema = Joi.object({
   third_party_id: uuid.required(),
   insurance_type: Joi.string().trim().min(1).max(100).required(),
   coverage_amount: amount.default(0),
+  premium_amount: amount.default(0),
   period_start: Joi.date().required(),
   period_end: Joi.date().allow(null).optional(),
   policy_number: Joi.string().trim().allow("", null).optional(),
-  status: Joi.string().valid("PROSES", "AKTIF", "EXPIRED", "KLAIM").default("PROSES"),
+  status: Joi.string().valid("AKTIF", "EXPIRED", "KLAIM").default("AKTIF"),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
 });
@@ -107,23 +111,31 @@ exports.claimSchema = Joi.object({
 
 exports.depositSchema = Joi.object({
   deposit_type_id: optionalUuid.optional(),
-  type: Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN").required(),
+  type: depositType.required(),
   contract_id: uuid.required(),
   third_party_id: optionalUuid.optional(),
-  nominal: amount.required(),
-  paid_amount: amount.default(0),
-  processed_amount: amount.default(0),
+  nominal: amount.optional(),
+  paid_amount: amount.optional(),
+  processed_amount: amount.optional(),
   remaining_amount: amount.allow(null).optional(),
   status: Joi.string().trim().max(50).default("PENDING"),
   notes: Joi.string().trim().allow("", null).optional(),
+  opening_transaction: Joi.object({
+    transaction_date: Joi.date().required(),
+    action: depositTransactionAction.default("TITIPAN"),
+    amount: positiveAmount.required(),
+    notes: Joi.string().trim().allow("", null).optional(),
+  }).optional(),
+  file: fileSchema.optional(),
 });
 
 exports.depositTransactionSchema = Joi.object({
   deposit_id: uuid.required(),
   transaction_date: Joi.date().required(),
-  action: Joi.string().trim().min(1).max(100).required(),
-  amount: amount.required(),
+  action: depositTransactionAction.required(),
+  amount: positiveAmount.required(),
   notes: Joi.string().trim().allow("", null).optional(),
+  file: fileSchema.optional(),
 });
 
 function makeUpdate(schema) {

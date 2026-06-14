@@ -15,7 +15,7 @@ const controller = require("./debtorImports.controller");
 const {
   idebImportJobSchema,
   importJobSchema,
-  restrikImportJobSchema,
+  resolveIdebSchema,
   slikImportJobSchema,
 } = require("./debtorImports.validation");
 
@@ -24,7 +24,6 @@ const READ_URLS = [
   "/dashboard/informasi-debitur/admin/upload-slik",
   "/dashboard/informasi-debitur/admin/monitoring-import",
   "/dashboard/informasi-debitur/admin/upload-ideb",
-  "/dashboard/informasi-debitur/admin/upload-restrik",
 ];
 
 function uploadAndValidate(schema = importJobSchema) {
@@ -47,6 +46,25 @@ function uploadSlikAndValidate() {
 }
 
 router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);
+router.get(
+  "/ideb/pending",
+  auth,
+  authorize("/dashboard/informasi-debitur/admin/monitoring-import", "read"),
+  controller.getPendingIdeb,
+);
+router.get(
+  "/ideb/:uploadId/resume-pdf",
+  auth,
+  authorize(READ_URLS, "read"),
+  controller.getIdebResumePdf,
+);
+router.patch(
+  "/ideb/:uploadId/resolve",
+  auth,
+  authorize("/dashboard/informasi-debitur/admin/upload-ideb", "create"),
+  validate(resolveIdebSchema),
+  controller.resolveIdeb,
+);
 router.post(
   "/master",
   auth,
@@ -72,13 +90,6 @@ router.post(
   authorize("/dashboard/informasi-debitur/admin/upload-ideb", "create"),
   ...uploadAndValidate(idebImportJobSchema),
   controller.createIdeb,
-);
-router.post(
-  "/restrik",
-  auth,
-  authorize("/dashboard/informasi-debitur/admin/upload-restrik", "create"),
-  ...uploadAndValidate(restrikImportJobSchema),
-  controller.createRestrik,
 );
 
 module.exports = router;

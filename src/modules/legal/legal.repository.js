@@ -313,4 +313,10 @@ exports.aggregateDeposits = (where = { deleted_at: null }) =>
     },
   });
 
+exports.findDepositTransactionsByDepositId = (depositId, tx) =>
+  client(tx).legal_deposit_transactions.findMany({
+    where: { deposit_id: depositId },
+    orderBy: [{ transaction_date: "asc" }, { created_at: "asc" }],
+  });
+
 exports.countWhere = (modelName, where) => prisma[modelName].count({ where });

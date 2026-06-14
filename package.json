@@ -31,17 +31,19 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "ioredis": "^5.11.0",
-    "joi": "^18.0.2",
+    "joi": "18.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pdf-lib": "^1.17.1",
-    "pg": "^8.20.0",
+    "pg": "8.18.0",
     "prisma": "7.6.0",
     "resend": "^6.12.3",
     "sharp": "^0.34.5"
   },
   "overrides": {
-    "@hono/node-server": "1.19.13"
+    "@hono/node-server": "1.19.13",
+    "hono": "4.12.25",
+    "uuid": "11.1.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

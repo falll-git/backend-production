@@ -80,7 +80,6 @@ const MENU_CAPABILITIES = {
   "/dashboard/informasi-debitur/admin/upload-slik": READ_CREATE,
   "/dashboard/informasi-debitur/admin/monitoring-import": READ_ONLY,
   "/dashboard/informasi-debitur/admin/upload-ideb": READ_CREATE,
-  "/dashboard/informasi-debitur/admin/upload-restrik": READ_CREATE,
   "/dashboard/informasi-debitur/laporan": READ_ONLY,
   "/dashboard/informasi-debitur/laporan/npf": READ_ONLY,
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing": READ_ONLY,
@@ -123,7 +122,6 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/kolektibilitas": CRUD,
   "/dashboard/parameter/cabang": CRUD,
   "/dashboard/parameter/jenis-agunan": CRUD,
-  "/dashboard/parameter/jenis-restrukturisasi": CRUD,
   "/dashboard/parameter/jenis-titipan": CRUD,
   "/dashboard/parameter/jenis-proses-legal": CRUD,
   "/dashboard/parameter/watermark-dokumen": READ_UPDATE,
@@ -239,7 +237,6 @@ const MENU_FEATURES = {
   "/dashboard/informasi-debitur/admin/upload-slik": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/monitoring-import": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/upload-ideb": [MANAGE_ALL_FEATURE],
-  "/dashboard/informasi-debitur/admin/upload-restrik": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/laporan/npf": [
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,

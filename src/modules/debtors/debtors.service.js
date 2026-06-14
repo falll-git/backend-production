@@ -251,6 +251,70 @@ function serializeContract(contract) {
   };
 }
 
+function buildRequiredDocumentsSummary(aggregate) {
+  const total = Number(aggregate?.required_documents_total || 0);
+  const uploaded = Math.min(
+    Number(aggregate?.required_documents_uploaded || 0),
+    total,
+  );
+  const missing = Math.max(total - uploaded, 0);
+
+  if (total === 0) {
+    return {
+      total,
+      uploaded: 0,
+      missing: 0,
+      status: "NO_CHECKLIST",
+      display: "Tidak ada checklist",
+    };
+  }
+
+  return {
+    total,
+    uploaded,
+    missing,
+    status: missing === 0 ? "COMPLETE" : "INCOMPLETE",
+    display: `${uploaded}/${total} wajib`,
+  };
+}
+
+function buildSlikCompletenessSummary(
+  aggregate,
+  latestSlikPeriodMonth,
+  fallbackContractsCount = 0,
+) {
+  const contractsCount = Number(
+    aggregate?.contracts_count ?? fallbackContractsCount ?? 0,
+  );
+  const collateralsCount = Number(aggregate?.collaterals_count || 0);
+
+  if (contractsCount === 0) {
+    return {
+      status: "NO_F01",
+      label: "Tanpa F01",
+    };
+  }
+
+  if (!latestSlikPeriodMonth) {
+    return {
+      status: "NO_PERIOD",
+      label: "Tanpa Periode",
+    };
+  }
+
+  if (collateralsCount === 0) {
+    return {
+      status: "NO_A01",
+      label: "Tanpa A01",
+    };
+  }
+
+  return {
+    status: "COMPLETE",
+    label: "Lengkap",
+  };
+}
+
 function serializeDebtor(debtor, aggregate = null) {
   if (!debtor) return null;
   const contracts = Array.isArray(debtor.contracts)
@@ -274,6 +338,12 @@ function serializeDebtor(debtor, aggregate = null) {
     collectibilityDisplayFromCode(aggregate?.latest_collectibility_code) ||
     latestContract?.latest_slik_snapshot?.collectibility_display ||
     collectibilityDisplayFromRecord(latestContract?.latest_collectibility);
+  const requiredDocuments = buildRequiredDocumentsSummary(aggregate);
+  const slikCompleteness = buildSlikCompletenessSummary(
+    aggregate,
+    latestSlikPeriodMonth,
+    contracts.length,
+  );
 
   return withSlikReferenceFields({
     id: debtor.id,
@@ -305,6 +375,13 @@ function serializeDebtor(debtor, aggregate = null) {
       aggregate?.digital_documents_count ?? 0,
       fallbackDocumentsCount,
     ),
+    required_documents_total: requiredDocuments.total,
+    required_documents_uploaded: requiredDocuments.uploaded,
+    required_documents_missing: requiredDocuments.missing,
+    required_documents_status: requiredDocuments.status,
+    required_documents_display: requiredDocuments.display,
+    slik_completeness_status: slikCompleteness.status,
+    slik_completeness_label: slikCompleteness.label,
     total_outstanding: totalOutstanding,
     latest_slik_period_month: latestSlikPeriodMonth,
     latest_collectibility_display: latestCollectibilityDisplay,
@@ -400,6 +477,37 @@ function readSummaryValue(source, keys) {
     if (value !== undefined && value !== null && value !== "") return value;
   }
   return null;
+}
+
+function normalizeCompareText(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = String(value).trim().replace(/\s+/g, " ");
+  return normalized || null;
+}
+
+function normalizeCompareKey(value) {
+  const text = normalizeCompareText(value);
+  return text ? text.toUpperCase() : null;
+}
+
+function parseCompareNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const normalized = String(value)
+    .trim()
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function collectibilityLevel(value) {
+  const text = normalizeCompareText(value);
+  if (!text) return null;
+  const match = text.match(/\b([1-5])\b/) || text.match(/^([1-5])/);
+  return match ? match[1] : null;
 }
 
 function activityRowId(kind) {
@@ -562,8 +670,38 @@ function buildIdebSummaryDetail(item, debtor, contracts) {
           ),
         }))
     : [];
+  const richSummary =
+    resultSummary.summary &&
+    typeof resultSummary.summary === "object" &&
+    !Array.isArray(resultSummary.summary)
+      ? resultSummary.summary
+      : null;
+  const identity =
+    resultSummary.identity &&
+    typeof resultSummary.identity === "object" &&
+    !Array.isArray(resultSummary.identity)
+      ? resultSummary.identity
+      : null;
+  const facilities = Array.isArray(resultSummary.facilities)
+    ? resultSummary.facilities.filter((entry) => entry && typeof entry === "object")
+    : [];
+  const monthlyCollectibilityHistory = Array.isArray(
+    resultSummary.monthly_collectibility_history,
+  )
+    ? resultSummary.monthly_collectibility_history.filter(
+        (entry) => entry && typeof entry === "object",
+      )
+    : [];
 
   return {
+    schema_version: readSummaryValue(resultSummary, ["schema_version", "version"]) || null,
+    source_format: readSummaryValue(resultSummary, ["source_format"]) || "IDEB_JSON",
+    period_month: readSummaryValue(resultSummary, ["period_month", "periode"]) || null,
+    report_number: readSummaryValue(resultSummary, ["report_number"]) || null,
+    reference_number: readSummaryValue(resultSummary, ["reference_number"]) || null,
+    request_date: readSummaryValue(resultSummary, ["request_date"]) || null,
+    result_date: readSummaryValue(resultSummary, ["result_date"]) || null,
+    officer_name: readSummaryValue(resultSummary, ["officer_name", "petugas"]) || null,
     debtor_name:
       readSummaryValue(resultSummary, ["debtor_name", "nama_nasabah", "name"]) ||
       item.debtor?.name ||
@@ -595,11 +733,15 @@ function buildIdebSummaryDetail(item, debtor, contracts) {
       contract?.status ||
       null,
     conclusion:
-      readSummaryValue(resultSummary, ["conclusion", "kesimpulan", "summary"]) || null,
+      readSummaryValue(resultSummary, ["conclusion", "kesimpulan"]) || null,
     processed_at:
       readSummaryValue(resultSummary, ["processed_at", "tanggal_proses"]) ||
       item.updated_at ||
       item.created_at,
+    identity,
+    summary: richSummary,
+    facilities,
+    monthly_collectibility_history: monthlyCollectibilityHistory,
     other_bprs: otherBprs,
   };
 }
@@ -612,18 +754,187 @@ function serializeIdeb(req, item, debtor, contracts) {
   };
 }
 
-function serializeRestructuring(item) {
+function idebResultSummary(upload) {
+  return upload?.result_summary && typeof upload.result_summary === "object" && !Array.isArray(upload.result_summary)
+    ? upload.result_summary
+    : {};
+}
+
+function idebFacilitiesFromUpload(upload) {
+  const summary = idebResultSummary(upload);
+  return Array.isArray(summary.facilities)
+    ? summary.facilities.filter((item) => item && typeof item === "object" && !Array.isArray(item))
+    : [];
+}
+
+function buildExternalIdebFacility(facility) {
   return {
-    ...item,
-    plafond_after:
-      item.plafond_after === null || item.plafond_after === undefined
-        ? null
-        : decimalToNumber(item.plafond_after),
-    outstanding_after:
-      item.outstanding_after === null || item.outstanding_after === undefined
-        ? null
-        : decimalToNumber(item.outstanding_after),
+    reporter: normalizeCompareText(readSummaryValue(facility, ["reporter_name", "reporter_code"])) || "-",
+    account_number: normalizeCompareText(readSummaryValue(facility, ["account_number", "no_rekening", "noRekening"])) || "-",
+    product: normalizeCompareText(readSummaryValue(facility, ["credit_type", "credit_type_code"])) || "-",
+    akad: normalizeCompareText(readSummaryValue(facility, ["financing_scheme", "financing_scheme_code"])) || "-",
+    plafond: parseCompareNumber(readSummaryValue(facility, ["plafond", "initial_plafond"])),
+    outstanding: parseCompareNumber(readSummaryValue(facility, ["outstanding"])),
+    collectibility: normalizeCompareText(readSummaryValue(facility, ["collectibility", "collectibility_code", "kol"])) || "-",
+    dpd: parseCompareNumber(readSummaryValue(facility, ["days_past_due", "dpd"])),
+    condition: normalizeCompareText(readSummaryValue(facility, ["condition", "condition_code"])) || "-",
+    due_date: normalizeCompareText(readSummaryValue(facility, ["due_date"])),
+    period_month: normalizeCompareText(readSummaryValue(facility, ["period_month"])),
   };
+}
+
+function buildInternalIdebFacility(contract) {
+  const snapshot = contract?.latest_slik_snapshot || null;
+  return {
+    contract_id: contract?.id || null,
+    no_kontrak: contract?.no_kontrak || "-",
+    facility_number: snapshot?.facility_number || contract?.no_kontrak || "-",
+    product:
+      snapshot?.credit_type_display ||
+      snapshot?.credit_type_code ||
+      contract?.product?.name ||
+      "-",
+    akad:
+      snapshot?.financing_scheme_display ||
+      snapshot?.financing_scheme_code ||
+      contract?.akad_type?.name ||
+      "-",
+    plafond:
+      snapshot?.plafond ??
+      snapshot?.initial_plafond ??
+      contract?.plafond ??
+      null,
+    outstanding:
+      snapshot?.baki_debet ??
+      contract?.outstanding_pokok ??
+      null,
+    collectibility:
+      snapshot?.collectibility_display ||
+      snapshot?.collectibility_code ||
+      contract?.latest_collectibility?.code ||
+      contract?.latest_collectibility?.name ||
+      "-",
+    dpd:
+      snapshot?.days_past_due ??
+      contract?.latest_collectibility?.dpd ??
+      null,
+    condition:
+      snapshot?.condition_display ||
+      snapshot?.condition_code ||
+      contract?.status ||
+      "-",
+    due_date:
+      snapshot?.due_date ||
+      contract?.tanggal_jatuh_tempo ||
+      null,
+    period_month:
+      snapshot?.period_month ||
+      contract?.latest_collectibility?.period_month ||
+      null,
+  };
+}
+
+function comparisonDisplayValue(value, kind = "text") {
+  if (value === null || value === undefined || value === "") return "-";
+  if (kind === "number") return Number(value);
+  return String(value);
+}
+
+function addComparisonDifference(differences, field, label, external, internal, kind = "text") {
+  const externalEmpty = external === null || external === undefined || external === "" || external === "-";
+  const internalEmpty = internal === null || internal === undefined || internal === "" || internal === "-";
+  if (externalEmpty && internalEmpty) return;
+
+  let isDifferent = false;
+  if (kind === "number") {
+    const externalNumber = parseCompareNumber(external);
+    const internalNumber = parseCompareNumber(internal);
+    isDifferent = externalNumber !== internalNumber;
+  } else if (kind === "kol") {
+    isDifferent = collectibilityLevel(external) !== collectibilityLevel(internal);
+  } else {
+    isDifferent = normalizeCompareKey(external) !== normalizeCompareKey(internal);
+  }
+
+  if (!isDifferent) return;
+  differences.push({
+    field,
+    label,
+    external: comparisonDisplayValue(external, kind === "number" ? "number" : "text"),
+    internal: comparisonDisplayValue(internal, kind === "number" ? "number" : "text"),
+  });
+}
+
+function compareIdebFacilities(external, internal) {
+  const differences = [];
+  addComparisonDifference(differences, "product", "Produk", external.product, internal.product);
+  addComparisonDifference(differences, "akad", "Akad", external.akad, internal.akad);
+  addComparisonDifference(differences, "plafond", "Plafon", external.plafond, internal.plafond, "number");
+  addComparisonDifference(differences, "outstanding", "Baki Debet", external.outstanding, internal.outstanding, "number");
+  addComparisonDifference(differences, "collectibility", "KOL", external.collectibility, internal.collectibility, "kol");
+  addComparisonDifference(differences, "dpd", "DPD", external.dpd, internal.dpd, "number");
+  addComparisonDifference(differences, "condition", "Kondisi", external.condition, internal.condition);
+  addComparisonDifference(differences, "due_date", "Jatuh Tempo", external.due_date, internal.due_date);
+  addComparisonDifference(differences, "period_month", "Periode", external.period_month, internal.period_month);
+  return differences;
+}
+
+function buildIdebComparisonItems(externalFacilities, internalContracts) {
+  const internalByKey = new Map();
+  for (const contract of internalContracts) {
+    const internal = buildInternalIdebFacility(contract);
+    for (const key of [internal.no_kontrak, internal.facility_number]) {
+      const normalized = normalizeCompareKey(key);
+      if (normalized && normalized !== "-") internalByKey.set(normalized, { contract, internal });
+    }
+  }
+
+  const matchedContractIds = new Set();
+  const items = [];
+
+  for (const rawExternal of externalFacilities) {
+    const external = buildExternalIdebFacility(rawExternal);
+    const matchKey = normalizeCompareKey(external.account_number);
+    const matched = matchKey ? internalByKey.get(matchKey) : null;
+
+    if (!matched) {
+      items.push({
+        status: "EXTERNAL_ONLY",
+        status_label: "Fasilitas Eksternal",
+        match_key: external.account_number,
+        external,
+        internal: null,
+        differences: [],
+      });
+      continue;
+    }
+
+    matchedContractIds.add(matched.contract.id);
+    const differences = compareIdebFacilities(external, matched.internal);
+    items.push({
+      status: differences.length > 0 ? "DIFFERENT" : "MATCHED",
+      status_label: differences.length > 0 ? "Beda Data" : "Cocok",
+      match_key: external.account_number,
+      external,
+      internal: matched.internal,
+      differences,
+    });
+  }
+
+  for (const contract of internalContracts) {
+    if (matchedContractIds.has(contract.id)) continue;
+    const internal = buildInternalIdebFacility(contract);
+    items.push({
+      status: "INTERNAL_ONLY",
+      status_label: "Internal Tidak Muncul",
+      match_key: internal.facility_number || internal.no_kontrak,
+      external: null,
+      internal,
+      differences: [],
+    });
+  }
+
+  return items;
 }
 
 function serializePrint(req, item) {
@@ -641,6 +952,12 @@ function serializeProgress(req, item, fallbackBaseName) {
 
   if ("coverage_amount" in serialized) {
     serialized.coverage_amount = decimalToNumber(serialized.coverage_amount);
+  }
+  if ("premium_amount" in serialized) {
+    serialized.premium_amount = decimalToNumber(serialized.premium_amount);
+    if (String(serialized.status || "").toUpperCase() === "PROSES") {
+      serialized.status = "AKTIF";
+    }
   }
   if ("appraisal_value" in serialized) {
     serialized.appraisal_value =
@@ -667,12 +984,7 @@ function serializeClaim(req, item) {
     ...item,
     collateral: item.collateral ? serializeCollateral(item.collateral) : null,
     insurance_progress: item.insurance_progress
-      ? {
-          ...item.insurance_progress,
-          collateral: item.insurance_progress.collateral
-            ? serializeCollateral(item.insurance_progress.collateral)
-            : null,
-        }
+      ? serializeProgress(req, item.insurance_progress, item.insurance_progress.insurance_type)
       : item.insurance_progress,
     claim_amount: decimalToNumber(item.claim_amount),
     approved_amount:
@@ -683,18 +995,32 @@ function serializeClaim(req, item) {
   };
 }
 
-function serializeDeposit(item) {
+function serializeDepositTransaction(req, transaction) {
+  return {
+    ...transaction,
+    raw_action: transaction.action,
+    amount: decimalToNumber(transaction.amount),
+    file: serializeLegalFile(req, transaction, `bukti-${transaction.action || "titipan"}`),
+  };
+}
+
+function serializeDeposit(req, item) {
+  const totalDeposit = decimalToNumber(item.total_deposit_amount ?? item.nominal);
+  const totalPayment = decimalToNumber(item.total_payment_amount ?? item.paid_amount);
+  const totalRefund = decimalToNumber(item.total_refund_amount ?? item.processed_amount);
+  const balanceAmount = decimalToNumber(item.balance_amount ?? item.remaining_amount);
   return {
     ...item,
-    nominal: decimalToNumber(item.nominal),
-    paid_amount: decimalToNumber(item.paid_amount),
-    processed_amount: decimalToNumber(item.processed_amount),
-    remaining_amount: decimalToNumber(item.remaining_amount),
+    nominal: totalDeposit,
+    paid_amount: totalPayment,
+    processed_amount: totalRefund,
+    remaining_amount: balanceAmount,
+    total_deposit_amount: totalDeposit,
+    total_payment_amount: totalPayment,
+    total_refund_amount: totalRefund,
+    balance_amount: balanceAmount,
     transactions: Array.isArray(item.transactions)
-      ? item.transactions.map((transaction) => ({
-          ...transaction,
-          amount: decimalToNumber(transaction.amount),
-        }))
+      ? item.transactions.map((transaction) => serializeDepositTransaction(req, transaction))
       : [],
   };
 }
@@ -1167,7 +1493,7 @@ exports.getWorkflow = async ({ req, id, userId }) => {
           serializeProgress(req, item, item.appraisal_type),
         ),
         claims: workflow.claims.map((item) => serializeClaim(req, item)),
-        deposits: workflow.deposits.map((item) => serializeDeposit(item)),
+        deposits: workflow.deposits.map((item) => serializeDeposit(req, item)),
       }
     : {
         prints: [],
@@ -1195,9 +1521,6 @@ exports.getWorkflow = async ({ req, id, userId }) => {
     collaterals: Array.isArray(workflow.collaterals)
       ? workflow.collaterals.map(serializeCollateral).filter(Boolean)
       : [],
-    restructuring_records: Array.isArray(workflow.restructuringRecords)
-      ? workflow.restructuringRecords.map(serializeRestructuring)
-      : [],
     document_checklist_status: buildDocumentChecklistStatus(
       documentChecklists,
       documents,
@@ -1209,6 +1532,54 @@ exports.getWorkflow = async ({ req, id, userId }) => {
         )
       : [],
     legal: legalWorkflow,
+  };
+};
+
+exports.getIdebComparison = async ({ id, query, userId }) => {
+  const uploadId = normalizeText(query.ideb_upload_id || query.idebUploadId);
+  if (!uploadId) throw new AppError("ID upload IDEB wajib dikirim.", 422);
+
+  const scope = await getDebtorAccessScope(userId);
+  const debtor = await repository.findById(id, {
+    deleted_at: null,
+    ...buildDebtorVisibilityWhere(scope),
+  });
+  if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
+
+  const upload = await repository.findIdebUploadById(uploadId);
+  if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
+  const linkedDebtorId = upload.debtor_id || upload.contract?.debtor_id || null;
+  if (!linkedDebtorId || linkedDebtorId !== id) {
+    throw new AppError("Upload IDEB tidak terhubung dengan debitur ini.", 404);
+  }
+
+  const serializedDebtor = serializeDebtor(debtor);
+  const externalFacilities = idebFacilitiesFromUpload(upload);
+  const items = buildIdebComparisonItems(externalFacilities, serializedDebtor.contracts);
+  const summary = items.reduce(
+    (current, item) => {
+      current.total += 1;
+      if (item.status === "MATCHED") current.matched += 1;
+      if (item.status === "DIFFERENT") current.different += 1;
+      if (item.status === "EXTERNAL_ONLY") current.external_only += 1;
+      if (item.status === "INTERNAL_ONLY") current.internal_only += 1;
+      return current;
+    },
+    {
+      total: 0,
+      matched: 0,
+      different: 0,
+      external_only: 0,
+      internal_only: 0,
+    },
+  );
+
+  return {
+    ideb_upload_id: upload.id,
+    debtor_id: id,
+    period_month: idebResultSummary(upload).period_month || null,
+    summary,
+    items,
   };
 };
 
