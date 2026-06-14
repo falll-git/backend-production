@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
 ALTER TABLE "legal_deposit_transactions"
   ADD COLUMN "file_path" TEXT,
   ADD COLUMN "file_name" TEXT,
@@ -33,7 +31,7 @@ INSERT INTO "legal_deposit_transactions" (
   "created_at"
 )
 SELECT
-  gen_random_uuid()::text,
+  md5("id" || ':TITIPAN:legacy'),
   "id",
   COALESCE("created_at", CURRENT_TIMESTAMP),
   'TITIPAN',
@@ -55,7 +53,7 @@ INSERT INTO "legal_deposit_transactions" (
   "created_at"
 )
 SELECT
-  gen_random_uuid()::text,
+  md5("id" || ':PEMBAYARAN:legacy'),
   "id",
   COALESCE("created_at", CURRENT_TIMESTAMP),
   'PEMBAYARAN',
@@ -77,7 +75,7 @@ INSERT INTO "legal_deposit_transactions" (
   "created_at"
 )
 SELECT
-  gen_random_uuid()::text,
+  md5("id" || ':REFUND:legacy'),
   "id",
   COALESCE("created_at", CURRENT_TIMESTAMP),
   'REFUND',
@@ -131,7 +129,7 @@ INSERT INTO "deposit_types" (
   "updated_at"
 )
 SELECT
-  gen_random_uuid()::text,
+  md5('deposit_type:LAINNYA'),
   'LAINNYA',
   'Titipan Lainnya',
   'LAINNYA',
