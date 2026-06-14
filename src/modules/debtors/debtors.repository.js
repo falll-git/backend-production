@@ -90,6 +90,8 @@ function buildDefaultDebtorAggregate() {
     collaterals_count: 0,
     documents_count: 0,
     digital_documents_count: 0,
+    required_documents_total: 0,
+    required_documents_uploaded: 0,
     total_outstanding: 0,
     latest_slik_period_month: null,
     latest_collectibility_code: null,
@@ -101,12 +103,30 @@ async function findListAggregates(debtorIds = []) {
   if (ids.length === 0) return new Map();
 
   const aggregates = new Map(ids.map((id) => [id, buildDefaultDebtorAggregate()]));
+  const requiredChecklists = await prisma.document_checklists.findMany({
+    where: {
+      is_required: true,
+      is_active: true,
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+  const requiredChecklistIds = requiredChecklists.map((item) => item.id);
+  const requiredDocumentsTotal = requiredChecklistIds.length;
+
+  for (const current of aggregates.values()) {
+    current.required_documents_total = requiredDocumentsTotal;
+  }
+
   const [
     contractGroups,
     collateralGroups,
     debtorDocumentGroups,
     digitalDocumentGroups,
     latestSnapshots,
+    requiredDocumentGroups,
   ] = await Promise.all([
     prisma.debtor_contracts.groupBy({
       by: ["debtor_id"],
@@ -164,6 +184,19 @@ async function findListAggregates(debtorIds = []) {
         collectibility_code: true,
       },
     }),
+    requiredChecklistIds.length > 0
+      ? prisma.debtor_documents.groupBy({
+          by: ["debtor_id", "document_checklist_id"],
+          where: {
+            debtor_id: { in: ids },
+            document_checklist_id: { in: requiredChecklistIds },
+            deleted_at: null,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   for (const group of contractGroups) {
@@ -188,6 +221,11 @@ async function findListAggregates(debtorIds = []) {
   for (const group of digitalDocumentGroups) {
     const current = aggregates.get(group.debtor_id);
     if (current) current.digital_documents_count = group._count?._all || 0;
+  }
+
+  for (const group of requiredDocumentGroups) {
+    const current = aggregates.get(group.debtor_id);
+    if (current) current.required_documents_uploaded += 1;
   }
 
   for (const snapshot of latestSnapshots) {
@@ -390,6 +428,33 @@ function findContractById(id) {
   });
 }
 
+function findIdebUploadById(id) {
+  return prisma.debtor_ideb_uploads.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+    },
+    include: {
+      debtor: {
+        select: {
+          id: true,
+          debtor_number: true,
+          identity_number: true,
+          name: true,
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
 function findDocumentsByDebtorId(debtorId, { where, skip, take, orderBy }) {
   return prisma.debtor_documents.findMany({
     where: {
@@ -494,7 +559,6 @@ async function findWorkflowData(debtorId, contractIds = []) {
     kjppProgress,
     claims,
     deposits,
-    restructuringRecords,
     collaterals,
   ] = await Promise.all([
     prisma.debtor_marketing_timelines.findMany({
@@ -733,25 +797,6 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
         })
       : [],
-    contractFilter
-      ? prisma.debtor_restructuring_records.findMany({
-          where: {
-            deleted_at: null,
-            ...contractFilter,
-          },
-          orderBy: [{ period_month: "desc" }, { restructuring_date: "desc" }, { created_at: "desc" }],
-          include: {
-            contract: {
-              select: {
-                id: true,
-                debtor_id: true,
-                no_kontrak: true,
-                status: true,
-              },
-            },
-          },
-        })
-      : [],
     prisma.debtor_collaterals.findMany({
       where: {
         deleted_at: null,
@@ -785,7 +830,6 @@ async function findWorkflowData(debtorId, contractIds = []) {
     timelines,
     notaryProgress,
     prints,
-    restructuringRecords,
     warningLetters,
   };
 }
@@ -808,6 +852,7 @@ module.exports = {
   findDocumentChecklistById,
   findDocuments,
   findDocumentsByDebtorId,
+  findIdebUploadById,
   findListAggregates,
   findMany,
   transaction,

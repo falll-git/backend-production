@@ -25,6 +25,50 @@ function findJobs({ where, skip, take, orderBy }) {
   });
 }
 
+function findPendingIdebUploads({ where, skip, take, orderBy }) {
+  return prisma.debtor_ideb_uploads.findMany({
+    where,
+    skip,
+    take,
+    orderBy,
+    include: {
+      import_job: {
+        include: {
+          records: {
+            where: {
+              deleted_at: null,
+              source_type: "IDEB",
+            },
+            orderBy: {
+              created_at: "desc",
+            },
+          },
+        },
+      },
+      debtor: {
+        select: {
+          id: true,
+          debtor_number: true,
+          identity_number: true,
+          name: true,
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
+function countPendingIdebUploads(where) {
+  return prisma.debtor_ideb_uploads.count({ where });
+}
+
 function countJobs(where) {
   return prisma.debtor_import_jobs.count({ where });
 }
@@ -85,18 +129,58 @@ function findContractById(id) {
   });
 }
 
+function findIdebUploadById(id, db = prisma) {
+  return db.debtor_ideb_uploads.findFirst({
+    where: {
+      id,
+      deleted_at: null,
+    },
+    include: {
+      import_job: {
+        include: {
+          records: {
+            where: {
+              deleted_at: null,
+              source_type: "IDEB",
+            },
+          },
+        },
+      },
+      debtor: {
+        select: {
+          id: true,
+          debtor_number: true,
+          identity_number: true,
+          name: true,
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+    },
+  });
+}
+
 function transaction(callback, options) {
   return prisma.$transaction(callback, options);
 }
 
 module.exports = {
   countJobs,
+  countPendingIdebUploads,
   createExternalRecord,
   createJob,
   findContractById,
   findDebtorById,
   findJobById,
   findJobs,
+  findIdebUploadById,
+  findPendingIdebUploads,
   prisma,
   transaction,
 };

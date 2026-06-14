@@ -43,6 +43,7 @@ router.post(
   validate(createDebtorDocumentSchema),
   controller.createDocument,
 );
+router.get("/:id/ideb-comparison", auth, authorize(READ_URLS, "read"), controller.getIdebComparison);
 router.get("/:id", auth, authorize(READ_URLS, "read"), controller.getById);
 router.put("/:id", auth, authorize(WRITE_URL, "update"), validate(updateDebtorSchema), controller.update);
 router.delete("/:id", auth, authorize(WRITE_URL, "delete"), controller.delete);

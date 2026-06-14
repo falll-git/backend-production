@@ -111,12 +111,6 @@ async function seedDebtorLegalParameters() {
     },
   ]);
 
-  await createMissing("restructuring_types", [
-    { code: "PENJADWALAN_ULANG", name: "Penjadwalan Ulang", is_active: true },
-    { code: "PERSYARATAN_KEMBALI", name: "Persyaratan Kembali", is_active: true },
-    { code: "PENATAAN_KEMBALI", name: "Penataan Kembali", is_active: true },
-  ]);
-
   await createMissing("collateral_types", [
     { code: "RUMAH_TINGGAL", name: "Rumah Tinggal", is_active: true },
     { code: "TANAH", name: "Tanah", is_active: true },
@@ -202,6 +196,7 @@ async function seedDebtorLegalParameters() {
     { code: "NOTARIS", name: "Titipan Notaris", category: "NOTARIS", is_active: true },
     { code: "ASURANSI", name: "Titipan Asuransi", category: "ASURANSI", is_active: true },
     { code: "ANGSURAN", name: "Titipan Angsuran", category: "ANGSURAN", is_active: true },
+    { code: "LAINNYA", name: "Titipan Lainnya", category: "LAINNYA", is_active: true },
   ]);
 
   await createMissing("legal_process_types", [

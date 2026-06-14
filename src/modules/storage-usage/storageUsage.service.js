@@ -65,21 +65,32 @@ function normalizeDays(value) {
 }
 
 function startOfLocalDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+}
+
+function addDays(date, days) {
+  const nextDate = new Date(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() + days);
+  return nextDate;
 }
 
 function formatTrendLabel(date) {
   return date.toLocaleDateString("id-ID", {
     day: "2-digit",
     month: "short",
+    timeZone: "UTC",
   });
 }
 
 function toIsoDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getStorageUsageSource() {
+  return process.env.STORAGE_USAGE_SOURCE || "database_file_size";
 }
 
 async function resolveSizeBytes(sizeBytes, storedPath) {
@@ -242,42 +253,144 @@ function summarizeBreakdown(entries, totalBytes) {
     .sort((left, right) => right.used_bytes - left.used_bytes);
 }
 
-function buildTrend(entries, days, freeQuotaGb) {
-  const today = startOfLocalDay(new Date());
-  const startDate = new Date(today);
-  startDate.setDate(today.getDate() - (days - 1));
+function buildSnapshotPayload({
+  snapshotDate,
+  usedBytes,
+  breakdown,
+  fileCount,
+  source,
+  isEstimated,
+}) {
+  return {
+    snapshotDate,
+    usedBytes,
+    usedGb: roundNumber(bytesToGb(usedBytes), 4),
+    fileCount,
+    breakdown,
+    source,
+    isEstimated,
+  };
+}
 
-  const sortedEntries = [...entries].sort(
-    (left, right) => left.created_at.getTime() - right.created_at.getTime(),
+function normalizeSnapshot(snapshot) {
+  const snapshotDate =
+    snapshot.snapshot_date instanceof Date
+      ? startOfLocalDay(snapshot.snapshot_date)
+      : startOfLocalDay(new Date(snapshot.snapshot_date));
+
+  return {
+    date: toIsoDate(snapshotDate),
+    snapshot_date: snapshotDate,
+    used_bytes: toFiniteNumber(snapshot.used_bytes, 0),
+    used_gb: roundNumber(toFiniteNumber(snapshot.used_gb, 0), 4),
+    file_count: toFiniteNumber(snapshot.file_count, 0),
+    breakdown: Array.isArray(snapshot.breakdown) ? snapshot.breakdown : [],
+    source: snapshot.source || getStorageUsageSource(),
+    is_estimated: Boolean(snapshot.is_estimated),
+  };
+}
+
+async function ensureDailySnapshots({
+  startDate,
+  endDate,
+  currentUsage,
+}) {
+  const source = getStorageUsageSource();
+  const todayPayload = buildSnapshotPayload({
+    snapshotDate: endDate,
+    usedBytes: currentUsage.usedBytes,
+    breakdown: currentUsage.breakdown,
+    fileCount: currentUsage.fileCount,
+    source,
+    isEstimated: false,
+  });
+
+  await repository.upsertDailySnapshot(todayPayload);
+
+  const [latestBeforeRange, rangeSnapshots] = await Promise.all([
+    repository.findLatestSnapshotBefore(startDate),
+    repository.findDailySnapshotsBetween(startDate, endDate),
+  ]);
+  const snapshotsByDate = new Map(
+    rangeSnapshots.map((snapshot) => {
+      const normalized = normalizeSnapshot(snapshot);
+      return [normalized.date, normalized];
+    }),
   );
-  let cursor = 0;
-  let cumulativeBytes = 0;
-  const points = [];
+  let previousSnapshot = latestBeforeRange
+    ? normalizeSnapshot(latestBeforeRange)
+    : null;
 
-  for (let offset = 0; offset < days; offset += 1) {
-    const dayStart = new Date(startDate);
-    dayStart.setDate(startDate.getDate() + offset);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayStart.getDate() + 1);
+  for (
+    let currentDate = new Date(startDate);
+    currentDate <= endDate;
+    currentDate = addDays(currentDate, 1)
+  ) {
+    const dateKey = toIsoDate(currentDate);
+    const existingSnapshot = snapshotsByDate.get(dateKey);
 
-    while (
-      cursor < sortedEntries.length &&
-      sortedEntries[cursor].created_at < dayEnd
-    ) {
-      cumulativeBytes += sortedEntries[cursor].size_bytes;
-      cursor += 1;
+    if (existingSnapshot) {
+      previousSnapshot = existingSnapshot;
+      continue;
     }
 
-    points.push({
-      date: toIsoDate(dayStart),
-      label: formatTrendLabel(dayStart),
-      used_bytes: cumulativeBytes,
-      used_gb: roundNumber(bytesToGb(cumulativeBytes), 4),
-      limit_gb: freeQuotaGb,
+    const baseSnapshot = previousSnapshot || normalizeSnapshot({
+      snapshot_date: endDate,
+      used_bytes: currentUsage.usedBytes,
+      used_gb: roundNumber(bytesToGb(currentUsage.usedBytes), 4),
+      file_count: currentUsage.fileCount,
+      breakdown: currentUsage.breakdown,
+      source,
+      is_estimated: true,
     });
+    const estimatedSnapshot = await repository.upsertDailySnapshot(
+      buildSnapshotPayload({
+        snapshotDate: currentDate,
+        usedBytes: baseSnapshot.used_bytes,
+        breakdown: baseSnapshot.breakdown,
+        fileCount: baseSnapshot.file_count,
+        source: baseSnapshot.source,
+        isEstimated: true,
+      }),
+    );
+    const normalizedEstimated = normalizeSnapshot(estimatedSnapshot);
+    snapshotsByDate.set(dateKey, normalizedEstimated);
+    previousSnapshot = normalizedEstimated;
   }
 
-  return points;
+  return Array.from(snapshotsByDate.values()).sort((left, right) =>
+    left.date.localeCompare(right.date),
+  );
+}
+
+async function buildTrendFromSnapshots({ days, freeQuotaGb, currentUsage }) {
+  const today = startOfLocalDay(new Date());
+  const startDate = addDays(today, -(days - 1));
+  const snapshots = await ensureDailySnapshots({
+    startDate,
+    endDate: today,
+    currentUsage,
+  });
+  let previousUsedBytes = snapshots[0]?.used_bytes ?? 0;
+
+  return snapshots.map((snapshot, index) => {
+    const snapshotDate = new Date(`${snapshot.date}T00:00:00Z`);
+    const deltaBytes =
+      index === 0 ? 0 : snapshot.used_bytes - previousUsedBytes;
+    previousUsedBytes = snapshot.used_bytes;
+
+    return {
+      date: snapshot.date,
+      label: formatTrendLabel(snapshotDate),
+      used_bytes: snapshot.used_bytes,
+      used_gb: roundNumber(bytesToGb(snapshot.used_bytes), 4),
+      file_count: snapshot.file_count,
+      delta_bytes: deltaBytes,
+      delta_gb: roundNumber(bytesToGb(deltaBytes), 4),
+      limit_gb: freeQuotaGb,
+      is_estimated: snapshot.is_estimated,
+    };
+  });
 }
 
 function resolveStatus(usedBytes, freeQuotaBytes) {
@@ -408,11 +521,22 @@ exports.getSummary = async ({ query = {} } = {}) => {
   const overageBytes = Math.max(usedBytes - freeQuotaBytes, 0);
   const overageGb = bytesToGb(overageBytes);
   const status = resolveStatus(usedBytes, freeQuotaBytes);
+  const breakdown = summarizeBreakdown(entries, usedBytes);
+  const currentUsage = {
+    usedBytes,
+    fileCount: entries.length,
+    breakdown,
+  };
   const billing = calculateTieredBilling({
     usedBytes,
     freeQuotaGb,
     pricingTiers,
     manualReviewThresholdGb,
+  });
+  const trend = await buildTrendFromSnapshots({
+    days,
+    freeQuotaGb,
+    currentUsage,
   });
 
   return {
@@ -424,7 +548,7 @@ exports.getSummary = async ({ query = {} } = {}) => {
       billing_model: billingModel,
       pricing_tiers: pricingTiers,
       manual_review_threshold_gb: manualReviewThresholdGb,
-      source: process.env.STORAGE_USAGE_SOURCE || "database_file_size",
+      source: getStorageUsageSource(),
     },
     usage: {
       used_bytes: usedBytes,
@@ -444,8 +568,8 @@ exports.getSummary = async ({ query = {} } = {}) => {
       file_count: entries.length,
       ...status,
     },
-    breakdown: summarizeBreakdown(entries, usedBytes),
-    trend: buildTrend(entries, days, freeQuotaGb),
+    breakdown,
+    trend,
     billing,
     updated_at: new Date().toISOString(),
   };

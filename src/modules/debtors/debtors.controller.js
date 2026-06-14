@@ -45,6 +45,21 @@ exports.getWorkflow = async (req, res) => {
   }
 };
 
+exports.getIdebComparison = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.getIdebComparison({
+        id: req.params.id,
+        query: req.query,
+        userId: req.user?.id,
+      }),
+    );
+  } catch (error) {
+    return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const data = await service.create({ payload: req.body, userId: req.user?.id });

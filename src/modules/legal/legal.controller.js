@@ -107,6 +107,7 @@ exports.deleteClaim = remove("legal_claims", "Klaim asuransi berhasil dihapus.")
 exports.listDeposits = async (req, res) => {
   try {
     const result = await service.listDeposits({
+      req,
       query: req.query,
       userId: req.user?.id,
     });
@@ -117,7 +118,7 @@ exports.listDeposits = async (req, res) => {
 };
 exports.createDeposit = async (req, res) => {
   try {
-    const data = await service.createDeposit({ payload: req.body, userId: req.user?.id });
+    const data = await service.createDeposit({ req, payload: req.body, userId: req.user?.id });
     return res.status(201).json({ status: true, success: true, message: "Dana titipan berhasil dibuat.", data });
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
@@ -127,7 +128,7 @@ exports.updateDeposit = async (req, res) => {
   try {
     return successResponse(
       res,
-      await service.updateDeposit({ id: req.params.id, payload: req.body, userId: req.user?.id }),
+      await service.updateDeposit({ req, id: req.params.id, payload: req.body, userId: req.user?.id }),
       "Dana titipan berhasil diperbarui.",
     );
   } catch (error) {
@@ -139,6 +140,7 @@ exports.deleteDeposit = remove("legal_deposits", "Dana titipan berhasil dihapus.
 exports.listDepositTransactions = async (req, res) => {
   try {
     const result = await service.listDepositTransactions({
+      req,
       query: req.query,
       userId: req.user?.id,
     });
@@ -149,7 +151,7 @@ exports.listDepositTransactions = async (req, res) => {
 };
 exports.createDepositTransaction = async (req, res) => {
   try {
-    const data = await service.createDepositTransaction({ payload: req.body, userId: req.user?.id });
+    const data = await service.createDepositTransaction({ req, payload: req.body, userId: req.user?.id });
     return res.status(201).json({ status: true, success: true, message: "Transaksi titipan berhasil dibuat.", data });
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });

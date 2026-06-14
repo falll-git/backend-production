@@ -34,7 +34,6 @@ const numberingTemplateRoutes = require("./modules/numbering-templates/numbering
 const depositTypeRoutes = require("./modules/deposit-types/depositTypes.route");
 const mailDeliveryMediaRoutes = require("./modules/mail-delivery-media/mailDeliveryMedia.route");
 const collateralTypeRoutes = require("./modules/collateral-types/collateralTypes.route");
-const restructuringTypeRoutes = require("./modules/restructuring-types/restructuringTypes.route");
 const legalProcessTypeRoutes = require("./modules/legal-process-types/legalProcessTypes.route");
 const debtorRoutes = require("./modules/debtors/debtors.route");
 const debtorContractRoutes = require("./modules/debtor-contracts/debtorContracts.route");
@@ -187,7 +186,6 @@ app.use("/api/numbering-templates", numberingTemplateRoutes);
 app.use("/api/deposit-types", depositTypeRoutes);
 app.use("/api/mail-delivery-media", mailDeliveryMediaRoutes);
 app.use("/api/collateral-types", collateralTypeRoutes);
-app.use("/api/restructuring-types", restructuringTypeRoutes);
 app.use("/api/legal-process-types", legalProcessTypeRoutes);
 app.use("/api/debtors", debtorRoutes);
 app.use("/api/debtor-contracts", debtorContractRoutes);

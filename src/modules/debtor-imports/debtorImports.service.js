@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
-const ExcelJS = require("exceljs");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const repository = require("./debtorImports.repository");
 const { AppError } = require("../../utils/errors");
 const { enqueueSlikImportJob } = require("../../queues/slik-import.queue");
@@ -25,23 +24,9 @@ const {
   mergeUnmappedSlikReferences,
 } = require("../../utils/slik-reference-dictionary");
 
-const IMPORT_TYPES = new Set(["SLIK", "RESTRIK", "IDEB"]);
+const IMPORT_TYPES = new Set(["SLIK", "IDEB"]);
 const SLIK_IMPORT_SEGMENTS = new Set(["D01", "D02", "F01", "A01"]);
-const IDEB_IMPORT_EXTENSIONS = new Set(["json"]);
-const RESTRIK_IMPORT_EXTENSIONS = new Set(["xlsx", "csv"]);
-const RESTRIK_REQUIRED_COLUMN_GROUPS = [
-  ["no_rekening_fasilitas", "no_kontrak", "nomor_kontrak"],
-  ["tanggal_restrukturisasi", "tgl_restrukturisasi"],
-  ["jenis_restrukturisasi", "jenis_restruk"],
-  ["status"],
-];
-const RESTRIK_STATUS_LABELS = new Set([
-  "DIAJUKAN",
-  "DISETUJUI",
-  "DITOLAK",
-  "AKTIF",
-  "SELESAI",
-]);
+const IDEB_IMPORT_EXTENSIONS = new Set(["json", "txt"]);
 const ACTIVE_SLIK_JOBS = new Set();
 const RAW_RECORD_CHUNK_SIZE = 500;
 const DEFAULT_SLIK_IMPORT_MAX_FILE_SIZE_MB = 500;
@@ -81,6 +66,46 @@ function serializeJob(req, job) {
   };
 }
 
+function serializeIdebPendingUpload(req, item) {
+  const externalRecord = item.import_job?.records?.find(
+    (record) => record.source_type === "IDEB",
+  );
+  const resultSummary =
+    item.result_summary && typeof item.result_summary === "object" && !Array.isArray(item.result_summary)
+      ? item.result_summary
+      : {};
+
+  return {
+    id: item.id,
+    import_job_id: item.import_job_id,
+    debtor_id: item.debtor_id,
+    contract_id: item.contract_id,
+    month: item.month,
+    year: item.year,
+    status: item.status,
+    external_status: externalRecord?.status || (item.debtor_id ? "MATCHED" : "MATCH_PENDING"),
+    period_month:
+      resultSummary.period_month ||
+      (item.year && item.month ? `${item.year}-${String(item.month).padStart(2, "0")}` : null),
+    debtor_name: resultSummary.debtor_name || null,
+    identity_number: resultSummary.identity_number || null,
+    contract_number: resultSummary.contract_number || null,
+    source_format: resultSummary.source_format || "IDEB_JSON",
+    current_collectibility: resultSummary.current_collectibility || null,
+    outstanding_pokok: Number(resultSummary.outstanding_pokok || 0),
+    summary_detail: resultSummary,
+    debtor: item.debtor || null,
+    contract: item.contract || null,
+    file: serializeFile(req, item, {
+      module: "debtor_information",
+      entityId: item.id,
+      fallbackBaseName: "ideb",
+    }),
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
 async function ensureTargets(payload) {
   if (payload.debtor_id && !(await repository.findDebtorById(payload.debtor_id))) {
     throw new AppError("Debitur target tidak ditemukan.", 404);
@@ -92,6 +117,43 @@ async function ensureTargets(payload) {
       throw new AppError("Kontrak tidak sesuai dengan debitur target.", 422);
     }
   }
+}
+
+async function ensureResolveTargets(tx, payload) {
+  const debtorId = normalizeText(payload.debtor_id);
+  const contractId = normalizeText(payload.contract_id);
+  if (!debtorId) throw new AppError("Debitur target wajib dipilih.", 422);
+
+  const debtor = await tx.digital_debtors.findFirst({
+    where: {
+      id: debtorId,
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+  if (!debtor) throw new AppError("Debitur target tidak ditemukan.", 404);
+
+  let contract = null;
+  if (contractId) {
+    contract = await tx.debtor_contracts.findFirst({
+      where: {
+        id: contractId,
+        deleted_at: null,
+      },
+      select: {
+        id: true,
+        debtor_id: true,
+      },
+    });
+    if (!contract) throw new AppError("Kontrak target tidak ditemukan.", 404);
+    if (contract.debtor_id !== debtorId) {
+      throw new AppError("Kontrak tidak sesuai dengan debitur target.", 422);
+    }
+  }
+
+  return { debtorId, contractId: contract?.id || null };
 }
 
 function getPayloadFiles(payload) {
@@ -112,10 +174,7 @@ function assertImportFiles(type, files) {
       throw new AppError("Import SLIK hanya menerima file TXT.", 422);
     }
     if (type === "IDEB" && !IDEB_IMPORT_EXTENSIONS.has(extension)) {
-      throw new AppError("Import IDEB hanya menerima file JSON.", 422);
-    }
-    if (type === "RESTRIK" && !RESTRIK_IMPORT_EXTENSIONS.has(extension)) {
-      throw new AppError("Import Restrukturisasi hanya menerima file XLSX atau CSV.", 422);
+      throw new AppError("Import IDEB hanya menerima file TXT atau JSON.", 422);
     }
   }
 }
@@ -196,8 +255,25 @@ function parseIdebJsonFile(fileMeta) {
     }
     return parsed;
   } catch (error) {
-    throw new AppError(`File IDEB JSON tidak valid: ${error.message}`, 422);
+    throw new AppError(
+      `File IDEB harus berekstensi TXT atau JSON dengan isi JSON valid: ${error.message}`,
+      422,
+    );
   }
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
+}
+
+function getFirstObject(value) {
+  return asArray(value).find((item) => asObject(item)) || {};
 }
 
 function readObjectValue(source, keys) {
@@ -209,7 +285,290 @@ function readObjectValue(source, keys) {
   return null;
 }
 
-function normalizeIdebSummary(raw) {
+function normalizeYearMonth(value) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const compact = text.replace(/[^\d]/g, "");
+  if (/^\d{6}$/.test(compact)) {
+    return `${compact.slice(0, 4)}-${compact.slice(4, 6)}`;
+  }
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
+  return match ? text : null;
+}
+
+function normalizeCompactDate(value) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const compact = text.replace(/[^\d]/g, "");
+  if (/^\d{14}$/.test(compact)) {
+    return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(
+      6,
+      8,
+    )}T${compact.slice(8, 10)}:${compact.slice(10, 12)}:${compact.slice(12, 14)}`;
+  }
+  if (/^\d{8}$/.test(compact)) {
+    return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+  }
+  return text;
+}
+
+function normalizeNumber(value) {
+  return parseCurrencyNumber(value) ?? 0;
+}
+
+function formatCodeLabel(code, label) {
+  const normalizedCode = normalizeText(code);
+  const normalizedLabel = normalizeText(label);
+  if (normalizedCode && normalizedLabel) return `${normalizedCode} - ${normalizedLabel}`;
+  return normalizedCode || normalizedLabel || null;
+}
+
+function normalizeIdebObjectArray(value) {
+  return asArray(value)
+    .map((item) => asObject(item))
+    .filter(Boolean);
+}
+
+function normalizeIdebFacilityHistory(facility) {
+  const history = [];
+  for (let index = 1; index <= 24; index += 1) {
+    const suffix = String(index).padStart(2, "0");
+    const periodMonth = normalizeYearMonth(facility[`tahunBulan${suffix}`]);
+    const collectibilityCode = normalizeText(facility[`tahunBulan${suffix}Kol`]);
+    const daysPastDue = parseCurrencyNumber(facility[`tahunBulan${suffix}Ht`]);
+    if (!periodMonth && !collectibilityCode && daysPastDue === null) continue;
+
+    history.push({
+      month_index: index,
+      period_month: periodMonth,
+      collectibility_code: collectibilityCode || null,
+      days_past_due: daysPastDue,
+    });
+  }
+
+  return history;
+}
+
+function normalizeIdebFacility(facility) {
+  const periodMonth =
+    normalizeYearMonth(
+      normalizeText(facility.tahun) && normalizeText(facility.bulan)
+        ? `${facility.tahun}${String(facility.bulan).padStart(2, "0")}`
+        : null,
+    ) || normalizeYearMonth(facility.periode);
+  const monthlyHistory = normalizeIdebFacilityHistory(facility);
+  const accountNumber = normalizeText(
+    readObjectValue(facility, ["noRekening", "no_rekening", "no_rekening_fasilitas"]),
+  );
+
+  return {
+    reporter_code: normalizeText(facility.ljk),
+    reporter_name: normalizeText(facility.ljkKet),
+    branch_code: normalizeText(facility.cabang),
+    branch_name: normalizeText(facility.cabangKet),
+    account_number: accountNumber,
+    period_month: periodMonth,
+    credit_nature_code: normalizeText(facility.sifatKreditPembiayaan),
+    credit_nature: formatCodeLabel(
+      facility.sifatKreditPembiayaan,
+      facility.sifatKreditPembiayaanKet,
+    ),
+    credit_type_code: normalizeText(facility.jenisKreditPembiayaan),
+    credit_type: formatCodeLabel(
+      facility.jenisKreditPembiayaan,
+      facility.jenisKreditPembiayaanKet,
+    ),
+    financing_scheme_code: normalizeText(facility.akadKreditPembiayaan),
+    financing_scheme: formatCodeLabel(
+      facility.akadKreditPembiayaan,
+      facility.akadKreditPembiayaanKet,
+    ),
+    initial_akad_number: normalizeText(facility.noAkadAwal),
+    initial_akad_date: normalizeCompactDate(facility.tanggalAkadAwal),
+    final_akad_number: normalizeText(facility.noAkadAkhir),
+    final_akad_date: normalizeCompactDate(facility.tanggalAkadAkhir),
+    initial_credit_date: normalizeCompactDate(facility.tanggalAwalKredit),
+    start_date: normalizeCompactDate(facility.tanggalMulai),
+    due_date: normalizeCompactDate(facility.tanggalJatuhTempo),
+    debtor_category_code: normalizeText(facility.kategoriDebiturKode),
+    debtor_category: formatCodeLabel(
+      facility.kategoriDebiturKode,
+      facility.kategoriDebiturKet,
+    ),
+    usage_type_code: normalizeText(facility.jenisPenggunaan),
+    usage_type: formatCodeLabel(facility.jenisPenggunaan, facility.jenisPenggunaanKet),
+    economic_sector_code: normalizeText(facility.sektorEkonomi),
+    economic_sector: formatCodeLabel(facility.sektorEkonomi, facility.sektorEkonomiKet),
+    government_program_code: normalizeText(facility.kreditProgramPemerintah),
+    government_program: formatCodeLabel(
+      facility.kreditProgramPemerintah,
+      facility.kreditProgramPemerintahKet,
+    ),
+    project_location_code: normalizeText(facility.lokasiProyek),
+    project_location: formatCodeLabel(facility.lokasiProyek, facility.lokasiProyekKet),
+    currency_code: normalizeText(facility.valutaKode),
+    interest_rate: parseCurrencyNumber(facility.sukuBungaImbalan),
+    interest_type_code: normalizeText(facility.jenisSukuBungaImbalan),
+    interest_type: formatCodeLabel(
+      facility.jenisSukuBungaImbalan,
+      facility.jenisSukuBungaImbalanKet,
+    ),
+    collectibility_code: normalizeText(facility.kualitas),
+    collectibility: formatCodeLabel(facility.kualitas, facility.kualitasKet),
+    days_past_due: parseCurrencyNumber(facility.jumlahHariTunggakan),
+    project_value: normalizeNumber(facility.nilaiProyek),
+    initial_plafond: normalizeNumber(facility.plafonAwal),
+    plafond: normalizeNumber(facility.plafon),
+    current_month_realization: normalizeNumber(facility.realisasiBulanBerjalan),
+    original_currency_amount: normalizeNumber(facility.nilaiDalamMataUangAsal),
+    outstanding: normalizeNumber(facility.bakiDebet),
+    problem_reason_code: normalizeText(facility.kodeSebabMacet),
+    problem_reason: formatCodeLabel(facility.kodeSebabMacet, facility.sebabMacetKet),
+    problem_date: normalizeCompactDate(facility.tanggalMacet),
+    principal_arrears: normalizeNumber(facility.tunggakanPokok),
+    interest_arrears: normalizeNumber(facility.tunggakanBunga),
+    arrears_frequency: parseCurrencyNumber(facility.frekuensiTunggakan),
+    penalty: normalizeNumber(facility.denda),
+    restructuring_frequency: parseCurrencyNumber(facility.frekuensiRestrukturisasi),
+    last_restructuring_date: normalizeCompactDate(facility.tanggalRestrukturisasiAkhir),
+    restructuring_method_code: normalizeText(facility.kodeCaraRestrukturisasi),
+    restructuring_method: formatCodeLabel(
+      facility.kodeCaraRestrukturisasi,
+      facility.restrukturisasiKet,
+    ),
+    condition_code: normalizeText(facility.kondisi),
+    condition: formatCodeLabel(facility.kondisi, facility.kondisiKet),
+    condition_date: normalizeCompactDate(facility.tanggalKondisi),
+    description: normalizeText(facility.keterangan),
+    collaterals: normalizeIdebObjectArray(facility.agunan),
+    guarantors: normalizeIdebObjectArray(facility.penjamin),
+    monthly_collectibility_history: monthlyHistory,
+  };
+}
+
+function normalizeOjkiDebIndividualSummary(raw) {
+  const header = asObject(raw.header) || {};
+  const individual = asObject(raw.individual) || {};
+  const searchParameter = asObject(individual.parameterPencarian) || {};
+  const debtorProfile = getFirstObject(individual.dataPokokDebitur);
+  const facilitySummary = asObject(individual.ringkasanFasilitas) || {};
+  const rawFacilities = asArray(
+    readObjectValue(asObject(individual.fasilitas) || {}, [
+      "kreditPembiayan",
+      "kreditPembiayaan",
+      "facilities",
+    ]),
+  ).filter((item) => asObject(item));
+  const facilities = rawFacilities.map((item) => normalizeIdebFacility(item));
+  const mainFacility = facilities[0] || {};
+  const periodMonth =
+    normalizeYearMonth(individual.posisiDataTerakhir) ||
+    mainFacility.period_month ||
+    normalizeYearMonth(facilitySummary.kualitasBulanDataTerburuk);
+  const resultDate = normalizeCompactDate(header.tanggalHasil);
+  const requestDate =
+    normalizeCompactDate(header.tanggalPermintaan) ||
+    normalizeCompactDate(individual.tanggalPermintaan);
+  const debtorName =
+    normalizeText(debtorProfile.namaDebitur) ||
+    normalizeText(searchParameter.namaDebitur);
+  const identityNumber =
+    normalizeText(debtorProfile.noIdentitas) ||
+    normalizeText(searchParameter.noIdentitas);
+  const worstCollectibility = normalizeText(facilitySummary.kualitasTerburuk);
+  const totalOutstanding = normalizeNumber(facilitySummary.bakiDebetTotal);
+  const totalPlafond = normalizeNumber(facilitySummary.plafonEfektifTotal);
+
+  return {
+    schema_version: "ojk-ideb-individual-v1",
+    source_format: "OJK_IDEB_INDIVIDUAL",
+    period_month: periodMonth,
+    officer_name: normalizeText(header.dibuatOleh),
+    report_number: normalizeText(individual.nomorLaporan),
+    reference_number:
+      normalizeText(header.kodeReferensiPengguna) || normalizeText(header.idPermintaan),
+    request_date: requestDate,
+    result_date: resultDate,
+    debtor_name: debtorName,
+    identity_number: identityNumber,
+    debtor_number: null,
+    contract_number: mainFacility.account_number || null,
+    current_collectibility:
+      formatCodeLabel(worstCollectibility, null) ||
+      mainFacility.collectibility ||
+      mainFacility.collectibility_code ||
+      null,
+    outstanding_pokok: totalOutstanding,
+    financing_status: mainFacility.condition || mainFacility.condition_code || null,
+    conclusion: null,
+    processed_at: resultDate || requestDate,
+    identity: {
+      name: debtorName,
+      identity_type: normalizeText(debtorProfile.identitas),
+      identity_number: identityNumber,
+      tax_number: normalizeText(debtorProfile.npwp) || normalizeText(searchParameter.npwp),
+      gender: formatCodeLabel(debtorProfile.jenisKelamin, debtorProfile.jenisKelaminKet),
+      birth_place:
+        normalizeText(debtorProfile.tempatLahir) ||
+        normalizeText(searchParameter.tempatLahir),
+      birth_date:
+        normalizeCompactDate(debtorProfile.tanggalLahir) ||
+        normalizeCompactDate(searchParameter.tanggalLahir),
+      address: normalizeText(debtorProfile.alamat),
+      village: normalizeText(debtorProfile.kelurahan),
+      district: normalizeText(debtorProfile.kecamatan),
+      city_code: normalizeText(debtorProfile.kabKota),
+      city: formatCodeLabel(debtorProfile.kabKota, debtorProfile.kabKotaKet),
+      postal_code: normalizeText(debtorProfile.kodePos),
+      country_code: normalizeText(debtorProfile.negara),
+      country: formatCodeLabel(debtorProfile.negara, debtorProfile.negaraKet),
+      occupation_code: normalizeText(debtorProfile.pekerjaan),
+      occupation: formatCodeLabel(debtorProfile.pekerjaan, debtorProfile.pekerjaanKet),
+      workplace: normalizeText(debtorProfile.tempatBekerja),
+      business_field_code: normalizeText(debtorProfile.bidangUsaha),
+      business_field: formatCodeLabel(
+        debtorProfile.bidangUsaha,
+        debtorProfile.bidangUsahaKet,
+      ),
+      reporter_code: normalizeText(debtorProfile.pelapor),
+      reporter: formatCodeLabel(debtorProfile.pelapor, debtorProfile.pelaporKet),
+      created_at_source: normalizeCompactDate(debtorProfile.tanggalDibentuk),
+      updated_at_source: normalizeCompactDate(debtorProfile.tanggalUpdate),
+    },
+    summary: {
+      total_plafond: totalPlafond,
+      total_outstanding: totalOutstanding,
+      worst_collectibility_code: worstCollectibility || null,
+      worst_collectibility: formatCodeLabel(worstCollectibility, null),
+      worst_collectibility_period: normalizeYearMonth(
+        facilitySummary.kualitasBulanDataTerburuk,
+      ),
+      bank_creditor_count: parseCurrencyNumber(facilitySummary.krediturBankUmum),
+      bpr_bprs_creditor_count: parseCurrencyNumber(facilitySummary["krediturBPR/S"]),
+      lp_creditor_count: parseCurrencyNumber(facilitySummary.krediturLp),
+      other_creditor_count: parseCurrencyNumber(facilitySummary.krediturLainnya),
+      effective_plafond_credit: normalizeNumber(
+        facilitySummary.plafonEfektifKreditPembiayaan,
+      ),
+      outstanding_credit: normalizeNumber(facilitySummary.bakiDebetKreditPembiayaan),
+    },
+    facilities,
+    monthly_collectibility_history: facilities.flatMap((facility) =>
+      facility.monthly_collectibility_history.map((history) => ({
+        account_number: facility.account_number,
+        reporter_name: facility.reporter_name,
+        ...history,
+      })),
+    ),
+    other_bprs: facilities.map((facility) => ({
+      name: facility.reporter_name || facility.reporter_code || "-",
+      collectibility: facility.collectibility || facility.collectibility_code,
+      outstanding_pokok: facility.outstanding || 0,
+    })),
+  };
+}
+
+function normalizeLegacyIdebSummary(raw) {
   const debtor = readObjectValue(raw, ["debitur", "debtor", "nasabah"]) || {};
   const summary = readObjectValue(raw, ["ringkasan", "summary", "hasil"]) || {};
   const facilities = readObjectValue(raw, ["fasilitas", "facilities", "pembiayaan"]) || [];
@@ -217,7 +576,11 @@ function normalizeIdebSummary(raw) {
 
   return {
     schema_version: normalizeText(raw.schema_version || raw.version) || "ideb-v1",
+    source_format: "IDEB_JSON",
     period_month: normalizeText(raw.periode || raw.period_month || raw.period),
+    officer_name: normalizeText(
+      readObjectValue(raw, ["officer_name", "petugas", "dibuatOleh", "created_by_name"]),
+    ),
     debtor_name: normalizeText(
       readObjectValue(debtor, ["nama", "name", "debtor_name", "nama_debitur"]),
     ),
@@ -273,147 +636,1284 @@ function normalizeIdebSummary(raw) {
   };
 }
 
-function normalizeHeaderKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\u00a0/g, " ")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-const RESTRIK_COLUMN_ALIASES = new Map(
-  Object.entries({
-    periode: "period_month",
-    period: "period_month",
-    period_month: "period_month",
-    no_cif: "debtor_number",
-    nomor_cif: "debtor_number",
-    nomor_debitur: "debtor_number",
-    no_debitur: "debtor_number",
-    cif: "debtor_number",
-    no_identitas: "identity_number",
-    nomor_identitas: "identity_number",
-    nik: "identity_number",
-    npwp: "identity_number",
-    no_rekening_fasilitas: "contract_number",
-    nomor_rekening_fasilitas: "contract_number",
-    no_rekening: "contract_number",
-    nomor_rekening: "contract_number",
-    no_kontrak: "contract_number",
-    nomor_kontrak: "contract_number",
-    nama_debitur: "debtor_name",
-    nama_nasabah: "debtor_name",
-    nama: "debtor_name",
-    tanggal_restrukturisasi: "restructuring_date",
-    tgl_restrukturisasi: "restructuring_date",
-    tanggal_restruk: "restructuring_date",
-    jenis_restrukturisasi: "restructuring_type",
-    jenis_restruk: "restructuring_type",
-    alasan_restrukturisasi: "reason",
-    alasan_restruk: "reason",
-    alasan: "reason",
-    plafon_setelah_restruk: "plafond_after",
-    plafond_setelah_restruk: "plafond_after",
-    plafon_setelah: "plafond_after",
-    os_setelah_restruk: "outstanding_after",
-    outstanding_setelah_restruk: "outstanding_after",
-    baki_debet_setelah_restruk: "outstanding_after",
-    tenor_setelah_restruk: "tenor_after",
-    tenor_setelah: "tenor_after",
-    jatuh_tempo_baru: "new_due_date",
-    tanggal_jatuh_tempo_baru: "new_due_date",
-    kol_sebelum: "collectibility_before",
-    kolektibilitas_sebelum: "collectibility_before",
-    kol_setelah: "collectibility_after",
-    kolektibilitas_setelah: "collectibility_after",
-    status: "status",
-    keterangan: "description",
-    deskripsi: "description",
-    catatan: "description",
-  }),
-);
-
-function canonicalRestrikHeader(value) {
-  const normalized = normalizeHeaderKey(value);
-  return RESTRIK_COLUMN_ALIASES.get(normalized) || normalized;
-}
-
-function normalizeCellValue(value) {
-  if (value === undefined || value === null) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === "object") {
-    if (value.text !== undefined) return normalizeCellValue(value.text);
-    if (value.result !== undefined) return normalizeCellValue(value.result);
-    if (Array.isArray(value.richText)) {
-      return normalizeText(value.richText.map((part) => part.text || "").join(""));
-    }
-    if (value.hyperlink && value.text) return normalizeCellValue(value.text);
+function normalizeIdebSummary(raw) {
+  if (asObject(raw)?.individual) {
+    return normalizeOjkiDebIndividualSummary(raw);
   }
-  return normalizeText(value);
+  return normalizeLegacyIdebSummary(raw);
 }
 
-function detectCsvDelimiter(filePath) {
-  const firstLine = fs.readFileSync(filePath, "utf8").split(/\r?\n/, 1)[0] || "";
-  const semicolonCount = (firstLine.match(/;/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  return semicolonCount > commaCount ? ";" : ",";
+function valueOrDash(value) {
+  if (value === undefined || value === null) return "-";
+  const text = String(value).trim();
+  return text || "-";
 }
 
-async function readRestrikRows(fileMeta) {
-  const absolutePath = resolveStoredFilePath(fileMeta.file_path);
-  if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new AppError(`File Restrukturisasi tidak ditemukan: ${fileMeta.file_name || fileMeta.file_path}`, 404);
+function recordValue(record, keys) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && value !== "") return value;
   }
+  return null;
+}
 
-  const extension = getExtension(fileMeta.file_name || fileMeta.file_path);
-  const workbook = new ExcelJS.Workbook();
-  if (extension === "csv") {
-    await workbook.csv.readFile(absolutePath, {
-      parserOptions: { delimiter: detectCsvDelimiter(absolutePath) },
-    });
+function formatIdebDate(value) {
+  const text = normalizeText(value);
+  if (!text) return "-";
+  const compact = text.replace(/[^\d]/g, "");
+  let date = null;
+  if (/^\d{14}$/.test(compact)) {
+    date = new Date(
+      Number(compact.slice(0, 4)),
+      Number(compact.slice(4, 6)) - 1,
+      Number(compact.slice(6, 8)),
+      Number(compact.slice(8, 10)),
+      Number(compact.slice(10, 12)),
+      Number(compact.slice(12, 14)),
+    );
+  } else if (/^\d{8}$/.test(compact)) {
+    date = new Date(
+      Number(compact.slice(0, 4)),
+      Number(compact.slice(4, 6)) - 1,
+      Number(compact.slice(6, 8)),
+    );
   } else {
-    await workbook.xlsx.readFile(absolutePath);
+    date = new Date(text);
   }
 
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet || worksheet.rowCount < 2) {
-    throw new AppError("File Restrukturisasi harus memiliki header dan minimal satu baris data.", 422);
-  }
+  if (!date || Number.isNaN(date.getTime())) return text;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
 
-  const headerRow = worksheet.getRow(1);
-  const headers = [];
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    headers[colNumber] = canonicalRestrikHeader(normalizeCellValue(cell.value));
-  });
+function formatIdebPeriod(value) {
+  const text = normalizeText(value);
+  if (!text) return "-";
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
+  if (!match) return text;
+  return new Intl.DateTimeFormat("id-ID", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(Number(match[1]), Number(match[2]) - 1, 1));
+}
 
-  const headerSet = new Set(headers.filter(Boolean));
-  const missingGroups = RESTRIK_REQUIRED_COLUMN_GROUPS.filter(
-    (group) => !group.some((key) => headerSet.has(canonicalRestrikHeader(key))),
+function formatIdebMoney(value) {
+  const amount = parseCurrencyNumber(value);
+  if (amount === null) return "-";
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatIdebNumber(value) {
+  const amount = parseCurrencyNumber(value);
+  if (amount === null) return "0";
+  return new Intl.NumberFormat("id-ID", {
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function idebSourceFormatLabel(value) {
+  const text = normalizeText(value);
+  if (text === "OJK_IDEB_INDIVIDUAL") return "OJK IDEB";
+  if (text === "IDEB_JSON") return "JSON IDEB";
+  return text || "-";
+}
+
+function idebFacilityArray(summary) {
+  return Array.isArray(summary?.facilities)
+    ? summary.facilities.filter((item) => item && typeof item === "object" && !Array.isArray(item))
+    : [];
+}
+
+function idebMonthlyHistoryArray(summary) {
+  return Array.isArray(summary?.monthly_collectibility_history)
+    ? summary.monthly_collectibility_history.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+}
+
+function idebReporterCount(summary, facilities) {
+  const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
+  const aggregateCount =
+    (parseCurrencyNumber(stats.bank_creditor_count) || 0) +
+    (parseCurrencyNumber(stats.bpr_bprs_creditor_count) || 0) +
+    (parseCurrencyNumber(stats.lp_creditor_count) || 0) +
+    (parseCurrencyNumber(stats.other_creditor_count) || 0);
+  if (aggregateCount > 0) return aggregateCount;
+
+  const names = new Set(
+    facilities
+      .map((facility) => recordValue(facility, ["reporter_name", "reporter_code", "ljk", "bank"]))
+      .filter(Boolean)
+      .map((value) => String(value).trim()),
   );
-  if (missingGroups.length > 0) {
-    throw new AppError(
-      `Template Restrukturisasi tidak lengkap. Kolom wajib belum ada: ${missingGroups
-        .map((group) => group[0])
-        .join(", ")}.`,
-      422,
+  return names.size || facilities.length;
+}
+
+function idebReporterNames(facilities) {
+  const names = [];
+  const seen = new Set();
+  for (const facility of facilities) {
+    const name =
+      recordValue(facility, ["reporter_name", "reporter_code", "ljk", "bank"]) || "-";
+    const normalized = String(name).trim().toUpperCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    names.push(String(name));
+  }
+  return names;
+}
+
+function idebFacilityPlafond(facility) {
+  return parseCurrencyNumber(
+    recordValue(facility, ["plafond", "initial_plafond", "plafon", "plafon_awal"]),
+  ) || 0;
+}
+
+function idebFacilityOutstanding(facility) {
+  return parseCurrencyNumber(
+    recordValue(facility, ["outstanding", "baki_debet", "outstanding_pokok"]),
+  ) || 0;
+}
+
+function idebFacilityArrears(facility) {
+  return (
+    (parseCurrencyNumber(recordValue(facility, ["principal_arrears", "tunggakan_pokok"])) || 0) +
+    (parseCurrencyNumber(recordValue(facility, ["interest_arrears", "tunggakan_bunga"])) || 0) +
+    (parseCurrencyNumber(recordValue(facility, ["penalty", "denda"])) || 0)
+  );
+}
+
+function idebFacilityCondition(facility) {
+  return valueOrDash(recordValue(facility, ["condition", "condition_code", "status"]));
+}
+
+function isIdebPaidOffFacility(facility) {
+  return idebFacilityCondition(facility).toUpperCase().includes("LUNAS");
+}
+
+function getIdebResumeMetrics(summary) {
+  const facilities = idebFacilityArray(summary);
+  const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
+  const activeFacilities = facilities.filter((facility) => !isIdebPaidOffFacility(facility));
+  const paidOffFacilities = facilities.filter(isIdebPaidOffFacility);
+  const totalPlafond =
+    parseCurrencyNumber(recordValue(stats, ["total_plafond", "effective_plafond_credit"])) ??
+    facilities.reduce((total, facility) => total + idebFacilityPlafond(facility), 0);
+  const totalOutstanding =
+    parseCurrencyNumber(recordValue(stats, ["total_outstanding", "outstanding_credit"])) ??
+    parseCurrencyNumber(summary?.outstanding_pokok) ??
+    facilities.reduce((total, facility) => total + idebFacilityOutstanding(facility), 0);
+
+  return {
+    facilities,
+    activeFacilities,
+    paidOffFacilities,
+    reporterCount: idebReporterCount(summary, facilities),
+    reporterNames: idebReporterNames(facilities),
+    totalPlafond,
+    totalOutstanding,
+    activeOutstanding: activeFacilities.reduce(
+      (total, facility) => total + idebFacilityOutstanding(facility),
+      0,
+    ),
+    paidOffPlafond: paidOffFacilities.reduce(
+      (total, facility) => total + idebFacilityPlafond(facility),
+      0,
+    ),
+    totalArrears: facilities.reduce((total, facility) => total + idebFacilityArrears(facility), 0),
+    worstCollectibility:
+      summary?.current_collectibility ||
+      recordValue(stats, ["worst_collectibility", "worst_collectibility_code"]) ||
+      "-",
+  };
+}
+
+function normalizePdfText(value) {
+  return String(value || "")
+    .replace(/\u2013|\u2014/g, "-")
+    .replace(/\u2018|\u2019/g, "'")
+    .replace(/\u201c|\u201d/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, "?");
+}
+
+function wrapPdfText(text, font, fontSize, maxWidth) {
+  const words = normalizePdfText(text).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(next, fontSize) <= maxWidth) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function compactIdebDateForFile(value) {
+  const text = normalizeText(value);
+  if (!text) return "tanggal-ideb";
+  const compact = text.replace(/[^\d]/g, "");
+  if (compact.length >= 8) return compact.slice(0, 8);
+  return text.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "tanggal-ideb";
+}
+
+function safeIdebPdfFileName(summary) {
+  const identity = normalizeText(summary?.identity_number) || "tanpa-identitas";
+  const date = compactIdebDateForFile(summary?.result_date || summary?.processed_at);
+  return `resume-ideb-${identity}-${date}.pdf`
+    .replace(/[<>:"/\\|?*\s]+/g, "-")
+    .replace(/-+/g, "-");
+}
+
+function idebContactText(identity) {
+  return valueOrDash(
+    recordValue(identity, [
+      "phone",
+      "mobile_phone",
+      "telephone",
+      "phone_number",
+      "nomor_telp",
+      "nomorTelp",
+    ]),
+  );
+}
+
+function idebAddressText(identity) {
+  return [
+    recordValue(identity, ["address"]),
+    recordValue(identity, ["village"]),
+    recordValue(identity, ["district"]),
+    recordValue(identity, ["city", "city_code"]),
+    recordValue(identity, ["postal_code"]),
+  ]
+    .filter(Boolean)
+    .join(", ") || "-";
+}
+
+function idebObjectLabel(record, keys) {
+  for (const key of keys) {
+    const value = recordValue(record, [key]);
+    if (value) return valueOrDash(value);
+  }
+  return "-";
+}
+
+async function renderIdebResumePdf(upload) {
+  const summary =
+    upload?.result_summary && typeof upload.result_summary === "object" && !Array.isArray(upload.result_summary)
+      ? upload.result_summary
+      : {};
+  const identity =
+    summary.identity && typeof summary.identity === "object" && !Array.isArray(summary.identity)
+      ? summary.identity
+      : {};
+  const metrics = getIdebResumeMetrics(summary);
+  const monthlyHistory = idebMonthlyHistoryArray(summary);
+  const collaterals = metrics.facilities.flatMap((facility) =>
+    Array.isArray(facility.collaterals) ? facility.collaterals : [],
+  );
+  const guarantors = metrics.facilities.flatMap((facility) =>
+    Array.isArray(facility.guarantors) ? facility.guarantors : [],
+  );
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const colors = {
+    navy: rgb(0.03, 0.07, 0.14),
+    slate: rgb(0.28, 0.33, 0.42),
+    muted: rgb(0.43, 0.48, 0.56),
+    border: rgb(0.86, 0.89, 0.93),
+    soft: rgb(0.96, 0.98, 1),
+    softGray: rgb(0.97, 0.98, 0.99),
+    yellow: rgb(0.97, 0.88, 0.03),
+    white: rgb(1, 1, 1),
+  };
+  const pageSizes = {
+    portrait: [595.28, 841.89],
+    landscape: [841.89, 595.28],
+  };
+  const margin = 36;
+  let page;
+  let pageWidth;
+  let pageHeight;
+  let contentWidth;
+  let orientation = "portrait";
+  let y;
+
+  function addPage(nextOrientation = orientation) {
+    orientation = nextOrientation;
+    page = pdfDoc.addPage(pageSizes[orientation]);
+    pageWidth = page.getWidth();
+    pageHeight = page.getHeight();
+    contentWidth = pageWidth - margin * 2;
+    y = pageHeight - margin;
+  }
+
+  function ensureSpace(required = 16) {
+    if (y >= margin + required) return;
+    addPage(orientation);
+  }
+
+  function drawWrappedTextAt(text, x, startY, width, options = {}) {
+    const font = options.bold ? boldFont : regularFont;
+    const size = options.size || 8.5;
+    const lineHeight = options.lineHeight || size + 3;
+    const color = options.color || colors.navy;
+    let lines = wrapPdfText(valueOrDash(text), font, size, width);
+    if (options.maxLines && lines.length > options.maxLines) {
+      lines = lines.slice(0, options.maxLines);
+      let last = lines[lines.length - 1] || "";
+      while (last.length > 0 && font.widthOfTextAtSize(`${last}...`, size) > width) {
+        last = last.slice(0, -1);
+      }
+      lines[lines.length - 1] = `${last || ""}...`;
+    }
+    lines.forEach((line, index) => {
+      const textWidth = font.widthOfTextAtSize(normalizePdfText(line), size);
+      const lineX = options.align === "right" ? Math.max(x, x + width - textWidth) : x;
+      page.drawText(normalizePdfText(line), {
+        x: lineX,
+        y: startY - index * lineHeight,
+        size,
+        font,
+        color,
+      });
+    });
+    return lines.length * lineHeight;
+  }
+
+  function drawTextBlock(text, options = {}) {
+    const x = options.x || margin;
+    const width = options.width || contentWidth;
+    const size = options.size || 8.5;
+    const lineHeight = options.lineHeight || size + 3;
+    const font = options.bold ? boldFont : regularFont;
+    const lines = wrapPdfText(valueOrDash(text), font, size, width);
+    const height = Math.max(lineHeight, lines.length * lineHeight);
+    ensureSpace(height + 4);
+    drawWrappedTextAt(text, x, y, width, options);
+    y -= height + (options.gap ?? 4);
+  }
+
+  function drawSectionTitle(title) {
+    ensureSpace(30);
+    y -= 5;
+    page.drawRectangle({
+      x: margin,
+      y: y - 3,
+      width: 9,
+      height: 15,
+      color: colors.yellow,
+    });
+    page.drawText(normalizePdfText(title), {
+      x: margin + 15,
+      y,
+      size: 10.5,
+      font: boldFont,
+      color: colors.navy,
+    });
+    y -= 20;
+  }
+
+  function drawBadge(text, x, baselineY, options = {}) {
+    const label = valueOrDash(text);
+    const fontSize = options.size || 7.2;
+    const padX = options.padX || 6;
+    const width = Math.min(
+      options.maxWidth || 110,
+      Math.max(28, (options.font || boldFont).widthOfTextAtSize(normalizePdfText(label), fontSize) + padX * 2),
+    );
+    const height = options.height || 15;
+    page.drawRectangle({
+      x,
+      y: baselineY - 3,
+      width,
+      height,
+      color: options.color || colors.softGray,
+      borderColor: options.borderColor || colors.border,
+      borderWidth: 0.6,
+    });
+    page.drawText(normalizePdfText(label), {
+      x: x + padX,
+      y: baselineY + 1,
+      size: fontSize,
+      font: options.font || boldFont,
+      color: options.textColor || colors.navy,
+    });
+    return width;
+  }
+
+  function collectibilityLevel(value) {
+    const match = /^([1-5])\b|\b([1-5])\b/.exec(normalizeText(value));
+    return match ? match[1] || match[2] : null;
+  }
+
+  function collectibilityLabel(value) {
+    const text = valueOrDash(value);
+    const level = collectibilityLevel(text);
+    const labels = {
+      1: "Lancar",
+      2: "DPK",
+      3: "Kurang Lancar",
+      4: "Diragukan",
+      5: "Macet",
+    };
+    if (!level) return text;
+    if (text.includes("-") || /[A-Za-z]/.test(text.replace(String(level), ""))) return text;
+    return `${level} - ${labels[level]}`;
+  }
+
+  function collectibilityColors(value) {
+    switch (collectibilityLevel(value)) {
+      case "1":
+        return { bg: rgb(0.04, 0.66, 0.28), fg: colors.white, border: rgb(0.03, 0.5, 0.22) };
+      case "2":
+        return { bg: rgb(0.58, 0.82, 0.28), fg: colors.navy, border: rgb(0.45, 0.68, 0.18) };
+      case "3":
+        return { bg: rgb(1, 0.83, 0.38), fg: colors.navy, border: rgb(0.92, 0.68, 0.15) };
+      case "4":
+        return { bg: rgb(1, 0.95, 0.02), fg: colors.navy, border: rgb(0.9, 0.78, 0) };
+      case "5":
+        return { bg: rgb(0.94, 0.08, 0.08), fg: colors.white, border: rgb(0.72, 0.03, 0.03) };
+      default:
+        return { bg: colors.softGray, fg: colors.slate, border: colors.border };
+    }
+  }
+
+  function drawKolBadge(value, x, baselineY, maxWidth = 90) {
+    const style = collectibilityColors(value);
+    return drawBadge(collectibilityLabel(value), x, baselineY, {
+      color: style.bg,
+      textColor: style.fg,
+      borderColor: style.border,
+      maxWidth,
+      size: 7,
+    });
+  }
+
+  function drawMetricCard(item, x, topY, width, height) {
+    const isKol = item.type === "kol";
+    const style = isKol ? collectibilityColors(item.value) : null;
+    page.drawRectangle({
+      x,
+      y: topY - height,
+      width,
+      height,
+      color: colors.white,
+      borderColor: colors.border,
+      borderWidth: 0.8,
+    });
+    page.drawRectangle({
+      x,
+      y: topY - height,
+      width: 4,
+      height,
+      color: isKol ? style.bg : colors.yellow,
+    });
+    page.drawText(normalizePdfText(item.label.toUpperCase()), {
+      x: x + 10,
+      y: topY - 14,
+      size: 6.6,
+      font: boldFont,
+      color: colors.muted,
+    });
+    if (isKol) {
+      drawKolBadge(item.value, x + 10, topY - 35, width - 20);
+    } else {
+      drawWrappedTextAt(item.value, x + 10, topY - 34, width - 20, {
+        size: item.small ? 9 : 11,
+        bold: true,
+        maxLines: 2,
+        lineHeight: 12,
+        color: colors.navy,
+      });
+    }
+    if (item.description) {
+      drawWrappedTextAt(item.description, x + 10, topY - height + 17, width - 20, {
+        size: 6.4,
+        lineHeight: 8,
+        maxLines: 2,
+        color: colors.muted,
+      });
+    }
+  }
+
+  function drawMetricGrid(items) {
+    const gap = 8;
+    const columns = 4;
+    const cardWidth = (contentWidth - gap * (columns - 1)) / columns;
+    const cardHeight = 62;
+    const rows = Math.ceil(items.length / columns);
+    ensureSpace(rows * cardHeight + (rows - 1) * gap + 8);
+    const startY = y;
+    items.forEach((item, index) => {
+      const col = index % columns;
+      const row = Math.floor(index / columns);
+      drawMetricCard(
+        item,
+        margin + col * (cardWidth + gap),
+        startY - row * (cardHeight + gap),
+        cardWidth,
+        cardHeight,
+      );
+    });
+    y -= rows * cardHeight + (rows - 1) * gap + 14;
+  }
+
+  function drawInfoCell(item, x, topY, width, height) {
+    page.drawRectangle({
+      x,
+      y: topY - height,
+      width,
+      height,
+      color: colors.softGray,
+      borderColor: colors.border,
+      borderWidth: 0.6,
+    });
+    page.drawText(normalizePdfText(item.label.toUpperCase()), {
+      x: x + 8,
+      y: topY - 13,
+      size: 6.6,
+      font: boldFont,
+      color: colors.muted,
+    });
+    drawWrappedTextAt(item.value, x + 8, topY - 29, width - 16, {
+      size: 8.3,
+      bold: Boolean(item.bold),
+      maxLines: item.maxLines || 2,
+      lineHeight: 10.5,
+      color: colors.navy,
+    });
+  }
+
+  function drawInfoGrid(items, columns = 2) {
+    const gap = 8;
+    const cellWidth = (contentWidth - gap * (columns - 1)) / columns;
+    let index = 0;
+    while (index < items.length) {
+      const first = items[index];
+      const rowItems = first.fullWidth ? [first] : items.slice(index, index + columns);
+      const rowHeight = Math.max(
+        42,
+        ...rowItems.map((item) => {
+          const width = item.fullWidth ? contentWidth : cellWidth;
+          const lines = wrapPdfText(valueOrDash(item.value), item.bold ? boldFont : regularFont, 8.3, width - 16);
+          return 25 + Math.min(item.maxLines || 2, Math.max(1, lines.length)) * 10.5;
+        }),
+      );
+      ensureSpace(rowHeight + gap);
+      rowItems.forEach((item, offset) => {
+        const width = item.fullWidth ? contentWidth : cellWidth;
+        const x = margin + offset * (cellWidth + gap);
+        drawInfoCell(item, x, y, width, rowHeight);
+      });
+      y -= rowHeight + gap;
+      index += first.fullWidth ? 1 : columns;
+    }
+    y -= 2;
+  }
+
+  function drawNoteBox(title, body, options = {}) {
+    const bodyLines = wrapPdfText(valueOrDash(body), regularFont, 8.2, contentWidth - 22);
+    const height = 38 + bodyLines.length * 10;
+    ensureSpace(height + 8);
+    page.drawRectangle({
+      x: margin,
+      y: y - height,
+      width: contentWidth,
+      height,
+      color: options.color || colors.soft,
+      borderColor: options.borderColor || colors.border,
+      borderWidth: 0.8,
+    });
+    page.drawText(normalizePdfText(title), {
+      x: margin + 10,
+      y: y - 15,
+      size: 8,
+      font: boldFont,
+      color: colors.navy,
+    });
+    drawWrappedTextAt(body, margin + 10, y - 30, contentWidth - 22, {
+      size: 8.2,
+      lineHeight: 10.5,
+      color: colors.slate,
+    });
+    y -= height + 10;
+  }
+
+  function drawTable(columns, rows, options = {}) {
+    const tableWidth = columns.reduce((total, column) => total + column.width, 0);
+    const startX = margin;
+    const headerHeight = options.headerHeight || 22;
+    const fontSize = options.fontSize || 7;
+    const lineHeight = fontSize + 2.5;
+
+    if (rows.length === 0) {
+      drawNoteBox(options.emptyTitle || "Data tidak tersedia", options.emptyText || "Belum ada data pada bagian ini.", {
+        color: colors.softGray,
+      });
+      return;
+    }
+
+    function drawHeader() {
+      ensureSpace(headerHeight + 10);
+      page.drawRectangle({
+        x: startX,
+        y: y - headerHeight,
+        width: tableWidth,
+        height: headerHeight,
+        color: rgb(0.94, 0.96, 0.98),
+        borderColor: colors.border,
+        borderWidth: 0.7,
+      });
+      let x = startX;
+      columns.forEach((column) => {
+        page.drawText(normalizePdfText(column.header.toUpperCase()), {
+          x: x + 4,
+          y: y - 14,
+          size: 6.4,
+          font: boldFont,
+          color: colors.slate,
+        });
+        x += column.width;
+      });
+      y -= headerHeight;
+    }
+
+    drawHeader();
+    rows.forEach((row, rowIndex) => {
+      const cellLines = columns.map((column) => {
+        if (column.type === "kol") return [collectibilityLabel(row[column.key])];
+        return wrapPdfText(
+          valueOrDash(row[column.key]),
+          row.__isTotal || column.bold ? boldFont : regularFont,
+          fontSize,
+          column.width - 8,
+        );
+      });
+      const rowHeight = Math.max(24, Math.max(...cellLines.map((lines) => lines.length)) * lineHeight + 12);
+      if (y < margin + rowHeight + 24) {
+        addPage(orientation);
+        drawHeader();
+      }
+      page.drawRectangle({
+        x: startX,
+        y: y - rowHeight,
+        width: tableWidth,
+        height: rowHeight,
+        color: row.__isTotal ? rgb(0.93, 0.96, 1) : rowIndex % 2 === 0 ? colors.white : rgb(0.985, 0.99, 0.995),
+        borderColor: rgb(0.9, 0.92, 0.95),
+        borderWidth: row.__isTotal ? 0.8 : 0.4,
+      });
+      let x = startX;
+      columns.forEach((column, colIndex) => {
+        if (colIndex > 0) {
+          page.drawLine({
+            start: { x, y },
+            end: { x, y: y - rowHeight },
+            thickness: 0.3,
+            color: rgb(0.9, 0.92, 0.95),
+          });
+        }
+        if (column.type === "kol") {
+          drawKolBadge(row[column.key], x + 4, y - 17, column.width - 8);
+        } else {
+          const lineOptions = {
+            size: fontSize,
+            lineHeight,
+            maxLines: column.maxLines || 3,
+            bold: Boolean(column.bold || row.__isTotal),
+            color: colors.navy,
+            align: column.align,
+          };
+          drawWrappedTextAt(row[column.key], x + 4, y - 11, column.width - 8, lineOptions);
+        }
+        x += column.width;
+      });
+      y -= rowHeight;
+    });
+    y -= 12;
+  }
+
+  function isWriteOffFacility(facility) {
+    const code = normalizeText(recordValue(facility, ["condition_code"]));
+    const condition = normalizeText(idebFacilityCondition(facility)).toUpperCase();
+    return code === "03" || condition.includes("HAPUS BUKU") || condition.includes("DIHAPUSBUKUKAN");
+  }
+
+  function facilityInitialPlafond(facility) {
+    return (
+      parseCurrencyNumber(
+        recordValue(facility, ["initial_plafond", "plafond", "plafon_awal", "plafon"]),
+      ) || 0
     );
   }
 
-  const rows = [];
-  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return;
-    const raw = {};
-    headers.forEach((header, colNumber) => {
-      if (!header) return;
-      raw[header] = normalizeCellValue(row.getCell(colNumber).value);
-    });
-    if (Object.values(raw).some((value) => value !== null && value !== "")) {
-      rows.push({ rowNumber, raw });
+  function facilityCreditDisplay(facility) {
+    const product = valueOrDash(recordValue(facility, ["credit_type", "credit_type_code"]));
+    const scheme = valueOrDash(recordValue(facility, ["financing_scheme", "financing_scheme_code"]));
+    if (product === "-" && scheme === "-") return "-";
+    if (scheme === "-") return product;
+    if (product === "-") return scheme;
+    return `${product}\n${scheme}`;
+  }
+
+  function facilityAkadDate(facility) {
+    return formatIdebDate(
+      recordValue(facility, ["initial_akad_date", "final_akad_date", "start_date", "initial_credit_date"]),
+    );
+  }
+
+  function facilityCollateralSummary(facility) {
+    const items = Array.isArray(facility.collaterals) ? facility.collaterals : [];
+    if (items.length === 0) return "-";
+    const labels = items
+      .slice(0, 2)
+      .map((collateral) =>
+        idebObjectLabel(collateral, [
+          "type",
+          "jenis_agunan",
+          "jenisAgunan",
+          "collateral_type",
+          "agunanKet",
+          "description",
+          "keterangan",
+        ]),
+      )
+      .filter((label) => label && label !== "-");
+    if (labels.length === 0) return "-";
+    return items.length > 2 ? `${labels.join(", ")} +${items.length - 2}` : labels.join(", ");
+  }
+
+  function reporterBreakdownText() {
+    const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
+    const buckets = [
+      ["Bank Umum", recordValue(stats, ["bank_creditor_count"])],
+      ["BPR/BPRS", recordValue(stats, ["bpr_bprs_creditor_count"])],
+      ["LP", recordValue(stats, ["lp_creditor_count"])],
+      ["Lainnya", recordValue(stats, ["other_creditor_count"])],
+    ]
+      .map(([label, value]) => [label, parseCurrencyNumber(value) || 0])
+      .filter(([, value]) => value > 0);
+    if (buckets.length > 0) {
+      return buckets.map(([label, value]) => `${formatIdebNumber(value)} ${label}`).join(", ");
     }
+    if (metrics.reporterNames.length > 0) {
+      return metrics.reporterNames.map((name, index) => `${index + 1}) ${name}`).join("  ");
+    }
+    return "-";
+  }
+
+  function drawCreditPositionTable() {
+    const rows = metrics.facilities.map((facility) => ({
+      reporter: valueOrDash(recordValue(facility, ["reporter_name", "reporter_code"])),
+      product: facilityCreditDisplay(facility),
+      akadDate: facilityAkadDate(facility),
+      plafond: formatIdebMoney(facilityInitialPlafond(facility)),
+      outstanding: formatIdebMoney(idebFacilityOutstanding(facility)),
+      kol: recordValue(facility, ["collectibility", "collectibility_code", "kol"]),
+      arrears: formatIdebMoney(idebFacilityArrears(facility)),
+      collateral: facilityCollateralSummary(facility),
+    }));
+    const totalInitialPlafond = metrics.facilities.reduce(
+      (total, facility) => total + facilityInitialPlafond(facility),
+      0,
+    );
+    const totalOutstanding = metrics.facilities.reduce(
+      (total, facility) => total + idebFacilityOutstanding(facility),
+      0,
+    );
+    const totalArrears = metrics.facilities.reduce(
+      (total, facility) => total + idebFacilityArrears(facility),
+      0,
+    );
+    if (rows.length > 0) {
+      rows.push({
+        reporter: "TOTAL KESELURUHAN",
+        product: "",
+        akadDate: "",
+        plafond: formatIdebMoney(totalInitialPlafond),
+        outstanding: formatIdebMoney(totalOutstanding),
+        kol: "",
+        arrears: formatIdebMoney(totalArrears),
+        collateral: "",
+        __isTotal: true,
+      });
+    }
+    drawTable(
+      [
+        { key: "reporter", header: "Pelapor", width: 120, bold: true, maxLines: 3 },
+        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 128, maxLines: 3 },
+        { key: "akadDate", header: "Tanggal Akad", width: 74, maxLines: 2 },
+        { key: "plafond", header: "Plafon Awal", width: 82, align: "right", maxLines: 2 },
+        { key: "outstanding", header: "Baki Debet Saat Ini", width: 86, align: "right", maxLines: 2 },
+        { key: "kol", header: "Kolektibilitas", width: 78, type: "kol" },
+        { key: "arrears", header: "Tunggakan", width: 78, align: "right", maxLines: 2 },
+        { key: "collateral", header: "Jaminan / Agunan", width: 123, maxLines: 3 },
+      ],
+      rows,
+      {
+        emptyTitle: "Ringkasan Posisi Fasilitas Kredit",
+        emptyText: "Belum ada data fasilitas IDEB pada hasil ini.",
+        fontSize: 6.7,
+      },
+    );
+  }
+
+  function drawReviewPanel(title, items, x, topY, width, height) {
+    page.drawRectangle({
+      x,
+      y: topY - height,
+      width,
+      height,
+      color: colors.white,
+      borderColor: colors.border,
+      borderWidth: 0.8,
+    });
+    page.drawRectangle({
+      x: x + 10,
+      y: topY - 24,
+      width: 7,
+      height: 14,
+      color: colors.yellow,
+    });
+    page.drawText(normalizePdfText(title), {
+      x: x + 23,
+      y: topY - 21,
+      size: 9.2,
+      font: boldFont,
+      color: colors.navy,
+    });
+
+    const columns = 2;
+    const gap = 12;
+    const columnWidth = (width - 22 - gap) / columns;
+    const startY = topY - 42;
+    items.forEach((item, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const cellX = x + 11 + column * (columnWidth + gap);
+      const cellY = startY - row * 27;
+      page.drawText(normalizePdfText(item.label.toUpperCase()), {
+        x: cellX,
+        y: cellY,
+        size: 5.8,
+        font: boldFont,
+        color: colors.muted,
+      });
+      drawWrappedTextAt(item.value, cellX, cellY - 11, columnWidth, {
+        size: 7.4,
+        bold: Boolean(item.bold),
+        maxLines: item.maxLines || 2,
+        lineHeight: 8.8,
+        color: colors.navy,
+      });
+    });
+  }
+
+  function drawHeaderBand(title, subtitle, metaLines = []) {
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 76,
+      width: pageWidth,
+      height: 76,
+      color: rgb(0.975, 0.985, 1),
+    });
+    page.drawRectangle({
+      x: margin,
+      y: pageHeight - margin - 8,
+      width: 50,
+      height: 5,
+      color: colors.yellow,
+    });
+    page.drawText(normalizePdfText(title), {
+      x: margin,
+      y: pageHeight - margin - 28,
+      size: 17,
+      font: boldFont,
+      color: colors.navy,
+    });
+    drawWrappedTextAt(subtitle, margin, pageHeight - margin - 48, 410, {
+      size: 8.2,
+      bold: true,
+      maxLines: 1,
+      color: colors.slate,
+    });
+    const metaX = pageWidth - margin - 235;
+    metaLines.forEach((line, index) => {
+      drawWrappedTextAt(line, metaX, pageHeight - margin - 24 - index * 13, 235, {
+        size: index === 0 ? 7.3 : 6.8,
+        bold: index === 0,
+        maxLines: 1,
+        color: index === 0 ? colors.navy : colors.slate,
+      });
+    });
+    y = pageHeight - 95;
+  }
+
+  function shortPeriod(value) {
+    const text = normalizeText(value);
+    const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
+    if (!match) return valueOrDash(text);
+    const month = new Intl.DateTimeFormat("id-ID", { month: "short" }).format(
+      new Date(Number(match[1]), Number(match[2]) - 1, 1),
+    );
+    return `${month} ${match[1].slice(2)}`;
+  }
+
+  function drawHistoryMatrix(history) {
+    const hasValue = history.some(
+      (entry) =>
+        normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
+        normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
+    );
+    if (history.length === 0) {
+      drawNoteBox("Histori KOL", "Belum ada histori KOL bulanan di hasil IDEB ini.", {
+        color: colors.softGray,
+      });
+      return;
+    }
+    if (!hasValue) {
+      drawNoteBox(
+        "Histori KOL",
+        `Histori periode tersedia ${formatIdebNumber(history.length)} bulan, tetapi nilai KOL/DPD tidak tercatat pada file IDEB ini.`,
+        { color: colors.softGray },
+      );
+      return;
+    }
+
+    const groups = new Map();
+    history.forEach((entry) => {
+      const key = [
+        valueOrDash(recordValue(entry, ["reporter_name", "reporter_code"])),
+        valueOrDash(recordValue(entry, ["account_number", "no_rekening"])),
+      ].join(" | ");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(entry);
+    });
+
+    for (const [label, entries] of groups.entries()) {
+      entries.sort((left, right) => {
+        const leftIndex = parseCurrencyNumber(recordValue(left, ["month_index"])) || 0;
+        const rightIndex = parseCurrencyNumber(recordValue(right, ["month_index"])) || 0;
+        return leftIndex - rightIndex;
+      });
+      for (let start = 0; start < entries.length; start += 12) {
+        const chunk = entries.slice(start, start + 12);
+        const labelWidth = 150;
+        const cellWidth = (contentWidth - labelWidth) / 12;
+        const headerHeight = 18;
+        const rowHeight = 34;
+        ensureSpace(headerHeight + rowHeight + 14);
+        page.drawRectangle({
+          x: margin,
+          y: y - headerHeight,
+          width: contentWidth,
+          height: headerHeight,
+          color: rgb(0.94, 0.96, 0.98),
+          borderColor: colors.border,
+          borderWidth: 0.6,
+        });
+        page.drawText("FASILITAS", {
+          x: margin + 5,
+          y: y - 12,
+          size: 6.4,
+          font: boldFont,
+          color: colors.slate,
+        });
+        chunk.forEach((entry, index) => {
+          page.drawText(shortPeriod(recordValue(entry, ["period_month"])), {
+            x: margin + labelWidth + index * cellWidth + 4,
+            y: y - 12,
+            size: 6.2,
+            font: boldFont,
+            color: colors.slate,
+          });
+        });
+        y -= headerHeight;
+        page.drawRectangle({
+          x: margin,
+          y: y - rowHeight,
+          width: contentWidth,
+          height: rowHeight,
+          color: colors.white,
+          borderColor: colors.border,
+          borderWidth: 0.5,
+        });
+        drawWrappedTextAt(label, margin + 5, y - 11, labelWidth - 10, {
+          size: 6.6,
+          bold: true,
+          maxLines: 2,
+          lineHeight: 8.4,
+        });
+        chunk.forEach((entry, index) => {
+          const x = margin + labelWidth + index * cellWidth;
+          const kol = recordValue(entry, ["collectibility_code", "collectibility", "kol"]);
+          const dpd = recordValue(entry, ["days_past_due", "dpd"]);
+          const style = collectibilityColors(kol);
+          page.drawRectangle({
+            x,
+            y: y - rowHeight,
+            width: cellWidth,
+            height: rowHeight,
+            color: collectibilityLevel(kol) ? style.bg : colors.softGray,
+            borderColor: colors.border,
+            borderWidth: 0.35,
+          });
+          page.drawText(`KOL ${valueOrDash(kol)}`, {
+            x: x + 4,
+            y: y - 13,
+            size: 6.2,
+            font: boldFont,
+            color: collectibilityLevel(kol) ? style.fg : colors.slate,
+          });
+          page.drawText(`DPD ${valueOrDash(dpd)}`, {
+            x: x + 4,
+            y: y - 25,
+            size: 5.8,
+            font: regularFont,
+            color: collectibilityLevel(kol) ? style.fg : colors.slate,
+          });
+        });
+        y -= rowHeight + 10;
+      }
+    }
+  }
+
+  function drawDocumentFooter() {
+    const pages = pdfDoc.getPages();
+    pages.forEach((pdfPage, index) => {
+      const width = pdfPage.getWidth();
+      pdfPage.drawLine({
+        start: { x: margin, y: 24 },
+        end: { x: width - margin, y: 24 },
+        thickness: 0.4,
+        color: colors.border,
+      });
+      pdfPage.drawText("Ruwang Arsip | Resume IDEB", {
+        x: margin,
+        y: 12,
+        size: 6.5,
+        font: regularFont,
+        color: colors.muted,
+      });
+      pdfPage.drawText(`Halaman ${index + 1}/${pages.length}`, {
+        x: width - margin - 52,
+        y: 12,
+        size: 6.5,
+        font: regularFont,
+        color: colors.muted,
+      });
+    });
+  }
+
+  const debtorName = recordValue(identity, ["name"]) || summary.debtor_name || upload?.debtor?.name;
+  const identityNumber =
+    recordValue(identity, ["identity_number"]) || summary.identity_number || upload?.debtor?.identity_number;
+  const birthText = [
+    recordValue(identity, ["birth_place"]),
+    formatIdebDate(recordValue(identity, ["birth_date"])),
+  ]
+    .filter((value) => value && value !== "-")
+    .join(" / ");
+  const latestIdebDate = formatIdebDate(summary.result_date || summary.processed_at);
+  const comparisonText =
+    upload.debtor_id || upload.contract_id
+      ? `Terhubung ke data internal: ${valueOrDash(upload?.debtor?.name || upload.debtor_id)}${
+          upload?.contract?.no_kontrak ? `, fasilitas ${upload.contract.no_kontrak}` : ""
+        }. Perbandingan rinci tetap tersedia di modal Hasil IDEB pada aplikasi.`
+      : "Belum terhubung ke debitur internal, sehingga perbandingan F01 internal belum tersedia.";
+  const writeOffFacilities = metrics.facilities.filter(isWriteOffFacility);
+  const writeOffPlafond = writeOffFacilities.reduce(
+    (total, facility) => total + facilityInitialPlafond(facility),
+    0,
+  );
+  const writeOffOutstanding = writeOffFacilities.reduce(
+    (total, facility) => total + idebFacilityOutstanding(facility),
+    0,
+  );
+  const writeOffArrears = writeOffFacilities.reduce(
+    (total, facility) => total + idebFacilityArrears(facility),
+    0,
+  );
+
+  addPage("landscape");
+  drawHeaderBand("RESUME HASIL IDEB", `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`, [
+    `Tanggal IDEB: ${latestIdebDate}`,
+    `Petugas: ${valueOrDash(summary.officer_name)}`,
+    `No Laporan: ${valueOrDash(summary.report_number)}`,
+    `Referensi: ${valueOrDash(summary.reference_number)}`,
+  ]);
+
+  drawMetricGrid([
+    {
+      label: "KOL Terburuk",
+      value: metrics.worstCollectibility,
+      type: "kol",
+      description: `${formatIdebNumber(metrics.reporterCount)} PJK | ${formatIdebNumber(
+        metrics.activeFacilities.length,
+      )} aktif`,
+    },
+    {
+      label: "Total Baki Debet Aktif",
+      value: formatIdebMoney(metrics.activeOutstanding),
+      small: true,
+      description: `${formatIdebNumber(metrics.activeFacilities.length)} fasilitas aktif`,
+    },
+    {
+      label: "Total Plafon Lunas",
+      value: formatIdebMoney(metrics.paidOffPlafond),
+      small: true,
+      description: `${formatIdebNumber(metrics.paidOffFacilities.length)} fasilitas lunas`,
+    },
+    {
+      label: "Pembiayaan Hapus Buku",
+      value: formatIdebMoney(writeOffOutstanding || writeOffPlafond),
+      small: true,
+      description: `${formatIdebNumber(writeOffFacilities.length)} fasilitas | Tunggakan ${formatIdebMoney(
+        writeOffArrears,
+      )}`,
+    },
+  ]);
+
+  const panelTop = y;
+  const panelGap = 10;
+  const panelWidth = (contentWidth - panelGap) / 2;
+  const panelHeight = 116;
+  drawReviewPanel(
+    "PROFIL POKOK DEBITUR",
+    [
+      { label: "Nama Lengkap", value: debtorName, bold: true },
+      { label: "Sektor Usaha", value: recordValue(identity, ["business_field", "business_field_code"]) },
+      { label: "Tempat / Tanggal Lahir", value: birthText },
+      { label: "Alamat Terakhir", value: idebAddressText(identity), maxLines: 2 },
+      { label: "Pekerjaan Utama", value: recordValue(identity, ["occupation", "occupation_code", "workplace"]) },
+      { label: "Nomor Telp", value: idebContactText(identity) },
+      { label: "NIK", value: identityNumber, bold: true },
+      { label: "Jenis Kelamin", value: recordValue(identity, ["gender"]) },
+    ],
+    margin,
+    panelTop,
+    panelWidth,
+    panelHeight,
+  );
+  drawReviewPanel(
+    "RESUME HASIL IDEB",
+    [
+      { label: "Tanggal Pengecekan IDEB", value: latestIdebDate },
+      { label: "Petugas", value: summary.officer_name },
+      { label: "Jumlah Lembaga / PJK", value: formatIdebNumber(metrics.reporterCount), bold: true },
+      { label: "Kualitas Terburuk", value: collectibilityLabel(metrics.worstCollectibility), bold: true },
+      { label: "Fasilitas Aktif", value: formatIdebNumber(metrics.activeFacilities.length) },
+      { label: "Sisa Baki Debet", value: formatIdebMoney(metrics.activeOutstanding), bold: true },
+      { label: "Total Plafon", value: formatIdebMoney(metrics.totalPlafond), bold: true },
+      { label: "Total Tunggakan", value: formatIdebMoney(metrics.totalArrears), bold: true },
+    ],
+    margin + panelWidth + panelGap,
+    panelTop,
+    panelWidth,
+    panelHeight,
+  );
+  y -= panelHeight + 14;
+
+  drawNoteBox(
+    "JUMLAH LEMBAGA PEMBUAT PELAPORAN/KREDITUR",
+    reporterBreakdownText(),
+    { color: rgb(0.985, 0.99, 0.995) },
+  );
+
+  drawSectionTitle("RINGKASAN POSISI FASILITAS KREDIT");
+  drawCreditPositionTable();
+
+  addPage("landscape");
+  drawHeaderBand("DETAIL LANJUTAN IDEB", `${valueOrDash(debtorName)} | ${valueOrDash(identityNumber)}`, [
+    `Tanggal IDEB: ${latestIdebDate}`,
+    `Format: ${idebSourceFormatLabel(summary.source_format)}`,
+  ]);
+
+  drawSectionTitle("PERBANDINGAN DENGAN F01 INTERNAL");
+  drawNoteBox(upload.debtor_id || upload.contract_id ? "Status: Terhubung" : "Status: Belum terhubung", comparisonText, {
+    color: upload.debtor_id || upload.contract_id ? rgb(0.94, 0.99, 0.96) : rgb(0.98, 0.98, 0.98),
+    borderColor: upload.debtor_id || upload.contract_id ? rgb(0.65, 0.88, 0.72) : colors.border,
   });
 
-  return rows;
+  drawSectionTitle("HISTORI KOL");
+  drawHistoryMatrix(monthlyHistory);
+
+  drawSectionTitle("AGUNAN");
+  drawTable(
+    [
+      { key: "no", header: "No", width: 28, bold: true, maxLines: 1 },
+      { key: "type", header: "Jenis Agunan", width: 190, maxLines: 2 },
+      { key: "value", header: "Nilai", width: 95, maxLines: 1 },
+      { key: "location", header: "Lokasi", width: 330, maxLines: 3 },
+    ],
+    collaterals.slice(0, 20).map((collateral, index) => ({
+      no: String(index + 1),
+      type: idebObjectLabel(collateral, ["type", "jenis_agunan", "jenisAgunan", "collateral_type", "agunanKet"]),
+      value: formatIdebMoney(recordValue(collateral, ["value", "nilai", "nilai_agunan", "market_value"])),
+      location: idebObjectLabel(collateral, ["location", "alamat", "address", "lokasi"]),
+    })),
+    {
+      emptyTitle: "Agunan",
+      emptyText: "Tidak ada data agunan pada file IDEB ini.",
+    },
+  );
+
+  drawSectionTitle("PENJAMIN");
+  drawTable(
+    [
+      { key: "no", header: "No", width: 28, bold: true, maxLines: 1 },
+      { key: "name", header: "Nama Penjamin", width: 190, maxLines: 2 },
+      { key: "identity", header: "Identitas", width: 135, maxLines: 2 },
+      { key: "address", header: "Alamat", width: 290, maxLines: 3 },
+    ],
+    guarantors.slice(0, 20).map((guarantor, index) => ({
+      no: String(index + 1),
+      name: idebObjectLabel(guarantor, ["name", "nama", "nama_penjamin", "namaPenjamin"]),
+      identity: idebObjectLabel(guarantor, ["identity_number", "no_identitas", "nik", "npwp"]),
+      address: idebObjectLabel(guarantor, ["address", "alamat"]),
+    })),
+    {
+      emptyTitle: "Penjamin",
+      emptyText: "Tidak ada data penjamin pada file IDEB ini.",
+    },
+  );
+
+  drawSectionTitle("METADATA FILE");
+  drawInfoGrid(
+    [
+      { label: "Nomor Laporan", value: summary.report_number },
+      { label: "Nomor Referensi", value: summary.reference_number },
+      { label: "Periode Data", value: formatIdebPeriod(summary.period_month) },
+      { label: "Format Sumber", value: idebSourceFormatLabel(summary.source_format) },
+    ],
+    2,
+  );
+
+  drawDocumentFooter();
+
+  const bytes = await pdfDoc.save();
+  return {
+    buffer: Buffer.from(bytes),
+    fileName: safeIdebPdfFileName(summary),
+  };
 }
 
 function parseCurrencyNumber(value) {
@@ -430,33 +1930,6 @@ function parseCurrencyNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseFlexibleDate(value) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  const text = normalizeText(value);
-  if (!text) return null;
-  const slikDate = parseSlikDate(text);
-  if (slikDate) return slikDate;
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (iso) return new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
-  const local = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(text);
-  if (local) return new Date(Date.UTC(Number(local[3]), Number(local[2]) - 1, Number(local[1])));
-  return null;
-}
-
-function parsePositiveInt(value) {
-  const text = normalizeText(value);
-  if (!text) return null;
-  const parsed = Number.parseInt(text, 10);
-  return Number.isInteger(parsed) ? parsed : null;
-}
-
-function buildRowHash(periodMonth, raw) {
-  return crypto
-    .createHash("sha256")
-    .update(JSON.stringify({ period_month: periodMonth, raw }))
-    .digest("hex");
-}
-
 async function inferIdebTargets(tx, payload, summary) {
   let debtorId = normalizeText(payload.debtor_id);
   let contractId = normalizeText(payload.contract_id);
@@ -470,11 +1943,14 @@ async function inferIdebTargets(tx, payload, summary) {
   }
 
   if (!contract && summary.contract_number) {
-    contract = await tx.debtor_contracts.findFirst({
+    const inferredContract = await tx.debtor_contracts.findFirst({
       where: { no_kontrak: summary.contract_number, deleted_at: null },
       select: { id: true, debtor_id: true, no_kontrak: true },
     });
-    if (contract) contractId = contract.id;
+    if (inferredContract && (!debtorId || inferredContract.debtor_id === debtorId)) {
+      contract = inferredContract;
+      contractId = inferredContract.id;
+    }
   }
 
   if (!debtorId && contract?.debtor_id) debtorId = contract.debtor_id;
@@ -493,137 +1969,6 @@ async function inferIdebTargets(tx, payload, summary) {
   }
 
   return { debtorId, contractId };
-}
-
-async function resolveRestrikRowTargets(tx, raw) {
-  const contractNumber = normalizeText(raw.contract_number);
-  const debtorNumber = normalizeText(raw.debtor_number);
-  const identityNumber = normalizeText(raw.identity_number);
-  let contract = null;
-  let debtor = null;
-
-  if (contractNumber) {
-    contract = await tx.debtor_contracts.findFirst({
-      where: { no_kontrak: contractNumber, deleted_at: null },
-      select: { id: true, debtor_id: true, no_kontrak: true },
-    });
-  }
-
-  if (contract?.debtor_id) {
-    debtor = await tx.digital_debtors.findFirst({
-      where: { id: contract.debtor_id, deleted_at: null },
-      select: { id: true, debtor_number: true, identity_number: true, name: true },
-    });
-  } else if (debtorNumber || identityNumber) {
-    debtor = await tx.digital_debtors.findFirst({
-      where: {
-        deleted_at: null,
-        OR: [
-          debtorNumber ? { debtor_number: debtorNumber } : null,
-          identityNumber ? { identity_number: identityNumber } : null,
-        ].filter(Boolean),
-      },
-      select: { id: true, debtor_number: true, identity_number: true, name: true },
-    });
-  }
-
-  return { debtor, contract };
-}
-
-function normalizeRestrikStatus(value) {
-  const normalized = normalizeUpper(value) || "AKTIF";
-  return RESTRIK_STATUS_LABELS.has(normalized) ? normalized : null;
-}
-
-function buildRestrikRecordData({ jobId, row, periodMonth, debtor, contract, userId }) {
-  const raw = row.raw;
-  const status = normalizeRestrikStatus(raw.status);
-  if (!status) {
-    throw new AppError(
-      `Baris ${row.rowNumber}: status harus salah satu dari DIAJUKAN, DISETUJUI, DITOLAK, AKTIF, SELESAI.`,
-      422,
-    );
-  }
-
-  const restructuringDate = parseFlexibleDate(raw.restructuring_date);
-  if (!restructuringDate) {
-    throw new AppError(`Baris ${row.rowNumber}: tanggal_restrukturisasi tidak valid.`, 422);
-  }
-
-  const rowHash = buildRowHash(periodMonth, raw);
-  return {
-    import_job_id: jobId,
-    debtor_id: debtor?.id || null,
-    contract_id: contract?.id || null,
-    period_month: periodMonth,
-    restructuring_date: restructuringDate,
-    restructuring_type: normalizeText(raw.restructuring_type),
-    reason: normalizeText(raw.reason),
-    plafond_after: parseCurrencyNumber(raw.plafond_after),
-    outstanding_after: parseCurrencyNumber(raw.outstanding_after),
-    tenor_after: parsePositiveInt(raw.tenor_after),
-    new_due_date: parseFlexibleDate(raw.new_due_date),
-    collectibility_before: normalizeText(raw.collectibility_before),
-    collectibility_after: normalizeText(raw.collectibility_after),
-    status,
-    description: normalizeText(raw.description),
-    raw_data: raw,
-    row_hash: rowHash,
-    created_by: userId || null,
-    updated_by: userId || null,
-    deleted_at: null,
-    deleted_by: null,
-  };
-}
-
-async function processRestrikRows(tx, { jobId, rows, periodMonth, userId }) {
-  const imported = [];
-  const errors = [];
-
-  for (const row of rows) {
-    try {
-      const contractNumber = normalizeText(row.raw.contract_number);
-      if (!contractNumber) {
-        throw new AppError(`Baris ${row.rowNumber}: no_rekening_fasilitas/no_kontrak wajib diisi.`, 422);
-      }
-
-      const { debtor, contract } = await resolveRestrikRowTargets(tx, row.raw);
-      if (!contract) {
-        throw new AppError(`Baris ${row.rowNumber}: kontrak ${contractNumber} tidak ditemukan.`, 422);
-      }
-
-      const data = buildRestrikRecordData({
-        jobId,
-        row,
-        periodMonth,
-        debtor,
-        contract,
-        userId,
-      });
-
-      const saved = await tx.debtor_restructuring_records.upsert({
-        where: {
-          period_month_row_hash: {
-            period_month: periodMonth,
-            row_hash: data.row_hash,
-          },
-        },
-        create: data,
-        update: {
-          ...data,
-          updated_by: userId || null,
-        },
-      });
-      imported.push(saved);
-    } catch (error) {
-      errors.push({
-        row_number: row.rowNumber,
-        message: error.message || "Baris Restrukturisasi gagal diproses.",
-      });
-    }
-  }
-
-  return { imported, errors };
 }
 
 function readPositiveIntEnv(key, fallback) {
@@ -720,6 +2065,121 @@ exports.getAll = async ({ req, query }) => {
   };
 };
 
+exports.getPendingIdeb = async ({ req, query }) => {
+  const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
+  const where = {
+    deleted_at: null,
+    OR: [
+      { debtor_id: null },
+      {
+        import_job: {
+          is: {
+            records: {
+              some: {
+                source_type: "IDEB",
+                status: "MATCH_PENDING",
+                deleted_at: null,
+              },
+            },
+          },
+        },
+      },
+    ],
+  };
+  const [data, total] = await Promise.all([
+    repository.findPendingIdebUploads({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+      orderBy: { created_at: "desc" },
+    }),
+    repository.countPendingIdebUploads(where),
+  ]);
+
+  return {
+    data: data.map((item) => serializeIdebPendingUpload(req, item)),
+    meta: buildPaginationMeta(total, pagination),
+  };
+};
+
+exports.resolveIdeb = async ({ req, uploadId, payload, userId }) => {
+  const resolved = await repository.transaction(async (tx) => {
+    const upload = await repository.findIdebUploadById(uploadId, tx);
+    if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
+    const targets = await ensureResolveTargets(tx, payload);
+
+    await tx.debtor_ideb_uploads.update({
+      where: { id: upload.id },
+      data: {
+        debtor_id: targets.debtorId,
+        contract_id: targets.contractId,
+        updated_by: userId || null,
+      },
+    });
+
+    await tx.debtor_external_records.updateMany({
+      where: {
+        source_type: "IDEB",
+        deleted_at: null,
+        OR: [
+          upload.import_job_id ? { import_job_id: upload.import_job_id } : null,
+          upload.file_path ? { file_path: upload.file_path } : null,
+        ].filter(Boolean),
+      },
+      data: {
+        debtor_id: targets.debtorId,
+        contract_id: targets.contractId,
+        status: "MATCHED",
+        updated_by: userId || null,
+      },
+    });
+
+    return tx.debtor_ideb_uploads.findFirst({
+      where: { id: upload.id, deleted_at: null },
+      include: {
+        import_job: {
+          include: {
+            records: {
+              where: {
+                deleted_at: null,
+                source_type: "IDEB",
+              },
+            },
+          },
+        },
+        debtor: {
+          select: {
+            id: true,
+            debtor_number: true,
+            identity_number: true,
+            name: true,
+          },
+        },
+        contract: {
+          select: {
+            id: true,
+            debtor_id: true,
+            no_kontrak: true,
+            status: true,
+          },
+        },
+      },
+    });
+  });
+
+  return serializeIdebPendingUpload(req, resolved);
+};
+
+exports.getIdebResumePdf = async ({ uploadId }) => {
+  const upload = await repository.findIdebUploadById(uploadId);
+  if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
+  if (!upload.result_summary || typeof upload.result_summary !== "object") {
+    throw new AppError("Ringkasan hasil IDEB belum tersedia.", 422);
+  }
+
+  return renderIdebResumePdf(upload);
+};
+
 exports.createJob = async ({ req, type, payload, userId }) => {
   const normalizedType = String(type || "").trim().toUpperCase();
   if (!IMPORT_TYPES.has(normalizedType)) {
@@ -735,8 +2195,6 @@ exports.createJob = async ({ req, type, payload, userId }) => {
   const primaryFile = fileMetas[0];
   const idebRaw = normalizedType === "IDEB" ? parseIdebJsonFile(primaryFile) : null;
   const idebSummary = idebRaw ? normalizeIdebSummary(idebRaw) : null;
-  const restrikRows =
-    normalizedType === "RESTRIK" ? await readRestrikRows(primaryFile) : null;
   const resolvedPeriodMonth =
     slikMetadata?.period_month ||
     normalizeText(payload.period_month) ||
@@ -747,12 +2205,7 @@ exports.createJob = async ({ req, type, payload, userId }) => {
     const created = await tx.debtor_import_jobs.create({
       data: {
         type: normalizedType,
-        status:
-          normalizedType === "SLIK"
-            ? "PENDING"
-            : normalizedType === "RESTRIK"
-              ? "PROCESSING"
-              : "COMPLETED",
+        status: normalizedType === "SLIK" ? "PENDING" : "COMPLETED",
         import_segment: slikMetadata?.import_segment || null,
         cif_status: slikMetadata?.cif_status || null,
         period_month: resolvedPeriodMonth,
@@ -762,16 +2215,10 @@ exports.createJob = async ({ req, type, payload, userId }) => {
         size_bytes: primaryFile.size_bytes,
         checksum: primaryFile.checksum,
         files: fileMetas,
-        total_rows:
-          normalizedType === "IDEB"
-            ? 1
-            : normalizedType === "RESTRIK"
-              ? restrikRows.length
-              : payload.total_rows || 0,
+        total_rows: normalizedType === "IDEB" ? 1 : payload.total_rows || 0,
         success_rows: normalizedType === "IDEB" ? 1 : 0,
         failed_rows: 0,
-        completed_at:
-          normalizedType === "SLIK" || normalizedType === "RESTRIK" ? null : new Date(),
+        completed_at: normalizedType === "SLIK" ? null : new Date(),
         created_by: userId || null,
       },
     });
@@ -788,7 +2235,7 @@ exports.createJob = async ({ req, type, payload, userId }) => {
           period_month: resolvedPeriodMonth,
           raw_reference: normalizeText(payload.raw_reference),
           summary: {
-            format: "IDEB_JSON",
+            format: idebSummary.source_format || "IDEB_JSON",
             raw: idebRaw,
             parsed: idebSummary,
           },
@@ -802,6 +2249,7 @@ exports.createJob = async ({ req, type, payload, userId }) => {
       });
       await tx.debtor_ideb_uploads.create({
         data: {
+          import_job_id: created.id,
           debtor_id: targets.debtorId,
           contract_id: targets.contractId,
           month: period.month,
@@ -818,60 +2266,6 @@ exports.createJob = async ({ req, type, payload, userId }) => {
           checksum: primaryFile.checksum,
           uploaded_by: userId || null,
           created_by: userId || null,
-        },
-      });
-    }
-
-    if (normalizedType === "RESTRIK") {
-      const result = await processRestrikRows(tx, {
-        jobId: created.id,
-        rows: restrikRows,
-        periodMonth: resolvedPeriodMonth,
-        userId,
-      });
-      const successRows = result.imported.length;
-      const failedRows = result.errors.length;
-      const status =
-        successRows > 0
-          ? failedRows > 0
-            ? "COMPLETED_WITH_ERRORS"
-            : "COMPLETED"
-          : "FAILED";
-      const summary = {
-        format: "RESTRIK_XLSX_CSV",
-        total_rows: restrikRows.length,
-        success_rows: successRows,
-        failed_rows: failedRows,
-        error_samples: result.errors.slice(0, 20),
-      };
-
-      await tx.debtor_external_records.create({
-        data: {
-          import_job_id: created.id,
-          source_type: normalizedType,
-          period_month: resolvedPeriodMonth,
-          raw_reference: normalizeText(payload.raw_reference),
-          summary,
-          file_path: primaryFile.file_path,
-          file_name: primaryFile.file_name,
-          mime_type: primaryFile.mime_type,
-          size_bytes: primaryFile.size_bytes,
-          status,
-          created_by: userId || null,
-        },
-      });
-
-      await tx.debtor_import_jobs.update({
-        where: { id: created.id },
-        data: {
-          status,
-          total_rows: restrikRows.length,
-          success_rows: successRows,
-          failed_rows: failedRows,
-          error_summary: result.errors.length > 0 ? result.errors.slice(0, 20) : undefined,
-          processing_summary: summary,
-          completed_at: new Date(),
-          updated_by: userId || null,
         },
       });
     }

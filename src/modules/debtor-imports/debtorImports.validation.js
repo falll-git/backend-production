@@ -28,16 +28,9 @@ exports.importJobSchema = Joi.object({
 
 exports.idebImportJobSchema = exports.importJobSchema;
 
-exports.restrikImportJobSchema = exports.importJobSchema.keys({
-  period_month: Joi.string()
-    .trim()
-    .pattern(/^\d{4}-(0[1-9]|1[0-2])$/)
-    .required()
-    .messages({
-      "any.required": "Periode Data wajib dipilih untuk Import Restrukturisasi.",
-      "string.empty": "Periode Data wajib dipilih untuk Import Restrukturisasi.",
-      "string.pattern.base": "Format Periode Data harus YYYY-MM.",
-    }),
+exports.resolveIdebSchema = Joi.object({
+  debtor_id: uuid.required(),
+  contract_id: optionalUuid.optional(),
 });
 
 exports.slikImportJobSchema = Joi.object({
