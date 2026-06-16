@@ -336,6 +336,34 @@ exports.findFacilityRows = ({ where, skip, take, orderBy }) =>
     include: CONTRACT_REPORT_INCLUDE,
   });
 
+exports.findContractsByFacilityNumbers = (facilityNumbers = [], extraWhere = {}) => {
+  const values = [...new Set(facilityNumbers.filter(Boolean))];
+  if (values.length === 0) return Promise.resolve([]);
+
+  return prisma.debtor_contracts.findMany({
+    where: {
+      AND: [
+        extraWhere,
+        {
+          deleted_at: null,
+          OR: [
+            { no_kontrak: { in: values } },
+            {
+              slik_snapshots: {
+                some: {
+                  deleted_at: null,
+                  facility_number: { in: values },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
+    include: CONTRACT_REPORT_INCLUDE,
+  });
+};
+
 exports.countFacilityRows = (where = {}) =>
   prisma.debtor_contracts.count({ where });
 
@@ -391,6 +419,30 @@ exports.findFacilitiesWithoutCollaterals = (where = {}) =>
     },
     include: CONTRACT_REPORT_INCLUDE,
   });
+
+exports.findCollateralsByFacilityNumbers = (facilityNumbers = [], extraWhere = {}) => {
+  const values = [...new Set(facilityNumbers.filter(Boolean))];
+  if (values.length === 0) return Promise.resolve([]);
+
+  return prisma.debtor_collaterals.findMany({
+    where: {
+      AND: [
+        extraWhere,
+        {
+          deleted_at: null,
+          facility_number: { in: values },
+        },
+      ],
+    },
+    select: {
+      id: true,
+      facility_number: true,
+      debtor_id: true,
+      contract_id: true,
+      collateral_number: true,
+    },
+  });
+};
 
 exports.findFacilitiesWithoutSlikPeriod = (where = {}) =>
   prisma.debtor_contracts.findMany({

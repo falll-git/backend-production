@@ -44,6 +44,7 @@ const URLS = {
   correspondencePrint: "/dashboard/manajemen-surat/cetak-dokumen",
 
   debtorReport: "/dashboard/informasi-debitur/laporan",
+  debtorIdebReport: "/dashboard/informasi-debitur/laporan-ideb",
   debtorList: "/dashboard/informasi-debitur",
   debtorMaster: "/dashboard/informasi-debitur/master-debitur",
   debtorActionPlan: "/dashboard/informasi-debitur/marketing/action-plan",
@@ -97,7 +98,6 @@ const URLS = {
   documentChecklist: "/dashboard/parameter/checklist-dokumen",
   financingProduct: "/dashboard/parameter/produk-pembiayaan",
   contractType: "/dashboard/parameter/jenis-akad",
-  collectibility: "/dashboard/parameter/kolektibilitas",
   branch: "/dashboard/parameter/cabang",
   collateralType: "/dashboard/parameter/jenis-agunan",
   depositType: "/dashboard/parameter/jenis-titipan",
@@ -122,7 +122,6 @@ const EXTENDED_PARAMETER_URLS = [
   URLS.documentChecklist,
   URLS.financingProduct,
   URLS.contractType,
-  URLS.collectibility,
   URLS.branch,
   URLS.collateralType,
   URLS.depositType,
@@ -139,6 +138,7 @@ const DEBTOR_IMPORT_URLS = [
   URLS.debtorUploadIdeb,
 ];
 const DEBTOR_REPORT_URLS = [
+  URLS.debtorIdebReport,
   URLS.debtorReport,
   URLS.debtorReportNpf,
   URLS.debtorReportMarketingActivity,

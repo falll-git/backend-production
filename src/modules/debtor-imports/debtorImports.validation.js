@@ -26,7 +26,24 @@ exports.importJobSchema = Joi.object({
   total_rows: Joi.number().integer().min(0).optional(),
 });
 
-exports.idebImportJobSchema = exports.importJobSchema;
+exports.idebImportJobSchema = Joi.object({
+  file: fileSchema.optional(),
+  files: Joi.array().items(fileSchema).min(1).max(20).optional(),
+  debtor_id: optionalUuid.optional(),
+  contract_id: optionalUuid.optional(),
+  period_month: Joi.string()
+    .trim()
+    .pattern(/^\d{4}-(0[1-9]|1[0-2])$/)
+    .allow("", null)
+    .optional(),
+  raw_reference: Joi.string().trim().allow("", null).optional(),
+  summary: Joi.alternatives().try(Joi.object(), Joi.array()).optional(),
+  total_rows: Joi.number().integer().min(0).optional(),
+})
+  .or("file", "files")
+  .messages({
+    "object.missing": "File IDEB wajib diunggah.",
+  });
 
 exports.resolveIdebSchema = Joi.object({
   debtor_id: uuid.required(),

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const repository = require("./debtorImports.repository");
 const { AppError } = require("../../utils/errors");
@@ -36,6 +37,13 @@ const DEFAULT_SLIK_IMPORT_MAX_ERROR_SAMPLES = 50;
 const SLIK_IMPORT_TRANSACTION_OPTIONS = {
   maxWait: 10000,
   timeout: 120000,
+};
+const FIXED_COLLECTIBILITY_LEVELS = {
+  1: { code: "KOL_1", name: "Lancar", is_npf: false },
+  2: { code: "KOL_2", name: "Dalam Perhatian Khusus", is_npf: false },
+  3: { code: "KOL_3", name: "Kurang Lancar", is_npf: true },
+  4: { code: "KOL_4", name: "Diragukan", is_npf: true },
+  5: { code: "KOL_5", name: "Macet", is_npf: true },
 };
 
 function serializeJob(req, job) {
@@ -90,6 +98,8 @@ function serializeIdebPendingUpload(req, item) {
     debtor_name: resultSummary.debtor_name || null,
     identity_number: resultSummary.identity_number || null,
     contract_number: resultSummary.contract_number || null,
+    report_number: resultSummary.report_number || null,
+    reference_number: resultSummary.reference_number || null,
     source_format: resultSummary.source_format || "IDEB_JSON",
     current_collectibility: resultSummary.current_collectibility || null,
     outstanding_pokok: Number(resultSummary.outstanding_pokok || 0),
@@ -101,8 +111,56 @@ function serializeIdebPendingUpload(req, item) {
       entityId: item.id,
       fallbackBaseName: "ideb",
     }),
+    files: Array.isArray(item.files)
+      ? item.files.map((file) => ({
+          id: file.id,
+          part_number: file.part_number,
+          total_parts: file.total_parts,
+          file: serializeFile(req, file, {
+            module: "debtor_information",
+            entityId: file.id,
+            fallbackBaseName: `ideb-part-${file.part_number || 1}`,
+          }),
+          created_at: file.created_at,
+        }))
+      : [],
     created_at: item.created_at,
     updated_at: item.updated_at,
+  };
+}
+
+function serializeIdebReportUpload(req, item) {
+  const base = serializeIdebPendingUpload(req, item);
+  const summary =
+    item.result_summary && typeof item.result_summary === "object" && !Array.isArray(item.result_summary)
+      ? item.result_summary
+      : {};
+  const metrics = getIdebResumeMetrics(summary);
+  const totalParts =
+    parseCurrencyNumber(summary.total_parts) ||
+    Math.max(...(Array.isArray(item.files) ? item.files.map((file) => file.total_parts || 1) : [1]));
+  const receivedParts =
+    parseCurrencyNumber(summary.received_parts) ||
+    (Array.isArray(item.files) && item.files.length > 0 ? item.files.length : 1);
+
+  return {
+    ...base,
+    link_status: item.debtor_id ? "TERHUBUNG" : "BELUM_TERHUBUNG",
+    result_date: summary.result_date || summary.processed_at || null,
+    reporter_count: metrics.reporterCount,
+    facilities_count: metrics.facilities.length,
+    active_facilities_count: metrics.activeFacilities.length,
+    paid_off_facilities_count: metrics.paidOffFacilities.length,
+    active_outstanding: metrics.activeOutstanding,
+    paid_off_plafond: metrics.paidOffPlafond,
+    total_plafond: metrics.totalPlafond,
+    total_outstanding: metrics.totalOutstanding,
+    total_arrears: metrics.totalArrears,
+    worst_collectibility: metrics.worstCollectibility,
+    officer_name: metrics.officerName,
+    total_parts: totalParts || 1,
+    received_parts: receivedParts || 1,
+    part_display: `${receivedParts || 1}/${totalParts || 1}`,
   };
 }
 
@@ -260,6 +318,232 @@ function parseIdebJsonFile(fileMeta) {
       422,
     );
   }
+}
+
+function getOjkIdebPartInfo(raw, fileMeta = {}) {
+  const header = asObject(raw?.header) || {};
+  const individual = asObject(raw?.individual) || {};
+  const searchParameter = asObject(individual.parameterPencarian) || {};
+  const debtorProfile = getFirstObject(individual.dataPokokDebitur);
+  const totalParts = parseCurrencyNumber(header.totalBagian) || 1;
+  const partNumber = parseCurrencyNumber(header.nomorBagian) || 1;
+
+  return {
+    request_id: normalizeText(header.idPermintaan),
+    report_number: normalizeText(individual.nomorLaporan),
+    identity_number:
+      normalizeText(debtorProfile.noIdentitas) ||
+      normalizeText(searchParameter.noIdentitas),
+    result_date: normalizeText(header.tanggalHasil),
+    reference_number: normalizeText(header.kodeReferensiPengguna),
+    total_parts: totalParts > 0 ? totalParts : 1,
+    part_number: partNumber > 0 ? partNumber : 1,
+    file_name: fileMeta.file_name || fileMeta.name || null,
+    file_path: fileMeta.file_path || null,
+    mime_type: fileMeta.mime_type || null,
+    size_bytes: fileMeta.size_bytes || null,
+    checksum: fileMeta.checksum || null,
+  };
+}
+
+function idebPartGroupKey(part) {
+  return [
+    part.request_id,
+    part.report_number,
+    part.identity_number,
+    part.result_date,
+  ].join("|");
+}
+
+function readOjkCreditFacilities(raw) {
+  const individual = asObject(raw?.individual) || {};
+  const facilitiesRoot = asObject(individual.fasilitas) || {};
+  return asArray(
+    readObjectValue(facilitiesRoot, [
+      "kreditPembiayan",
+      "kreditPembiayaan",
+      "facilities",
+    ]),
+  ).filter((item) => asObject(item));
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeOjkIdebParts(parts) {
+  if (parts.length === 0) throw new AppError("File IDEB wajib diunggah.", 422);
+
+  const first = parts[0].part;
+  const groupKey = idebPartGroupKey(first);
+  const hasDifferentGroup = parts.some((item) => idebPartGroupKey(item.part) !== groupKey);
+  if (hasDifferentGroup) {
+    throw new AppError(
+      "Semua bagian IDEB harus berasal dari satu hasil pengecekan yang sama.",
+      422,
+    );
+  }
+
+  const hasDifferentTotalParts = parts.some(
+    (item) => (item.part.total_parts || 1) !== (first.total_parts || 1),
+  );
+  if (hasDifferentTotalParts) {
+    throw new AppError("Total bagian IDEB tidak konsisten antar file yang diunggah.", 422);
+  }
+
+  const totalParts = first.total_parts || 1;
+  const partNumbers = parts.map((item) => item.part.part_number);
+  const invalidPartNumbers = partNumbers.filter(
+    (partNumber) => partNumber < 1 || partNumber > totalParts,
+  );
+  if (invalidPartNumbers.length > 0) {
+    throw new AppError(
+      `Nomor bagian IDEB tidak valid: ${invalidPartNumbers.join(", ")}.`,
+      422,
+    );
+  }
+  const uniquePartNumbers = new Set(partNumbers);
+  if (uniquePartNumbers.size !== partNumbers.length) {
+    throw new AppError("Nomor bagian file IDEB tidak boleh duplikat.", 422);
+  }
+
+  const expectedParts = Array.from({ length: totalParts }, (_, index) => index + 1);
+  const missingParts = expectedParts.filter((partNumber) => !uniquePartNumbers.has(partNumber));
+  if (missingParts.length > 0) {
+    throw new AppError(
+      `File IDEB belum lengkap. Bagian yang kurang: ${missingParts.join(", ")}.`,
+      422,
+    );
+  }
+
+  if (parts.length > totalParts) {
+    throw new AppError("Jumlah file IDEB melebihi total bagian yang tercatat.", 422);
+  }
+
+  const sortedParts = [...parts].sort(
+    (left, right) => left.part.part_number - right.part.part_number,
+  );
+  const merged = cloneJson(sortedParts[0].raw);
+  const mergedIndividual = asObject(merged.individual) || {};
+  const mergedFacilities = asObject(mergedIndividual.fasilitas) || {};
+  mergedIndividual.fasilitas = mergedFacilities;
+  merged.individual = mergedIndividual;
+  mergedFacilities.kreditPembiayan = sortedParts.flatMap((item) =>
+    readOjkCreditFacilities(item.raw).map((facility) => cloneJson(facility)),
+  );
+  delete mergedFacilities.kreditPembiayaan;
+  delete mergedFacilities.facilities;
+  if (merged.header && typeof merged.header === "object") {
+    merged.header.nomorBagian = "1";
+    merged.header.totalBagian = String(totalParts);
+  }
+
+  return {
+    raw: merged,
+    metadata: {
+      total_parts: totalParts,
+      received_parts: sortedParts.length,
+      part_numbers: sortedParts.map((item) => item.part.part_number),
+      source_files: sortedParts.map((item) => ({
+        part_number: item.part.part_number,
+        total_parts: item.part.total_parts,
+        file_name: item.part.file_name,
+        file_path: item.part.file_path,
+        mime_type: item.part.mime_type,
+        size_bytes: item.part.size_bytes,
+        checksum: item.part.checksum,
+      })),
+    },
+  };
+}
+
+function buildIdebImportPayload(fileMetas) {
+  const parsedFiles = fileMetas.map((fileMeta) => ({
+    fileMeta,
+    raw: parseIdebJsonFile(fileMeta),
+  }));
+  const isAllOjk = parsedFiles.every((item) => asObject(item.raw)?.individual);
+
+  if (parsedFiles.length > 1 && !isAllOjk) {
+    throw new AppError(
+      "Upload multi-file IDEB hanya didukung untuk format OJK IDEB.",
+      422,
+    );
+  }
+
+  if (isAllOjk) {
+    const parts = parsedFiles.map((item) => ({
+      ...item,
+      part: getOjkIdebPartInfo(item.raw, item.fileMeta),
+    }));
+    const totalParts = parts[0]?.part.total_parts || 1;
+    const hasMultiPart = totalParts > 1 || parts.length > 1;
+    const merged = hasMultiPart
+      ? mergeOjkIdebParts(parts)
+      : {
+          raw: parts[0].raw,
+          metadata: {
+            total_parts: 1,
+            received_parts: 1,
+            part_numbers: [1],
+            source_files: [
+              {
+                part_number: 1,
+                total_parts: 1,
+                file_name: parts[0].part.file_name,
+                file_path: parts[0].part.file_path,
+                mime_type: parts[0].part.mime_type,
+                size_bytes: parts[0].part.size_bytes,
+                checksum: parts[0].part.checksum,
+              },
+            ],
+          },
+        };
+    return {
+      raw: merged.raw,
+      summary: {
+        ...normalizeIdebSummary(merged.raw),
+        ...merged.metadata,
+      },
+      parts: parts
+        .sort((left, right) => left.part.part_number - right.part.part_number)
+        .map((item) => item.part),
+    };
+  }
+
+  const raw = parsedFiles[0].raw;
+  const fileMeta = parsedFiles[0].fileMeta;
+  return {
+    raw,
+    summary: {
+      ...normalizeIdebSummary(raw),
+      total_parts: 1,
+      received_parts: 1,
+      part_numbers: [1],
+      source_files: [
+        {
+          part_number: 1,
+          total_parts: 1,
+          file_name: fileMeta.file_name,
+          file_path: fileMeta.file_path,
+          mime_type: fileMeta.mime_type,
+          size_bytes: fileMeta.size_bytes,
+          checksum: fileMeta.checksum,
+        },
+      ],
+    },
+    parts: [
+      {
+        part_number: 1,
+        total_parts: 1,
+        file_name: fileMeta.file_name,
+        file_path: fileMeta.file_path,
+        mime_type: fileMeta.mime_type,
+        size_bytes: fileMeta.size_bytes,
+        checksum: fileMeta.checksum,
+      },
+    ],
+  };
 }
 
 function asObject(value) {
@@ -819,6 +1103,7 @@ function getIdebResumeMetrics(summary) {
     paidOffFacilities,
     reporterCount: idebReporterCount(summary, facilities),
     reporterNames: idebReporterNames(facilities),
+    officerName: normalizeText(summary?.officer_name),
     totalPlafond,
     totalOutstanding,
     activeOutstanding: activeFacilities.reduce(
@@ -925,6 +1210,7 @@ async function renderIdebResumePdf(upload) {
       : {};
   const metrics = getIdebResumeMetrics(summary);
   const monthlyHistory = idebMonthlyHistoryArray(summary);
+  const sourceFiles = Array.isArray(summary.source_files) ? summary.source_files : [];
   const collaterals = metrics.facilities.flatMap((facility) =>
     Array.isArray(facility.collaterals) ? facility.collaterals : [],
   );
@@ -941,6 +1227,8 @@ async function renderIdebResumePdf(upload) {
     border: rgb(0.86, 0.89, 0.93),
     soft: rgb(0.96, 0.98, 1),
     softGray: rgb(0.97, 0.98, 0.99),
+    panel: rgb(0.975, 0.982, 0.992),
+    accent: rgb(0.79, 0.84, 0.92),
     yellow: rgb(0.97, 0.88, 0.03),
     white: rgb(1, 1, 1),
   };
@@ -996,6 +1284,17 @@ async function renderIdebResumePdf(upload) {
       });
     });
     return lines.length * lineHeight;
+  }
+
+  function measureWrappedTextHeight(text, width, options = {}) {
+    const font = options.bold ? boldFont : regularFont;
+    const size = options.size || 8.5;
+    const lineHeight = options.lineHeight || size + 3;
+    let lines = wrapPdfText(valueOrDash(text), font, size, width);
+    if (options.maxLines && lines.length > options.maxLines) {
+      lines = lines.slice(0, options.maxLines);
+    }
+    return Math.max(lineHeight, lines.length * lineHeight);
   }
 
   function drawTextBlock(text, options = {}) {
@@ -1124,7 +1423,7 @@ async function renderIdebResumePdf(upload) {
       y: topY - height,
       width: 4,
       height,
-      color: isKol ? style.bg : colors.yellow,
+      color: isKol ? style.bg : colors.accent,
     });
     page.drawText(normalizePdfText(item.label.toUpperCase()), {
       x: x + 10,
@@ -1158,7 +1457,7 @@ async function renderIdebResumePdf(upload) {
     const gap = 8;
     const columns = 4;
     const cardWidth = (contentWidth - gap * (columns - 1)) / columns;
-    const cardHeight = 62;
+    const cardHeight = 76;
     const rows = Math.ceil(items.length / columns);
     ensureSpace(rows * cardHeight + (rows - 1) * gap + 8);
     const startY = y;
@@ -1173,7 +1472,7 @@ async function renderIdebResumePdf(upload) {
         cardHeight,
       );
     });
-    y -= rows * cardHeight + (rows - 1) * gap + 14;
+    y -= rows * cardHeight + (rows - 1) * gap + 18;
   }
 
   function drawInfoCell(item, x, topY, width, height) {
@@ -1332,8 +1631,15 @@ async function renderIdebResumePdf(upload) {
           });
         }
         if (column.type === "kol") {
-          drawKolBadge(row[column.key], x + 4, y - 17, column.width - 8);
+          if (!row.__isTotal) {
+            drawKolBadge(row[column.key], x + 4, y - 17, column.width - 8);
+          }
         } else {
+          const cellValue = row[column.key];
+          if (row.__isTotal && (cellValue === "" || cellValue === null || cellValue === undefined)) {
+            x += column.width;
+            return;
+          }
           const lineOptions = {
             size: fontSize,
             lineHeight,
@@ -1342,7 +1648,7 @@ async function renderIdebResumePdf(upload) {
             color: colors.navy,
             align: column.align,
           };
-          drawWrappedTextAt(row[column.key], x + 4, y - 11, column.width - 8, lineOptions);
+          drawWrappedTextAt(cellValue, x + 4, y - 11, column.width - 8, lineOptions);
         }
         x += column.width;
       });
@@ -1458,14 +1764,14 @@ async function renderIdebResumePdf(upload) {
     }
     drawTable(
       [
-        { key: "reporter", header: "Pelapor", width: 120, bold: true, maxLines: 3 },
-        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 128, maxLines: 3 },
-        { key: "akadDate", header: "Tanggal Akad", width: 74, maxLines: 2 },
-        { key: "plafond", header: "Plafon Awal", width: 82, align: "right", maxLines: 2 },
-        { key: "outstanding", header: "Baki Debet Saat Ini", width: 86, align: "right", maxLines: 2 },
-        { key: "kol", header: "Kolektibilitas", width: 78, type: "kol" },
-        { key: "arrears", header: "Tunggakan", width: 78, align: "right", maxLines: 2 },
-        { key: "collateral", header: "Jaminan / Agunan", width: 123, maxLines: 3 },
+        { key: "reporter", header: "Pelapor", width: 110, bold: true, maxLines: 3 },
+        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 166, maxLines: 3 },
+        { key: "akadDate", header: "Tanggal Akad", width: 68, maxLines: 2 },
+        { key: "plafond", header: "Plafon Awal", width: 76, align: "right", maxLines: 2 },
+        { key: "outstanding", header: "Baki Debet Saat Ini", width: 82, align: "right", maxLines: 2 },
+        { key: "kol", header: "Kolektibilitas", width: 72, type: "kol" },
+        { key: "arrears", header: "Tunggakan", width: 74, align: "right", maxLines: 2 },
+        { key: "collateral", header: "Jaminan / Agunan", width: 121, maxLines: 3 },
       ],
       rows,
       {
@@ -1476,7 +1782,54 @@ async function renderIdebResumePdf(upload) {
     );
   }
 
-  function drawReviewPanel(title, items, x, topY, width, height) {
+  function drawReviewPanel(title, items, x, topY, width) {
+    const innerPaddingX = 11;
+    const contentTopGap = 42;
+    const bottomPadding = 12;
+    const gap = 12;
+    const columns = 2;
+    const innerWidth = width - innerPaddingX * 2;
+    const columnWidth = (innerWidth - gap) / columns;
+    const rows = [];
+
+    for (let index = 0; index < items.length; ) {
+      const first = items[index];
+      if (first.fullWidth) {
+        rows.push([{ ...first, __width: innerWidth }]);
+        index += 1;
+        continue;
+      }
+
+      rows.push(
+        items.slice(index, index + columns).map((item) => ({
+          ...item,
+          __width: columnWidth,
+        })),
+      );
+      index += columns;
+    }
+
+    const rowHeights = rows.map((rowItems) =>
+      Math.max(
+        23,
+        ...rowItems.map((item) => {
+          const maxLines = item.maxLines || (item.fullWidth ? 4 : 2);
+          const valueHeight = measureWrappedTextHeight(item.value, item.__width, {
+            size: 7.4,
+            bold: Boolean(item.bold),
+            maxLines,
+            lineHeight: 8.8,
+          });
+          return 12 + valueHeight;
+        }),
+      ),
+    );
+    const height =
+      contentTopGap +
+      rowHeights.reduce((sum, rowHeight) => sum + rowHeight, 0) +
+      Math.max(0, rowHeights.length - 1) * 8 +
+      bottomPadding;
+
     page.drawRectangle({
       x,
       y: topY - height,
@@ -1501,39 +1854,64 @@ async function renderIdebResumePdf(upload) {
       color: colors.navy,
     });
 
-    const columns = 2;
-    const gap = 12;
-    const columnWidth = (width - 22 - gap) / columns;
-    const startY = topY - 42;
-    items.forEach((item, index) => {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      const cellX = x + 11 + column * (columnWidth + gap);
-      const cellY = startY - row * 27;
-      page.drawText(normalizePdfText(item.label.toUpperCase()), {
-        x: cellX,
-        y: cellY,
-        size: 5.8,
-        font: boldFont,
-        color: colors.muted,
+    let cursorY = topY - contentTopGap;
+    rows.forEach((rowItems, rowIndex) => {
+      rowItems.forEach((item, itemIndex) => {
+        const cellWidth = item.__width;
+        const cellX =
+          x + innerPaddingX + (rowItems.length === 1 ? 0 : itemIndex * (columnWidth + gap));
+        page.drawText(normalizePdfText(item.label.toUpperCase()), {
+          x: cellX,
+          y: cursorY,
+          size: 5.8,
+          font: boldFont,
+          color: colors.muted,
+        });
+        drawWrappedTextAt(item.value, cellX, cursorY - 11, cellWidth, {
+          size: 7.4,
+          bold: Boolean(item.bold),
+          maxLines: item.maxLines || (item.fullWidth ? 4 : 2),
+          lineHeight: 8.8,
+          color: colors.navy,
+        });
       });
-      drawWrappedTextAt(item.value, cellX, cellY - 11, columnWidth, {
-        size: 7.4,
-        bold: Boolean(item.bold),
-        maxLines: item.maxLines || 2,
-        lineHeight: 8.8,
-        color: colors.navy,
-      });
+      cursorY -= rowHeights[rowIndex] + 8;
     });
+
+    return height;
   }
 
   function drawHeaderBand(title, subtitle, metaLines = []) {
+    const subtitleWidth = 430;
+    const metaWidth = 238;
+    const metaPaddingX = 10;
+    const metaPaddingY = 9;
+    const metaLineGap = 5;
+    const subtitleHeight = measureWrappedTextHeight(subtitle, subtitleWidth, {
+      size: 8.2,
+      bold: true,
+      maxLines: 2,
+      lineHeight: 10.5,
+    });
+    const metaLineHeights = metaLines.map((line, index) =>
+      measureWrappedTextHeight(line, metaWidth - metaPaddingX * 2, {
+        size: index === 0 ? 7.3 : 6.8,
+        bold: index === 0,
+        maxLines: 2,
+        lineHeight: index === 0 ? 9.5 : 9,
+      }),
+    );
+    const metaContentHeight =
+      metaLineHeights.reduce((sum, height) => sum + height, 0) +
+      Math.max(0, metaLineHeights.length - 1) * metaLineGap;
+    const metaPanelHeight = metaPaddingY * 2 + metaContentHeight;
+    const bandHeight = Math.max(106, 34 + Math.max(subtitleHeight, metaPanelHeight) + 18);
     page.drawRectangle({
       x: 0,
-      y: pageHeight - 76,
+      y: pageHeight - bandHeight,
       width: pageWidth,
-      height: 76,
-      color: rgb(0.975, 0.985, 1),
+      height: bandHeight,
+      color: rgb(0.978, 0.986, 0.996),
     });
     page.drawRectangle({
       x: margin,
@@ -1552,19 +1930,32 @@ async function renderIdebResumePdf(upload) {
     drawWrappedTextAt(subtitle, margin, pageHeight - margin - 48, 410, {
       size: 8.2,
       bold: true,
-      maxLines: 1,
+      maxLines: 2,
       color: colors.slate,
     });
-    const metaX = pageWidth - margin - 235;
+    const metaX = pageWidth - margin - metaWidth;
+    const metaTopY = pageHeight - margin - 10;
+    page.drawRectangle({
+      x: metaX,
+      y: metaTopY - metaPanelHeight,
+      width: metaWidth,
+      height: metaPanelHeight,
+      color: colors.panel,
+      borderColor: colors.border,
+      borderWidth: 0.7,
+    });
+    let metaCursorY = metaTopY - metaPaddingY;
     metaLines.forEach((line, index) => {
-      drawWrappedTextAt(line, metaX, pageHeight - margin - 24 - index * 13, 235, {
+      const consumedHeight = drawWrappedTextAt(line, metaX + metaPaddingX, metaCursorY, metaWidth - metaPaddingX * 2, {
         size: index === 0 ? 7.3 : 6.8,
         bold: index === 0,
-        maxLines: 1,
+        maxLines: 2,
+        lineHeight: index === 0 ? 9.5 : 9,
         color: index === 0 ? colors.navy : colors.slate,
       });
+      metaCursorY -= consumedHeight + metaLineGap;
     });
-    y = pageHeight - 95;
+    y = pageHeight - bandHeight - 18;
   }
 
   function shortPeriod(value) {
@@ -1577,24 +1968,19 @@ async function renderIdebResumePdf(upload) {
     return `${month} ${match[1].slice(2)}`;
   }
 
+  function formatFileBytes(value) {
+    const size = parseCurrencyNumber(value);
+    if (!size || size <= 0) return "-";
+    if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+    if (size >= 1024) return `${(size / 1024).toFixed(size >= 100 * 1024 ? 0 : 1)} KB`;
+    return `${Math.round(size)} B`;
+  }
+
   function drawHistoryMatrix(history) {
-    const hasValue = history.some(
-      (entry) =>
-        normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
-        normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
-    );
     if (history.length === 0) {
       drawNoteBox("Histori KOL", "Belum ada histori KOL bulanan di hasil IDEB ini.", {
         color: colors.softGray,
       });
-      return;
-    }
-    if (!hasValue) {
-      drawNoteBox(
-        "Histori KOL",
-        `Histori periode tersedia ${formatIdebNumber(history.length)} bulan, tetapi nilai KOL/DPD tidak tercatat pada file IDEB ini.`,
-        { color: colors.softGray },
-      );
       return;
     }
 
@@ -1608,14 +1994,38 @@ async function renderIdebResumePdf(upload) {
       groups.get(key).push(entry);
     });
 
-    for (const [label, entries] of groups.entries()) {
-      entries.sort((left, right) => {
+    const meaningfulGroups = Array.from(groups.entries()).filter(([, entries]) =>
+      entries.some(
+        (entry) =>
+          normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
+          normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
+      ),
+    );
+
+    if (meaningfulGroups.length === 0) {
+      drawNoteBox(
+        "Histori KOL",
+        `Histori periode tersedia ${formatIdebNumber(history.length)} bulan, tetapi nilai KOL/DPD tidak tercatat pada file IDEB ini.`,
+        { color: colors.softGray },
+      );
+      return;
+    }
+
+    for (const [label, entries] of meaningfulGroups) {
+      const meaningfulEntries = entries
+        .filter(
+          (entry) =>
+            normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
+            normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
+        )
+        .sort((left, right) => {
         const leftIndex = parseCurrencyNumber(recordValue(left, ["month_index"])) || 0;
         const rightIndex = parseCurrencyNumber(recordValue(right, ["month_index"])) || 0;
         return leftIndex - rightIndex;
       });
-      for (let start = 0; start < entries.length; start += 12) {
-        const chunk = entries.slice(start, start + 12);
+
+      for (let start = 0; start < meaningfulEntries.length; start += 12) {
+        const chunk = meaningfulEntries.slice(start, start + 12);
         const labelWidth = 150;
         const cellWidth = (contentWidth - labelWidth) / 12;
         const headerHeight = 18;
@@ -1736,7 +2146,7 @@ async function renderIdebResumePdf(upload) {
   const comparisonText =
     upload.debtor_id || upload.contract_id
       ? `Terhubung ke data internal: ${valueOrDash(upload?.debtor?.name || upload.debtor_id)}${
-          upload?.contract?.no_kontrak ? `, fasilitas ${upload.contract.no_kontrak}` : ""
+          upload?.contract?.no_kontrak ? `, kontrak ${upload.contract.no_kontrak}` : ""
         }. Perbandingan rinci tetap tersedia di modal Hasil IDEB pada aplikasi.`
       : "Belum terhubung ke debitur internal, sehingga perbandingan F01 internal belum tersedia.";
   const writeOffFacilities = metrics.facilities.filter(isWriteOffFacility);
@@ -1758,6 +2168,7 @@ async function renderIdebResumePdf(upload) {
     `Tanggal IDEB: ${latestIdebDate}`,
     `Petugas: ${valueOrDash(summary.officer_name)}`,
     `No Laporan: ${valueOrDash(summary.report_number)}`,
+    `Bagian: ${formatIdebNumber(summary.received_parts || sourceFiles.length || 1)}/${formatIdebNumber(summary.total_parts || sourceFiles.length || 1)}`,
     `Referensi: ${valueOrDash(summary.reference_number)}`,
   ]);
 
@@ -1795,25 +2206,23 @@ async function renderIdebResumePdf(upload) {
   const panelTop = y;
   const panelGap = 10;
   const panelWidth = (contentWidth - panelGap) / 2;
-  const panelHeight = 116;
-  drawReviewPanel(
+  const profilePanelHeight = drawReviewPanel(
     "PROFIL POKOK DEBITUR",
     [
       { label: "Nama Lengkap", value: debtorName, bold: true },
       { label: "Sektor Usaha", value: recordValue(identity, ["business_field", "business_field_code"]) },
       { label: "Tempat / Tanggal Lahir", value: birthText },
-      { label: "Alamat Terakhir", value: idebAddressText(identity), maxLines: 2 },
       { label: "Pekerjaan Utama", value: recordValue(identity, ["occupation", "occupation_code", "workplace"]) },
       { label: "Nomor Telp", value: idebContactText(identity) },
       { label: "NIK", value: identityNumber, bold: true },
       { label: "Jenis Kelamin", value: recordValue(identity, ["gender"]) },
+      { label: "Alamat Terakhir", value: idebAddressText(identity), maxLines: 4, fullWidth: true },
     ],
     margin,
     panelTop,
     panelWidth,
-    panelHeight,
   );
-  drawReviewPanel(
+  const resumePanelHeight = drawReviewPanel(
     "RESUME HASIL IDEB",
     [
       { label: "Tanggal Pengecekan IDEB", value: latestIdebDate },
@@ -1828,9 +2237,8 @@ async function renderIdebResumePdf(upload) {
     margin + panelWidth + panelGap,
     panelTop,
     panelWidth,
-    panelHeight,
   );
-  y -= panelHeight + 14;
+  y -= Math.max(profilePanelHeight, resumePanelHeight) + 14;
 
   drawNoteBox(
     "JUMLAH LEMBAGA PEMBUAT PELAPORAN/KREDITUR",
@@ -1845,6 +2253,7 @@ async function renderIdebResumePdf(upload) {
   drawHeaderBand("DETAIL LANJUTAN IDEB", `${valueOrDash(debtorName)} | ${valueOrDash(identityNumber)}`, [
     `Tanggal IDEB: ${latestIdebDate}`,
     `Format: ${idebSourceFormatLabel(summary.source_format)}`,
+    `Bagian: ${formatIdebNumber(summary.received_parts || sourceFiles.length || 1)}/${formatIdebNumber(summary.total_parts || sourceFiles.length || 1)}`,
   ]);
 
   drawSectionTitle("PERBANDINGAN DENGAN F01 INTERNAL");
@@ -1894,17 +2303,6 @@ async function renderIdebResumePdf(upload) {
       emptyTitle: "Penjamin",
       emptyText: "Tidak ada data penjamin pada file IDEB ini.",
     },
-  );
-
-  drawSectionTitle("METADATA FILE");
-  drawInfoGrid(
-    [
-      { label: "Nomor Laporan", value: summary.report_number },
-      { label: "Nomor Referensi", value: summary.reference_number },
-      { label: "Periode Data", value: formatIdebPeriod(summary.period_month) },
-      { label: "Format Sumber", value: idebSourceFormatLabel(summary.source_format) },
-    ],
-    2,
   );
 
   drawDocumentFooter();
@@ -2102,6 +2500,88 @@ exports.getPendingIdeb = async ({ req, query }) => {
   };
 };
 
+function buildIdebReportWhere(query = {}) {
+  const clauses = [{ deleted_at: null }];
+  const linkStatus = normalizeUpper(query.link_status || query.status_link);
+  const periodMonth = normalizeText(query.period_month);
+  const search = normalizeText(query.search);
+
+  if (linkStatus === "TERHUBUNG" || linkStatus === "LINKED") {
+    clauses.push({ debtor_id: { not: null } });
+  }
+  if (linkStatus === "BELUM_TERHUBUNG" || linkStatus === "UNLINKED") {
+    clauses.push({ debtor_id: null });
+  }
+  if (periodMonth) {
+    const period = parsePeriodParts(periodMonth);
+    clauses.push({ year: period.year, month: period.month });
+  }
+  if (search) {
+    clauses.push({
+      OR: [
+        { file_name: { contains: search, mode: "insensitive" } },
+        { debtor: { is: { name: { contains: search, mode: "insensitive" } } } },
+        { debtor: { is: { identity_number: { contains: search } } } },
+        { debtor: { is: { debtor_number: { contains: search } } } },
+        {
+          result_summary: {
+            path: ["debtor_name"],
+            string_contains: search,
+            mode: "insensitive",
+          },
+        },
+        {
+          result_summary: {
+            path: ["identity_number"],
+            string_contains: search,
+          },
+        },
+        {
+          result_summary: {
+            path: ["contract_number"],
+            string_contains: search,
+            mode: "insensitive",
+          },
+        },
+        {
+          result_summary: {
+            path: ["report_number"],
+            string_contains: search,
+            mode: "insensitive",
+          },
+        },
+      ],
+    });
+  }
+
+  return { AND: clauses };
+}
+
+exports.getIdebReports = async ({ req, query }) => {
+  const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
+  const where = buildIdebReportWhere(query);
+  const [data, total] = await Promise.all([
+    repository.findIdebReports({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+      orderBy: { created_at: "desc" },
+    }),
+    repository.countIdebReports(where),
+  ]);
+
+  return {
+    data: data.map((item) => serializeIdebReportUpload(req, item)),
+    meta: buildPaginationMeta(total, pagination),
+  };
+};
+
+exports.getIdebReportDetail = async ({ req, uploadId }) => {
+  const upload = await repository.findIdebUploadById(uploadId);
+  if (!upload) throw new AppError("Laporan IDEB tidak ditemukan.", 404);
+  return serializeIdebReportUpload(req, upload);
+};
+
 exports.resolveIdeb = async ({ req, uploadId, payload, userId }) => {
   const resolved = await repository.transaction(async (tx) => {
     const upload = await repository.findIdebUploadById(uploadId, tx);
@@ -2193,8 +2673,10 @@ exports.createJob = async ({ req, type, payload, userId }) => {
   await ensureTargets(payload);
   const fileMetas = persistImportFiles(normalizedType, files);
   const primaryFile = fileMetas[0];
-  const idebRaw = normalizedType === "IDEB" ? parseIdebJsonFile(primaryFile) : null;
-  const idebSummary = idebRaw ? normalizeIdebSummary(idebRaw) : null;
+  const idebImport =
+    normalizedType === "IDEB" ? buildIdebImportPayload(fileMetas) : null;
+  const idebRaw = idebImport?.raw || null;
+  const idebSummary = idebImport?.summary || null;
   const resolvedPeriodMonth =
     slikMetadata?.period_month ||
     normalizeText(payload.period_month) ||
@@ -2215,8 +2697,12 @@ exports.createJob = async ({ req, type, payload, userId }) => {
         size_bytes: primaryFile.size_bytes,
         checksum: primaryFile.checksum,
         files: fileMetas,
-        total_rows: normalizedType === "IDEB" ? 1 : payload.total_rows || 0,
-        success_rows: normalizedType === "IDEB" ? 1 : 0,
+        total_rows:
+          normalizedType === "IDEB"
+            ? idebSummary?.received_parts || fileMetas.length
+            : payload.total_rows || 0,
+        success_rows:
+          normalizedType === "IDEB" ? idebSummary?.received_parts || fileMetas.length : 0,
         failed_rows: 0,
         completed_at: normalizedType === "SLIK" ? null : new Date(),
         created_by: userId || null,
@@ -2247,7 +2733,7 @@ exports.createJob = async ({ req, type, payload, userId }) => {
           created_by: userId || null,
         },
       });
-      await tx.debtor_ideb_uploads.create({
+      const upload = await tx.debtor_ideb_uploads.create({
         data: {
           import_job_id: created.id,
           debtor_id: targets.debtorId,
@@ -2267,6 +2753,19 @@ exports.createJob = async ({ req, type, payload, userId }) => {
           uploaded_by: userId || null,
           created_by: userId || null,
         },
+      });
+      await tx.debtor_ideb_upload_files.createMany({
+        data: (idebImport?.parts || []).map((part) => ({
+          id: crypto.randomUUID(),
+          upload_id: upload.id,
+          part_number: part.part_number || 1,
+          total_parts: part.total_parts || idebSummary.total_parts || 1,
+          file_path: part.file_path,
+          file_name: part.file_name,
+          mime_type: part.mime_type,
+          size_bytes: part.size_bytes,
+          checksum: part.checksum,
+        })),
       });
     }
 
@@ -2395,12 +2894,19 @@ async function findOrCreateCollectibility(tx, level, context = null) {
     return existing;
   }
 
-  const collectibility = await tx.collectibility_levels.create({
-    data: {
+  const fixedCollectibility =
+    FIXED_COLLECTIBILITY_LEVELS[normalizedLevel] || {
       code: `KOL_${normalizedLevel}`,
-      level: normalizedLevel,
       name: `Kolektibilitas ${normalizedLevel}`,
       is_npf: normalizedLevel >= 3,
+    };
+
+  const collectibility = await tx.collectibility_levels.create({
+    data: {
+      code: fixedCollectibility.code,
+      level: normalizedLevel,
+      name: fixedCollectibility.name,
+      is_npf: fixedCollectibility.is_npf,
       is_active: true,
     },
   });

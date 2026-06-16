@@ -4,6 +4,7 @@ const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
   uploadDomainFile,
+  uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
   uploadSlikImportFiles,
@@ -24,6 +25,7 @@ const READ_URLS = [
   "/dashboard/informasi-debitur/admin/upload-slik",
   "/dashboard/informasi-debitur/admin/monitoring-import",
   "/dashboard/informasi-debitur/admin/upload-ideb",
+  "/dashboard/informasi-debitur/laporan-ideb",
 ];
 
 function uploadAndValidate(schema = importJobSchema) {
@@ -34,6 +36,17 @@ function uploadAndValidate(schema = importJobSchema) {
       numberFields: ["total_rows"],
     }),
     validate(schema),
+  ];
+}
+
+function uploadIdebAndValidate() {
+  return [
+    uploadDomainFiles("files", 20),
+    normalizePersuratanMultipartBody({
+      jsonFields: ["summary"],
+      numberFields: ["total_rows"],
+    }),
+    validate(idebImportJobSchema),
   ];
 }
 
@@ -88,7 +101,7 @@ router.post(
   "/ideb",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-ideb", "create"),
-  ...uploadAndValidate(idebImportJobSchema),
+  ...uploadIdebAndValidate(),
   controller.createIdeb,
 );
 
