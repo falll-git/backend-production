@@ -61,11 +61,65 @@ function findPendingIdebUploads({ where, skip, take, orderBy }) {
           status: true,
         },
       },
+      files: {
+        orderBy: {
+          part_number: "asc",
+        },
+      },
     },
   });
 }
 
 function countPendingIdebUploads(where) {
+  return prisma.debtor_ideb_uploads.count({ where });
+}
+
+function findIdebReports({ where, skip, take, orderBy }) {
+  return prisma.debtor_ideb_uploads.findMany({
+    where,
+    skip,
+    take,
+    orderBy,
+    include: {
+      import_job: {
+        include: {
+          records: {
+            where: {
+              deleted_at: null,
+              source_type: "IDEB",
+            },
+            orderBy: {
+              created_at: "desc",
+            },
+          },
+        },
+      },
+      debtor: {
+        select: {
+          id: true,
+          debtor_number: true,
+          identity_number: true,
+          name: true,
+        },
+      },
+      contract: {
+        select: {
+          id: true,
+          debtor_id: true,
+          no_kontrak: true,
+          status: true,
+        },
+      },
+      files: {
+        orderBy: {
+          part_number: "asc",
+        },
+      },
+    },
+  });
+}
+
+function countIdebReports(where) {
   return prisma.debtor_ideb_uploads.count({ where });
 }
 
@@ -162,6 +216,11 @@ function findIdebUploadById(id, db = prisma) {
           status: true,
         },
       },
+      files: {
+        orderBy: {
+          part_number: "asc",
+        },
+      },
     },
   });
 }
@@ -172,6 +231,7 @@ function transaction(callback, options) {
 
 module.exports = {
   countJobs,
+  countIdebReports,
   countPendingIdebUploads,
   createExternalRecord,
   createJob,
@@ -180,6 +240,7 @@ module.exports = {
   findJobById,
   findJobs,
   findIdebUploadById,
+  findIdebReports,
   findPendingIdebUploads,
   prisma,
   transaction,

@@ -6,8 +6,6 @@ const SEND_DUE_DATE_INVALID_MESSAGE = "Format target pengiriman tidak valid.";
 const RESPONSE_DUE_DATE_INVALID_MESSAGE = "Format batas follow-up tidak valid.";
 const FILE_REQUIRED_MESSAGE = "Dokumen wajib diunggah.";
 const REQUIRED_CHANGE_MESSAGE = "Tidak ada data yang diperbarui.";
-const DELIVERY_MEDIA_VALUES = ["email", "pos", "kurir", "langsung"];
-
 const uploadedFileSchema = Joi.object({
   buffer: Joi.any().optional(),
   temp_path: Joi.string().trim().optional(),
@@ -46,11 +44,10 @@ exports.createOutgoingMailSchema = Joi.object({
   }),
   delivery_media: Joi.string()
     .trim()
-    .lowercase()
-    .valid("email", "pos", "kurir", "langsung")
+    .min(1)
+    .max(50)
     .required()
     .messages({
-      "any.only": "Media pengiriman harus email, pos, kurir, atau langsung.",
       "any.required": "Media pengiriman wajib dipilih.",
       "string.empty": "Media pengiriman wajib dipilih.",
     }),
@@ -98,22 +95,15 @@ exports.updateOutgoingMailSchema = Joi.object({
   delivery_media: Joi.string()
     .trim()
     .custom((value, helpers) => {
-      const normalized = String(value || "")
-        .trim()
-        .toLowerCase();
+      const normalized = String(value || "").trim();
 
       if (!normalized) {
         return helpers.error("string.empty");
       }
 
-      if (!DELIVERY_MEDIA_VALUES.includes(normalized)) {
-        return helpers.error("any.only");
-      }
-
       return normalized;
     })
     .messages({
-      "any.only": "Media pengiriman harus email, pos, kurir, atau langsung.",
       "string.empty": "Media pengiriman wajib dipilih.",
     }),
   name: Joi.string().trim().optional().messages({

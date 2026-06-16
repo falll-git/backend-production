@@ -292,6 +292,17 @@ async function getDebtorInformationFileMeta(payload) {
         },
       }),
     () =>
+      prisma.debtor_ideb_upload_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.debtor_marketing_activities.findFirst({
         where: {
           id: payload.entity_id,
@@ -634,6 +645,13 @@ async function debtorFileExists(payload) {
         id: payload.entity_id,
         file_path: payload.path,
         deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.debtor_ideb_upload_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
       },
       select: { id: true },
     }),

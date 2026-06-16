@@ -4,11 +4,7 @@ const {
 } = require("../_shared/parameterModule.factory");
 
 module.exports = createParameterSchemas({
-  code: Joi.string()
-    .trim()
-    .uppercase()
-    .valid("EMAIL", "POS", "KURIR", "LANGSUNG")
-    .required(),
+  code: Joi.string().trim().uppercase().min(1).max(50).required(),
   name: Joi.string().trim().min(1).max(255).required(),
   description: Joi.string().trim().allow("", null).optional(),
   is_active: Joi.boolean().default(true),

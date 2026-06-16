@@ -697,7 +697,7 @@ async function serializeIncomingMail({ req, record }) {
   };
 }
 
-async function serializeOutgoingMail({ req, record }) {
+async function serializeOutgoingMail({ req, record, deliveryMediaNames = null }) {
   const fallbackBaseName = record.mail_number || record.name || record.id;
   const fileData = await serializePersuratanFile({
     req,
@@ -716,7 +716,9 @@ async function serializeOutgoingMail({ req, record }) {
     watermark_file_size_bytes: toSizeBytesNumber(
       record.watermark_file_size_bytes,
     ),
-    delivery_media: getDeliveryMediaLabel(record.delivery_media),
+    delivery_media:
+      deliveryMediaNames?.get(record.delivery_media) ||
+      getDeliveryMediaLabel(record.delivery_media),
     delivery_media_key: record.delivery_media,
     creator: serializeUser(record.creator),
     updater: serializeUser(record.updater),

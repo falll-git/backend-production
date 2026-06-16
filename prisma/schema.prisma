@@ -115,13 +115,6 @@ enum outgoing_mail_statuses {
   INACTIVE
 }
 
-enum outgoing_mail_delivery_media {
-  EMAIL    @map("email")
-  POS      @map("pos")
-  KURIR    @map("kurir")
-  LANGSUNG @map("langsung")
-}
-
 enum disposition_statuses {
   NEW
   IN_PROGRESS
@@ -835,7 +828,7 @@ model outgoing_mails {
 
   letter_prioritie_id       String
   storage_id                String
-  delivery_media            outgoing_mail_delivery_media
+  delivery_media            String
   name                      String
   send_date                 DateTime
   send_due_date             DateTime?
@@ -1749,6 +1742,7 @@ model debtor_ideb_uploads {
   import_job debtor_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
   debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
   contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  files    debtor_ideb_upload_files[]
 
   @@index([import_job_id])
   @@index([debtor_id])
@@ -1756,6 +1750,26 @@ model debtor_ideb_uploads {
   @@index([year, month])
   @@index([status])
   @@index([deleted_at])
+}
+
+model debtor_ideb_upload_files {
+  id           String   @id @default(uuid())
+  upload_id    String
+  part_number  Int      @default(1)
+  total_parts  Int      @default(1)
+  file_path    String
+  file_name    String?
+  mime_type    String?
+  size_bytes   Int?
+  checksum     String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  upload debtor_ideb_uploads @relation(fields: [upload_id], references: [id], onDelete: Cascade)
+
+  @@unique([upload_id, part_number])
+  @@index([upload_id])
+  @@index([part_number])
 }
 
 model legal_notary_progress {

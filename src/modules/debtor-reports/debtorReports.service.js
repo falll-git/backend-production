@@ -119,6 +119,127 @@ function normalizeCompletenessIssue(value) {
   return null;
 }
 
+function normalizeFacilityKey(value) {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.toUpperCase() : null;
+}
+
+function selectReportSnapshot(slikSnapshots = [], preferredPeriodMonth = null) {
+  if (!Array.isArray(slikSnapshots) || slikSnapshots.length === 0) return null;
+  if (preferredPeriodMonth) {
+    const matched = slikSnapshots.find(
+      (item) => item && item.period_month === preferredPeriodMonth,
+    );
+    if (matched) return matched;
+  }
+  return slikSnapshots[0] || null;
+}
+
+function selectReportCollectibility(collectibilities = [], preferredPeriodMonth = null) {
+  if (!Array.isArray(collectibilities) || collectibilities.length === 0) return null;
+  if (preferredPeriodMonth) {
+    const matched = collectibilities.find(
+      (item) => item && item.period_month === preferredPeriodMonth,
+    );
+    if (matched) return matched;
+  }
+  return collectibilities[0] || null;
+}
+
+function contractDisplayContext(contract, preferredPeriodMonth = null) {
+  const latestSnapshot = selectReportSnapshot(
+    contract?.slik_snapshots,
+    preferredPeriodMonth,
+  );
+  const latestCollectibility = selectReportCollectibility(
+    contract?.collectibilities,
+    preferredPeriodMonth,
+  );
+
+  return {
+    latestSnapshot,
+    latestCollectibility,
+    effectivePeriodMonth:
+      latestSnapshot?.period_month || latestCollectibility?.period_month || null,
+  };
+}
+
+function debtorDisplayContext(contracts = [], preferredPeriodMonth = null) {
+  const mappedContracts = Array.isArray(contracts)
+    ? contracts
+        .map((contract) => ({
+          contract,
+          context: contractDisplayContext(contract, preferredPeriodMonth),
+        }))
+        .filter((item) => item.contract)
+    : [];
+
+  if (mappedContracts.length === 0) {
+    return {
+      latestContract: null,
+      latestCollectibilityDisplay: null,
+      latestPeriodMonth: null,
+    };
+  }
+
+  const preferredMatch = mappedContracts.find(
+    (item) => item.context.effectivePeriodMonth === preferredPeriodMonth,
+  );
+  const latestContract = preferredMatch?.contract || mappedContracts[0].contract;
+  const latestContext =
+    preferredMatch?.context || contractDisplayContext(latestContract, preferredPeriodMonth);
+  const latestCollectibilityDisplay =
+    latestContext.latestSnapshot?.collectibility_display ||
+    collectibilityDisplayFromRecord(latestContext.latestCollectibility);
+
+  return {
+    latestContract,
+    latestCollectibilityDisplay: latestCollectibilityDisplay || null,
+    latestPeriodMonth: latestContext.effectivePeriodMonth,
+  };
+}
+
+function buildContractMatchMap(contracts = []) {
+  const map = new Map();
+  for (const contract of contracts) {
+    const context = contractDisplayContext(contract);
+    for (const key of [contract?.no_kontrak, context.latestSnapshot?.facility_number]) {
+      const normalizedKey = normalizeFacilityKey(key);
+      if (normalizedKey && !map.has(normalizedKey)) {
+        map.set(normalizedKey, contract);
+      }
+    }
+  }
+  return map;
+}
+
+async function inferContractsByFacilityNumbers(scope, facilityNumbers = []) {
+  const values = [...new Set(facilityNumbers.map(normalizeFacilityKey).filter(Boolean))];
+  if (values.length === 0) return new Map();
+
+  const contracts = await repository.findContractsByFacilityNumbers(
+    values,
+    buildContractVisibilityWhere(scope),
+  );
+  return buildContractMatchMap(contracts);
+}
+
+function attachInferredContractToCollateralRows(rows = [], contractMatchMap = new Map()) {
+  return rows.map((row) => {
+    if (!row || row.contract_id || row.debtor_id) return row;
+    const matchedContract = contractMatchMap.get(normalizeFacilityKey(row.facility_number));
+    if (!matchedContract) return row;
+
+    return {
+      ...row,
+      debtor_id: matchedContract.debtor_id,
+      debtor: row.debtor || matchedContract.debtor || null,
+      contract_id: matchedContract.id,
+      contract: matchedContract,
+    };
+  });
+}
+
 function customerTypeLabel(value) {
   const normalized = normalizeCustomerType(value);
   return normalized ? CUSTOMER_TYPE_LABELS[normalized] || normalized : null;
@@ -363,7 +484,7 @@ function serializeDebtorSummary(debtor, aggregate = null) {
   }, SLIK_REFERENCE_FIELD_MAPPINGS.debtor);
 }
 
-function serializeContract(contract) {
+function serializeContract(contract, options = {}) {
   if (!contract) return null;
   const collectibilities = Array.isArray(contract.collectibilities)
     ? contract.collectibilities.map(serializeCollectibility).filter(Boolean)
@@ -371,6 +492,14 @@ function serializeContract(contract) {
   const slikSnapshots = Array.isArray(contract.slik_snapshots)
     ? contract.slik_snapshots.map(serializeContractSnapshot).filter(Boolean)
     : [];
+  const context = contractDisplayContext(
+    {
+      ...contract,
+      collectibilities,
+      slik_snapshots: slikSnapshots,
+    },
+    options.preferredPeriodMonth || null,
+  );
 
   return {
     id: contract.id,
@@ -399,25 +528,36 @@ function serializeContract(contract) {
     akad_type: serializeParameter(contract.akad_type),
     branch: serializeBranch(contract.branch),
     marketing_user: serializeUser(contract.marketing_user),
-    latest_collectibility: collectibilities[0] || null,
+    latest_collectibility: context.latestCollectibility || null,
     collectibilities,
-    latest_slik_snapshot: slikSnapshots[0] || null,
+    latest_slik_snapshot: context.latestSnapshot || null,
     slik_snapshots: slikSnapshots,
     created_at: contract.created_at,
     updated_at: contract.updated_at,
   };
 }
 
-function serializeDebtor(debtor, aggregate = null) {
+function serializeDebtor(debtor, aggregate = null, options = {}) {
   if (!debtor) return null;
   const contracts = Array.isArray(debtor.contracts)
-    ? debtor.contracts.map(serializeContract).filter(Boolean)
+    ? debtor.contracts
+        .map((contract) =>
+          serializeContract(contract, {
+            preferredPeriodMonth: options.preferredPeriodMonth || null,
+          }),
+        )
+        .filter(Boolean)
     : [];
-  const latestContract = contracts[0] || null;
+  const debtorContext = debtorDisplayContext(
+    contracts,
+    options.preferredPeriodMonth || null,
+  );
+  const latestContract = debtorContext.latestContract;
   const latestCollectibilityDisplay =
-    collectibilityDisplayFromCode(aggregate?.latest_collectibility_code) ||
-    latestContract?.latest_slik_snapshot?.collectibility_display ||
-    collectibilityDisplayFromRecord(latestContract?.latest_collectibility);
+    options.preferredPeriodMonth
+      ? debtorContext.latestCollectibilityDisplay
+      : collectibilityDisplayFromCode(aggregate?.latest_collectibility_code) ||
+        debtorContext.latestCollectibilityDisplay;
 
   return withSlikReferenceFields({
     id: debtor.id,
@@ -447,9 +587,9 @@ function serializeDebtor(debtor, aggregate = null) {
     documents_count: aggregate?.documents_count ?? 0,
     total_outstanding: aggregate?.total_outstanding ?? 0,
     latest_slik_period_month:
-      aggregate?.latest_slik_period_month ||
-      latestContract?.latest_slik_snapshot?.period_month ||
-      latestContract?.latest_collectibility?.period_month ||
+      (options.preferredPeriodMonth
+        ? debtorContext.latestPeriodMonth || aggregate?.latest_slik_period_month
+        : aggregate?.latest_slik_period_month || debtorContext.latestPeriodMonth) ||
       null,
     latest_collectibility_display: latestCollectibilityDisplay ?? null,
     created_at: debtor.created_at,
@@ -514,7 +654,7 @@ function serializeCompletenessIssue({
   contract = null,
   collateral = null,
   debtorAggregate = null,
-}) {
+}, options = {}) {
   const definition = COMPLETENESS_ISSUES[issue_type];
   if (!definition) return null;
   const serializedDebtor =
@@ -522,7 +662,9 @@ function serializeCompletenessIssue({
       debtor || contract?.debtor || collateral?.debtor || collateral?.contract?.debtor,
       debtorAggregate,
     );
-  const serializedContract = serializeContract(contract);
+  const serializedContract = serializeContract(contract, {
+    preferredPeriodMonth: options.preferredPeriodMonth || null,
+  });
   const serializedCollateral = serializeCollateral(collateral);
   const periodMonth =
     serializedContract?.latest_slik_snapshot?.period_month ||
@@ -1101,6 +1243,9 @@ exports.getSummary = async (_query = {}, userId = null) => {
 exports.getPortfolio = async (query = {}, userId = null) => {
   const scope = await getReportScope(userId, REPORT_URLS.portfolio);
   const where = buildDebtorReportWhere(query, scope);
+  const preferredPeriodMonth = normalizeFilter(
+    query.period_month || query.periodMonth,
+  );
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
   const [rows, total, summaryRows, contractAggregate, collateralCount] =
     await Promise.all([
@@ -1126,7 +1271,11 @@ exports.getPortfolio = async (query = {}, userId = null) => {
       collateralCount,
       scope,
     ),
-    items: rows.map((item) => serializeDebtor(item, aggregates.get(item.id))),
+    items: rows.map((item) =>
+      serializeDebtor(item, aggregates.get(item.id), {
+        preferredPeriodMonth,
+      }),
+    ),
     meta: buildReportMeta(total, pagination),
   };
 };
@@ -1134,6 +1283,9 @@ exports.getPortfolio = async (query = {}, userId = null) => {
 exports.getFacilities = async (query = {}, userId = null) => {
   const scope = await getReportScope(userId, REPORT_URLS.facilities);
   const where = buildContractReportWhere(query, scope);
+  const preferredPeriodMonth = normalizeFilter(
+    query.period_month || query.periodMonth,
+  );
   const activeWhere = {
     AND: [where, { status: { in: ACTIVE_CONTRACT_STATUSES } }],
   };
@@ -1154,7 +1306,13 @@ exports.getFacilities = async (query = {}, userId = null) => {
 
   return {
     summary: buildFacilitySummary(aggregate, collectibilityRows, activeCount, scope),
-    items: rows.map(serializeContract).filter(Boolean),
+    items: rows
+      .map((item) =>
+        serializeContract(item, {
+          preferredPeriodMonth,
+        }),
+      )
+      .filter(Boolean),
     meta: buildReportMeta(total, pagination),
   };
 };
@@ -1175,10 +1333,17 @@ exports.getCollaterals = async (query = {}, userId = null) => {
     repository.countLinkedCollateralRows(where),
     repository.countUnlinkedCollateralRows(where),
   ]);
+  const inferredContractMap = await inferContractsByFacilityNumbers(
+    scope,
+    rows
+      .filter((item) => item && !item.contract_id && !item.debtor_id)
+      .map((item) => item.facility_number),
+  );
+  const resolvedRows = attachInferredContractToCollateralRows(rows, inferredContractMap);
 
   return {
     summary: buildCollateralSummary(aggregate, linkedCount, unlinkedCount, scope),
-    items: rows.map(serializeCollateral).filter(Boolean),
+    items: resolvedRows.map(serializeCollateral).filter(Boolean),
     meta: buildReportMeta(total, pagination),
   };
 };
@@ -1186,6 +1351,9 @@ exports.getCollaterals = async (query = {}, userId = null) => {
 exports.getCompleteness = async (query = {}, userId = null) => {
   const scope = await getReportScope(userId, REPORT_URLS.completeness);
   const issueFilter = normalizeCompletenessIssue(query.issue_type || query.issueType);
+  const preferredPeriodMonth = normalizeFilter(
+    query.period_month || query.periodMonth,
+  );
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
   const completenessQuery = { ...query, status: "" };
   const debtorWhere = buildDebtorReportWhere(completenessQuery, scope);
@@ -1219,6 +1387,8 @@ exports.getCompleteness = async (query = {}, userId = null) => {
               issue_type: "REQUIRED_DOCUMENTS_INCOMPLETE",
               debtor,
               debtorAggregate: aggregate,
+            }, {
+              preferredPeriodMonth,
             });
           })
           .filter(Boolean);
@@ -1230,46 +1400,86 @@ exports.getCompleteness = async (query = {}, userId = null) => {
     tasks.push(
       repository.findDebtorsWithoutFacilities(debtorWhere).then((rows) =>
         rows.map((debtor) =>
-          serializeCompletenessIssue({
-            issue_type: "DEBTOR_WITHOUT_FACILITY",
-            debtor,
-          }),
+          serializeCompletenessIssue(
+            {
+              issue_type: "DEBTOR_WITHOUT_FACILITY",
+              debtor,
+            },
+            { preferredPeriodMonth },
+          ),
         ),
       ),
     );
   }
   if (!issueFilter || issueFilter === "FACILITY_WITHOUT_COLLATERAL") {
     tasks.push(
-      repository.findFacilitiesWithoutCollaterals(contractWhere).then((rows) =>
-        rows.map((contract) =>
-          serializeCompletenessIssue({
-            issue_type: "FACILITY_WITHOUT_COLLATERAL",
-            contract,
-          }),
-        ),
-      ),
+      repository.findFacilitiesWithoutCollaterals(contractWhere).then(async (rows) => {
+        const facilityNumbers = rows
+          .map((contract) =>
+            contractDisplayContext(contract, preferredPeriodMonth).latestSnapshot
+              ?.facility_number || null,
+          )
+          .filter(Boolean);
+        const existingCollaterals = await repository.findCollateralsByFacilityNumbers(
+          facilityNumbers,
+          {},
+        );
+        const existingByFacilityNumber = new Set(
+          existingCollaterals
+            .map((item) => normalizeFacilityKey(item.facility_number))
+            .filter(Boolean),
+        );
+
+        return rows
+          .filter((contract) => {
+            const facilityNumber =
+              contractDisplayContext(contract, preferredPeriodMonth).latestSnapshot
+                ?.facility_number || null;
+            return !existingByFacilityNumber.has(normalizeFacilityKey(facilityNumber));
+          })
+          .map((contract) =>
+            serializeCompletenessIssue(
+              {
+                issue_type: "FACILITY_WITHOUT_COLLATERAL",
+                contract,
+              },
+              { preferredPeriodMonth },
+            ),
+          );
+      }),
     );
   }
   if (!issueFilter || issueFilter === "UNLINKED_COLLATERAL") {
     tasks.push(
-      repository.findUnlinkedCollaterals(collateralWhere).then((rows) =>
-        rows.map((collateral) =>
-          serializeCompletenessIssue({
-            issue_type: "UNLINKED_COLLATERAL",
-            collateral,
-          }),
-        ),
-      ),
+      repository.findUnlinkedCollaterals(collateralWhere).then(async (rows) => {
+        const inferredContractMap = await inferContractsByFacilityNumbers(
+          scope,
+          rows.map((item) => item.facility_number),
+        );
+        return attachInferredContractToCollateralRows(rows, inferredContractMap).map(
+          (collateral) =>
+            serializeCompletenessIssue(
+              {
+                issue_type: "UNLINKED_COLLATERAL",
+                collateral,
+              },
+              { preferredPeriodMonth },
+            ),
+        );
+      }),
     );
   }
   if (!issueFilter || issueFilter === "MISSING_SLIK_PERIOD") {
     tasks.push(
       repository.findFacilitiesWithoutSlikPeriod(contractWhere).then((rows) =>
         rows.map((contract) =>
-          serializeCompletenessIssue({
-            issue_type: "MISSING_SLIK_PERIOD",
-            contract,
-          }),
+          serializeCompletenessIssue(
+            {
+              issue_type: "MISSING_SLIK_PERIOD",
+              contract,
+            },
+            { preferredPeriodMonth },
+          ),
         ),
       ),
     );

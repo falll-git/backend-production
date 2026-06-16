@@ -36,6 +36,30 @@ const { toSizeBytesBigInt } = require("../../utils/size-bytes");
 const OUTGOING_MAIL_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar";
 
+async function buildDeliveryMediaNameMap(codes) {
+  const uniqueCodes = [...new Set((codes || []).filter(Boolean))];
+
+  if (uniqueCodes.length === 0) {
+    return new Map();
+  }
+
+  const rows = await prisma.mail_delivery_media.findMany({
+    where: {
+      code: {
+        in: uniqueCodes,
+      },
+    },
+    select: {
+      code: true,
+      name: true,
+    },
+  });
+
+  return new Map(
+    rows.map((row) => [String(row.code || ""), String(row.name || row.code || "")]),
+  );
+}
+
 async function resolveActiveDeliveryMedia(value) {
   const deliveryMedia = normalizeDeliveryMedia(value);
 
@@ -185,11 +209,15 @@ function buildWhere({
 
 async function serializeList(req, records) {
   const serialized = [];
+  const deliveryMediaNames = await buildDeliveryMediaNameMap(
+    records.map((record) => record.delivery_media),
+  );
 
   for (const record of records) {
     const item = await serializeOutgoingMail({
       req,
       record,
+      deliveryMediaNames,
     });
 
     serialized.push(item);
@@ -282,9 +310,14 @@ exports.getById = async ({ req, id, userId }) => {
     throw new AppError("Surat keluar tidak ditemukan.", 404);
   }
 
+  const deliveryMediaNames = await buildDeliveryMediaNameMap([
+    outgoingMail.delivery_media,
+  ]);
+
   return serializeOutgoingMail({
     req,
     record: outgoingMail,
+    deliveryMediaNames,
   });
 };
 
@@ -338,9 +371,14 @@ exports.create = async ({ req, payload, userId }) => {
     actorId: userId,
   });
 
+  const deliveryMediaNames = await buildDeliveryMediaNameMap([
+    created.delivery_media,
+  ]);
+
   return serializeOutgoingMail({
     req,
     record: created,
+    deliveryMediaNames,
   });
 };
 
@@ -440,9 +478,14 @@ exports.update = async ({ req, id, payload, userId }) => {
     updated = await repository.findById(updated.id);
   }
 
+  const deliveryMediaNames = await buildDeliveryMediaNameMap([
+    updated.delivery_media,
+  ]);
+
   return serializeOutgoingMail({
     req,
     record: updated,
+    deliveryMediaNames,
   });
 };
 

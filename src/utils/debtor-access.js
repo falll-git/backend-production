@@ -14,6 +14,7 @@ const DEBTOR_DATA_SCOPE_URLS = [
   "/dashboard/informasi-debitur/admin/upload-slik",
   "/dashboard/informasi-debitur/admin/monitoring-import",
   "/dashboard/informasi-debitur/admin/upload-ideb",
+  "/dashboard/informasi-debitur/laporan-ideb",
   "/dashboard/informasi-debitur/laporan",
   "/dashboard/informasi-debitur/laporan/npf",
   "/dashboard/informasi-debitur/laporan/aktivitas-marketing",

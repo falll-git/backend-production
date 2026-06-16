@@ -22,20 +22,6 @@ const OUTGOING_CODE_BY_STATUS = {
   ACTIVE: 1,
 };
 
-const DELIVERY_MEDIA_BY_LABEL = {
-  email: "EMAIL",
-  pos: "POS",
-  kurir: "KURIR",
-  langsung: "LANGSUNG",
-};
-
-const DELIVERY_MEDIA_LABEL_BY_STATUS = {
-  EMAIL: "email",
-  POS: "pos",
-  KURIR: "kurir",
-  LANGSUNG: "langsung",
-};
-
 function normalizeToken(value) {
   return String(value ?? "")
     .trim()
@@ -83,19 +69,25 @@ function normalizeDeliveryMedia(value) {
   if (value === undefined || value === null || value === "") return null;
 
   const raw = String(value).trim();
-  const lower = raw.toLowerCase();
-  if (DELIVERY_MEDIA_BY_LABEL[lower]) {
-    return DELIVERY_MEDIA_BY_LABEL[lower];
-  }
-
   const normalized = normalizeToken(raw);
-  return DELIVERY_MEDIA_LABEL_BY_STATUS[normalized] ? normalized : null;
+  return normalized || null;
+}
+
+function humanizeToken(value) {
+  const normalized = normalizeToken(value);
+  if (!normalized) return null;
+
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function getDeliveryMediaLabel(value) {
   const normalized = normalizeDeliveryMedia(value);
   if (!normalized) return value ?? null;
-  return DELIVERY_MEDIA_LABEL_BY_STATUS[normalized];
+  return humanizeToken(normalized);
 }
 
 module.exports = {
