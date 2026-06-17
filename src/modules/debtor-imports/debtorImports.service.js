@@ -1707,6 +1707,13 @@ async function renderIdebResumePdf(upload) {
     return items.length > 2 ? `${labels.join(", ")} +${items.length - 2}` : labels.join(", ");
   }
 
+  function facilityDaysPastDue(facility) {
+    const value = parseCurrencyNumber(
+      recordValue(facility, ["days_past_due", "dpd", "jumlah_hari_tunggakan"]),
+    );
+    return value === null ? null : value;
+  }
+
   function reporterBreakdownText() {
     const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
     const buckets = [
@@ -1734,6 +1741,10 @@ async function renderIdebResumePdf(upload) {
       plafond: formatIdebMoney(facilityInitialPlafond(facility)),
       outstanding: formatIdebMoney(idebFacilityOutstanding(facility)),
       kol: recordValue(facility, ["collectibility", "collectibility_code", "kol"]),
+      dpd:
+        facilityDaysPastDue(facility) === null
+          ? "-"
+          : `${formatIdebNumber(facilityDaysPastDue(facility))} hari`,
       arrears: formatIdebMoney(idebFacilityArrears(facility)),
       collateral: facilityCollateralSummary(facility),
     }));
@@ -1757,6 +1768,7 @@ async function renderIdebResumePdf(upload) {
         plafond: formatIdebMoney(totalInitialPlafond),
         outstanding: formatIdebMoney(totalOutstanding),
         kol: "",
+        dpd: "",
         arrears: formatIdebMoney(totalArrears),
         collateral: "",
         __isTotal: true,
@@ -1764,20 +1776,21 @@ async function renderIdebResumePdf(upload) {
     }
     drawTable(
       [
-        { key: "reporter", header: "Pelapor", width: 110, bold: true, maxLines: 3 },
-        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 166, maxLines: 3 },
-        { key: "akadDate", header: "Tanggal Akad", width: 68, maxLines: 2 },
-        { key: "plafond", header: "Plafon Awal", width: 76, align: "right", maxLines: 2 },
-        { key: "outstanding", header: "Baki Debet Saat Ini", width: 82, align: "right", maxLines: 2 },
-        { key: "kol", header: "Kolektibilitas", width: 72, type: "kol" },
-        { key: "arrears", header: "Tunggakan", width: 74, align: "right", maxLines: 2 },
-        { key: "collateral", header: "Jaminan / Agunan", width: 121, maxLines: 3 },
+        { key: "reporter", header: "Pelapor", width: 102, bold: true, maxLines: 3 },
+        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 148, maxLines: 3 },
+        { key: "akadDate", header: "Tanggal Akad", width: 62, maxLines: 2 },
+        { key: "plafond", header: "Plafon Awal", width: 70, align: "right", maxLines: 2 },
+        { key: "outstanding", header: "Baki Debet Saat Ini", width: 76, align: "right", maxLines: 2 },
+        { key: "kol", header: "Kolektibilitas", width: 66, type: "kol" },
+        { key: "dpd", header: "DPD / Hari Tunggakan", width: 62, align: "center", maxLines: 2 },
+        { key: "arrears", header: "Tunggakan", width: 68, align: "right", maxLines: 2 },
+        { key: "collateral", header: "Jaminan / Agunan", width: 115, maxLines: 3 },
       ],
       rows,
       {
         emptyTitle: "Ringkasan Posisi Fasilitas Kredit",
         emptyText: "Belum ada data fasilitas IDEB pada hasil ini.",
-        fontSize: 6.7,
+        fontSize: 6.5,
       },
     );
   }
@@ -2162,6 +2175,11 @@ async function renderIdebResumePdf(upload) {
     (total, facility) => total + idebFacilityArrears(facility),
     0,
   );
+  const highestDaysPastDue = metrics.facilities.reduce((current, facility) => {
+    const value = facilityDaysPastDue(facility);
+    if (value === null) return current;
+    return current === null ? value : Math.max(current, value);
+  }, null);
 
   addPage("landscape");
   drawHeaderBand("RESUME HASIL IDEB", `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`, [
@@ -2179,7 +2197,7 @@ async function renderIdebResumePdf(upload) {
       type: "kol",
       description: `${formatIdebNumber(metrics.reporterCount)} PJK | ${formatIdebNumber(
         metrics.activeFacilities.length,
-      )} aktif`,
+      )} aktif | DPD ${highestDaysPastDue === null ? "-" : `${formatIdebNumber(highestDaysPastDue)} hari`}`,
     },
     {
       label: "Total Baki Debet Aktif",
@@ -2229,6 +2247,11 @@ async function renderIdebResumePdf(upload) {
       { label: "Petugas", value: summary.officer_name },
       { label: "Jumlah Lembaga / PJK", value: formatIdebNumber(metrics.reporterCount), bold: true },
       { label: "Kualitas Terburuk", value: collectibilityLabel(metrics.worstCollectibility), bold: true },
+      {
+        label: "DPD Tertinggi",
+        value: highestDaysPastDue === null ? "-" : `${formatIdebNumber(highestDaysPastDue)} hari`,
+        bold: true,
+      },
       { label: "Fasilitas Aktif", value: formatIdebNumber(metrics.activeFacilities.length) },
       { label: "Sisa Baki Debet", value: formatIdebMoney(metrics.activeOutstanding), bold: true },
       { label: "Total Plafon", value: formatIdebMoney(metrics.totalPlafond), bold: true },

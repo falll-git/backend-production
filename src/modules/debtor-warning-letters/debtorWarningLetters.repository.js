@@ -16,6 +16,7 @@ const INCLUDE = {
       status: true,
     },
   },
+  files: true,
 };
 
 exports.findMany = ({ where, skip, take, orderBy }) =>

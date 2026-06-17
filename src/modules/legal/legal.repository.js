@@ -188,8 +188,13 @@ exports.updateNumberingTemplate = (id, data, tx) =>
 
 function includeFor(modelName) {
   switch (modelName) {
+    case "legal_document_templates":
+      return {
+        files: true,
+      };
     case "legal_print_histories":
       return {
+        files: true,
         template: true,
         numbering_template: true,
         contract: {
@@ -200,6 +205,7 @@ function includeFor(modelName) {
     case "legal_insurance_progress":
     case "legal_kjpp_progress":
       return {
+        files: true,
         contract: {
           select: CONTRACT_SELECT,
         },
@@ -212,6 +218,7 @@ function includeFor(modelName) {
       };
     case "legal_claims":
       return {
+        files: true,
         contract: {
           select: CONTRACT_SELECT,
         },
@@ -223,6 +230,7 @@ function includeFor(modelName) {
             collateral: {
               select: COLLATERAL_SELECT,
             },
+            files: true,
             third_party: {
               select: THIRD_PARTY_SELECT,
             },
@@ -243,10 +251,14 @@ function includeFor(modelName) {
             transaction_date: "desc",
           },
           take: 10,
+          include: {
+            files: true,
+          },
         },
       };
     case "legal_deposit_transactions":
       return {
+        files: true,
         deposit: {
           include: {
             contract: {

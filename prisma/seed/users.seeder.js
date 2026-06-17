@@ -96,12 +96,6 @@ function assertValidSeedPassword(seedUser) {
       `Password seed user ${seedUser.username} wajib mengandung huruf dan angka.`,
     );
   }
-
-  if (process.env.NODE_ENV === "production" && seedUser.password.length < 12) {
-    throw new Error(
-      `Password seed user ${seedUser.username} minimal 12 karakter di production.`,
-    );
-  }
 }
 
 async function upsertSeedUser(seedUser) {

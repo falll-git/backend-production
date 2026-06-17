@@ -67,6 +67,9 @@ const DEBTOR_INCLUDE = {
     orderBy: {
       created_at: "desc",
     },
+    include: {
+      files: true,
+    },
   },
 };
 
@@ -317,12 +320,13 @@ function findById(id, where = {}, db = prisma) {
         where: {
           deleted_at: null,
         },
-        orderBy: {
-          created_at: "desc",
-        },
-        include: {
-          document_checklist: true,
-          contract: {
+      orderBy: {
+        created_at: "desc",
+      },
+      include: {
+        files: true,
+        document_checklist: true,
+        contract: {
             select: {
               id: true,
               debtor_id: true,
@@ -466,6 +470,7 @@ function findDocumentsByDebtorId(debtorId, { where, skip, take, orderBy }) {
     take,
     orderBy,
     include: {
+      files: true,
       document_checklist: true,
       contract: {
         select: {
@@ -486,6 +491,7 @@ function findDocuments({ where, skip, take, orderBy }) {
     take,
     orderBy,
     include: {
+      files: true,
       document_checklist: true,
       debtor: {
         select: {
@@ -532,6 +538,7 @@ function createDocument(data) {
   return prisma.debtor_documents.create({
     data,
     include: {
+      files: true,
       document_checklist: true,
       contract: {
         select: {
@@ -586,6 +593,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
       orderBy: [{ activity_date: "desc" }, { created_at: "desc" }],
       include: {
         timeline: true,
+        files: true,
         related_activity: {
           select: {
             id: true,
@@ -638,6 +646,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
             status: true,
           },
         },
+        files: true,
       },
     }),
     contractFilter
@@ -648,6 +657,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: { printed_at: "desc" },
           include: {
+            files: true,
             template: true,
             numbering_template: true,
             contract: {
@@ -671,6 +681,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
       },
       orderBy: [{ issued_at: "desc" }, { created_at: "desc" }],
       include: {
+        files: true,
         contract: {
           select: {
             id: true,
@@ -689,6 +700,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: [{ received_at: "desc" }, { created_at: "desc" }],
           include: {
+            files: true,
             third_party: true,
             collateral: true,
             contract: {
@@ -710,6 +722,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: [{ period_start: "desc" }, { created_at: "desc" }],
           include: {
+            files: true,
             third_party: true,
             collateral: true,
             contract: {
@@ -731,6 +744,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: [{ received_at: "desc" }, { created_at: "desc" }],
           include: {
+            files: true,
             third_party: true,
             collateral: true,
             contract: {
@@ -752,6 +766,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
           },
           orderBy: [{ submitted_at: "desc" }, { created_at: "desc" }],
           include: {
+            files: true,
             collateral: true,
             contract: {
               select: {
@@ -764,6 +779,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
             insurance_progress: {
               include: {
                 collateral: true,
+                files: true,
                 third_party: true,
               },
             },
@@ -793,6 +809,9 @@ async function findWorkflowData(debtorId, contractIds = []) {
                 transaction_date: "desc",
               },
               take: 25,
+              include: {
+                files: true,
+              },
             },
           },
         })

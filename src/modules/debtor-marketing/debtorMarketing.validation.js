@@ -8,6 +8,7 @@ const fileSchema = Joi.object({
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
 }).unknown(true);
+const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 
 const payload = {
   debtor_id: uuid.required(),
@@ -26,6 +27,7 @@ const payload = {
   handling_result: Joi.string().trim().allow("", null).optional(),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 };
 
 exports.createMarketingActivitySchema = Joi.object(payload);

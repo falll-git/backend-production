@@ -598,6 +598,13 @@ exports.completeIncomingMail = async ({ req, id, userId }) => {
     ),
     updated_by: userId,
   });
+
+  await notificationService.notifyIncomingMailDispositionCompleted({
+    incomingMail: updated,
+    disposition: currentDisposition,
+    actorId: userId,
+  });
+
   return serializeIncomingMail({
     req,
     record: updated,
@@ -690,6 +697,15 @@ exports.updateDispositionStatus = async ({
   });
 
   const updatedMail = await repository.findById(incomingMailId);
+
+  if (normalizedStatus === "COMPLETED") {
+    await notificationService.notifyIncomingMailDispositionCompleted({
+      incomingMail: updatedMail,
+      disposition,
+      actorId: userId,
+    });
+  }
+
   return serializeIncomingMail({
     req,
     record: updatedMail,

@@ -6,7 +6,12 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
-const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  normalizeUploadFiles,
+  persistDomainFiles,
+  serializeFile,
+  serializeFiles,
+} = require("../../utils/domain-files");
 const {
   buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
@@ -66,6 +71,10 @@ function serialize(req, item) {
       entityId: item.id,
       fallbackBaseName: item.activity_kind,
     }),
+    files: serializeFiles(req, item, {
+      module: "debtor_information",
+      fallbackBaseName: item.activity_kind,
+    }),
     debtor: item.debtor,
     contract: item.contract,
     timeline: item.timeline || null,
@@ -74,6 +83,16 @@ function serialize(req, item) {
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
+}
+
+function buildStoredFiles(fileMetas = []) {
+  return fileMetas.map((fileMeta) => ({
+    file_path: fileMeta.file_path,
+    file_name: fileMeta.file_name,
+    mime_type: fileMeta.mime_type,
+    size_bytes: fileMeta.size_bytes,
+    checksum: fileMeta.checksum,
+  }));
 }
 
 function buildWhere(kind, query, scope = null) {
@@ -318,19 +337,25 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
   await ensureReferences(data);
   await ensureDebtorAccessible(data.debtor_id, userId);
   const timeline = await resolveTimeline({ kind, data, userId });
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity: `debtor-marketing/${kind.toLowerCase()}`,
-        input: payload.file,
-        fallbackBaseName: kind,
-      })
-    : null;
+  const fileMetas = persistDomainFiles({
+    entity: `debtor-marketing/${kind.toLowerCase()}`,
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: kind,
+  });
+  const primaryFile = fileMetas[0] || null;
 
   const created = await repository.create({
     ...data,
     timeline_id: timeline.id,
     timeline_group_id: timeline.group_key || timeline.id,
-    ...(fileMeta || {}),
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
     activity_kind: kind,
     created_by: userId || null,
   });
@@ -360,21 +385,26 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
     userId,
     currentId: current.id,
   });
-  const fileMeta =
-    payload.file !== undefined && payload.file !== null
-      ? persistDomainFile({
-          entity: `debtor-marketing/${current.activity_kind.toLowerCase()}`,
-          input: payload.file,
-          previousPath: current.file_path,
-          fallbackBaseName: current.activity_kind,
-        })
-      : null;
+  const fileMetas = persistDomainFiles({
+    entity: `debtor-marketing/${current.activity_kind.toLowerCase()}`,
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: current.activity_kind,
+  });
+  const primaryFile =
+    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
 
   const updated = await repository.update(id, {
     ...data,
     timeline_id: timeline.id,
     timeline_group_id: timeline.group_key || timeline.id,
-    ...(fileMeta || {}),
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
     updated_by: userId || null,
   });
   await syncTimelineState(timeline, current.activity_kind, data, userId);

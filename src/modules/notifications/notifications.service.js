@@ -83,6 +83,10 @@ function shouldSendEmail(payload) {
   return EMAIL_EVENT_TYPES.has(payload.event_type);
 }
 
+function uniqueRecipientIds(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
 function isDedupeConflict(error, payload) {
   return Boolean(payload?.dedupe_key && error?.code === "P2002");
 }
@@ -306,6 +310,28 @@ exports.notifyArchiveLoanResolved = async ({ item, actorId, status }) => {
   });
 };
 
+exports.notifyArchiveLoanReturned = async ({ item, actorId }) => {
+  const recipients = uniqueRecipientIds([
+    item.borrower_id,
+    item.document?.owner_user_id,
+    item.document?.created_by,
+  ]).filter((recipientId) => recipientId !== actorId);
+
+  return safeCreateNotifications(recipients, {
+    module: "DIGITAL_ARCHIVE",
+    event_type: "INFO",
+    entity_type: "DIGITAL_DOCUMENT_LOAN",
+    entity_id: item.id,
+    title: "Dokumen arsip telah dikembalikan",
+    message: `${documentLabel(item.document)} sudah dikembalikan dan proses peminjaman ditutup.`,
+    link_url: "/dashboard/arsip-digital/historis/peminjaman",
+    priority: "NORMAL",
+    dedupe_key: `digital_archive:loan_returned:${item.id}`,
+    created_by: actorId,
+    email: false,
+  });
+};
+
 exports.notifyIncomingMailDispositions = async ({ incomingMail, dispositions, actorId, redisposition = false }) => {
   const items = (dispositions || []).filter((item) => item?.receiver_id);
   const results = [];
@@ -354,6 +380,66 @@ exports.notifyMemorandumDispositions = async ({ memorandum, dispositions, actorI
   }
 
   return results;
+};
+
+exports.notifyIncomingMailDispositionCompleted = async ({
+  incomingMail,
+  disposition,
+  actorId,
+}) => {
+  const recipients = uniqueRecipientIds([
+    disposition?.sender_id,
+    incomingMail?.created_by,
+  ]).filter(
+    (recipientId) =>
+      recipientId &&
+      recipientId !== actorId &&
+      recipientId !== disposition?.receiver_id,
+  );
+
+  return safeCreateNotifications(recipients, {
+    module: "CORRESPONDENCE",
+    event_type: "INFO",
+    entity_type: "INCOMING_MAIL_DISPOSITION",
+    entity_id: disposition?.id || incomingMail?.id,
+    title: "Disposisi surat masuk selesai",
+    message: `${mailLabel(incomingMail)} sudah ditandai selesai oleh penerima disposisi.`,
+    link_url: `/dashboard/manajemen-surat/laporan?kind=surat-masuk&id=${incomingMail.id}`,
+    priority: "NORMAL",
+    dedupe_key: `correspondence:incoming_disposition_completed:${disposition?.id || incomingMail?.id}`,
+    created_by: actorId,
+    email: false,
+  });
+};
+
+exports.notifyMemorandumDispositionCompleted = async ({
+  memorandum,
+  disposition,
+  actorId,
+}) => {
+  const recipients = uniqueRecipientIds([
+    disposition?.sender_id,
+    memorandum?.created_by,
+  ]).filter(
+    (recipientId) =>
+      recipientId &&
+      recipientId !== actorId &&
+      recipientId !== disposition?.receiver_id,
+  );
+
+  return safeCreateNotifications(recipients, {
+    module: "CORRESPONDENCE",
+    event_type: "INFO",
+    entity_type: "MEMORANDUM_DISPOSITION",
+    entity_id: disposition?.id || memorandum?.id,
+    title: "Disposisi memorandum selesai",
+    message: `${mailLabel(memorandum)} sudah ditandai selesai oleh penerima disposisi.`,
+    link_url: `/dashboard/manajemen-surat/laporan?kind=memorandum&id=${memorandum.id}`,
+    priority: "NORMAL",
+    dedupe_key: `correspondence:memorandum_disposition_completed:${disposition?.id || memorandum?.id}`,
+    created_by: actorId,
+    email: false,
+  });
 };
 
 exports.notifyOutgoingMailFollowUpCreated = async ({ outgoingMail, actorId }) => {

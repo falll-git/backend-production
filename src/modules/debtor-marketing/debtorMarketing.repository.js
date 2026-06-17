@@ -34,6 +34,7 @@ const INCLUDE = {
       handling_step: true,
     },
   },
+  files: true,
 };
 
 function findMany({ where, skip, take, orderBy }) {

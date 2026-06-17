@@ -607,6 +607,12 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
     updated_by: userId,
   });
 
+  await notificationService.notifyMemorandumDispositionCompleted({
+    memorandum: updated,
+    disposition: currentDisposition,
+    actorId: userId,
+  });
+
   return serializeMemorandum({
     req,
     record: updated,
@@ -699,6 +705,15 @@ exports.updateDispositionStatus = async ({
   });
 
   const updatedMemorandum = await repository.findById(memorandumId);
+
+  if (normalizedStatus === "COMPLETED") {
+    await notificationService.notifyMemorandumDispositionCompleted({
+      memorandum: updatedMemorandum,
+      disposition,
+      actorId: userId,
+    });
+  }
+
   return serializeMemorandum({
     req,
     record: updatedMemorandum,

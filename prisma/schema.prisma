@@ -1546,6 +1546,7 @@ model debtor_documents {
   debtor             digital_debtors      @relation(fields: [debtor_id], references: [id])
   contract           debtor_contracts?    @relation(fields: [contract_id], references: [id], onDelete: SetNull)
   document_checklist document_checklists? @relation(fields: [document_checklist_id], references: [id], onDelete: SetNull)
+  files              debtor_document_files[]
 
   @@index([debtor_id])
   @@index([contract_id])
@@ -1553,6 +1554,23 @@ model debtor_documents {
   @@index([document_type])
   @@index([category])
   @@index([deleted_at])
+}
+
+model debtor_document_files {
+  id          String   @id @default(uuid())
+  document_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  document debtor_documents @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([document_id, file_path])
+  @@index([document_id])
 }
 
 model debtor_marketing_timelines {
@@ -1617,6 +1635,7 @@ model debtor_marketing_activities {
   timeline           debtor_marketing_timelines?   @relation(fields: [timeline_id], references: [id], onDelete: SetNull)
   related_activity   debtor_marketing_activities?  @relation("DebtorMarketingActivityRelated", fields: [related_activity_id], references: [id], onDelete: SetNull)
   related_activities debtor_marketing_activities[] @relation("DebtorMarketingActivityRelated")
+  files              debtor_marketing_activity_files[]
 
   @@index([activity_kind, status])
   @@index([debtor_id])
@@ -1626,6 +1645,23 @@ model debtor_marketing_activities {
   @@index([related_activity_id])
   @@index([activity_date])
   @@index([deleted_at])
+}
+
+model debtor_marketing_activity_files {
+  id          String   @id @default(uuid())
+  activity_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  activity debtor_marketing_activities @relation(fields: [activity_id], references: [id], onDelete: Cascade)
+
+  @@unique([activity_id, file_path])
+  @@index([activity_id])
 }
 
 model debtor_warning_letters {
@@ -1651,12 +1687,30 @@ model debtor_warning_letters {
 
   debtor   digital_debtors   @relation(fields: [debtor_id], references: [id])
   contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  files    debtor_warning_letter_files[]
 
   @@index([debtor_id])
   @@index([contract_id])
   @@index([letter_type])
   @@index([delivery_status])
   @@index([deleted_at])
+}
+
+model debtor_warning_letter_files {
+  id         String   @id @default(uuid())
+  letter_id   String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  letter debtor_warning_letters @relation(fields: [letter_id], references: [id], onDelete: Cascade)
+
+  @@unique([letter_id, file_path])
+  @@index([letter_id])
 }
 
 model legal_document_templates {
@@ -1679,11 +1733,29 @@ model legal_document_templates {
   updated_at       DateTime  @updatedAt
 
   print_histories legal_print_histories[]
+  files           legal_document_template_files[]
 
   @@unique([template_type, version])
   @@index([template_type])
   @@index([is_active])
   @@index([deleted_at])
+}
+
+model legal_document_template_files {
+  id          String   @id @default(uuid())
+  template_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  template legal_document_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@unique([template_id, file_path])
+  @@index([template_id])
 }
 
 model legal_print_histories {
@@ -1710,11 +1782,29 @@ model legal_print_histories {
   template           legal_document_templates? @relation(fields: [template_id], references: [id], onDelete: SetNull)
   numbering_template numbering_templates?      @relation(fields: [numbering_template_id], references: [id], onDelete: SetNull)
   contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
+  files              legal_print_history_files[]
 
   @@index([contract_id])
   @@index([document_type])
   @@index([printed_at])
   @@index([deleted_at])
+}
+
+model legal_print_history_files {
+  id           String   @id @default(uuid())
+  print_id      String
+  file_path    String
+  file_name    String?
+  mime_type    String?
+  size_bytes   Int?
+  checksum     String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  print legal_print_histories @relation(fields: [print_id], references: [id], onDelete: Cascade)
+
+  @@unique([print_id, file_path])
+  @@index([print_id])
 }
 
 model debtor_ideb_uploads {
@@ -1799,12 +1889,30 @@ model legal_notary_progress {
   contract    debtor_contracts @relation(fields: [contract_id], references: [id])
   collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  files       legal_notary_progress_files[]
 
   @@index([contract_id])
   @@index([collateral_id])
   @@index([third_party_id])
   @@index([status])
   @@index([deleted_at])
+}
+
+model legal_notary_progress_files {
+  id           String   @id @default(uuid())
+  progress_id  String
+  file_path    String
+  file_name    String?
+  mime_type    String?
+  size_bytes   Int?
+  checksum     String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  progress legal_notary_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
+
+  @@unique([progress_id, file_path])
+  @@index([progress_id])
 }
 
 model legal_insurance_progress {
@@ -1836,6 +1944,7 @@ model legal_insurance_progress {
   collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
   claims      legal_claims[]
+  files       legal_insurance_progress_files[]
 
   @@index([contract_id])
   @@index([collateral_id])
@@ -1843,6 +1952,23 @@ model legal_insurance_progress {
   @@index([policy_number])
   @@index([status])
   @@index([deleted_at])
+}
+
+model legal_insurance_progress_files {
+  id           String   @id @default(uuid())
+  progress_id  String
+  file_path    String
+  file_name    String?
+  mime_type    String?
+  size_bytes   Int?
+  checksum     String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  progress legal_insurance_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
+
+  @@unique([progress_id, file_path])
+  @@index([progress_id])
 }
 
 model legal_kjpp_progress {
@@ -1874,12 +2000,30 @@ model legal_kjpp_progress {
   contract    debtor_contracts @relation(fields: [contract_id], references: [id])
   collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  files       legal_kjpp_progress_files[]
 
   @@index([contract_id])
   @@index([collateral_id])
   @@index([third_party_id])
   @@index([status])
   @@index([deleted_at])
+}
+
+model legal_kjpp_progress_files {
+  id           String   @id @default(uuid())
+  progress_id  String
+  file_path    String
+  file_name    String?
+  mime_type    String?
+  size_bytes   Int?
+  checksum     String?
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  progress legal_kjpp_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
+
+  @@unique([progress_id, file_path])
+  @@index([progress_id])
 }
 
 model legal_claims {
@@ -1912,6 +2056,7 @@ model legal_claims {
   contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
   collateral         debtor_collaterals?       @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
   insurance_progress legal_insurance_progress? @relation(fields: [insurance_progress_id], references: [id], onDelete: SetNull)
+  files              legal_claim_files[]
 
   @@index([contract_id])
   @@index([collateral_id])
@@ -1919,6 +2064,23 @@ model legal_claims {
   @@index([policy_number])
   @@index([status])
   @@index([deleted_at])
+}
+
+model legal_claim_files {
+  id         String   @id @default(uuid())
+  claim_id    String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  claim legal_claims @relation(fields: [claim_id], references: [id], onDelete: Cascade)
+
+  @@unique([claim_id, file_path])
+  @@index([claim_id])
 }
 
 model legal_deposits {
@@ -1968,8 +2130,26 @@ model legal_deposit_transactions {
   created_at       DateTime @default(now())
 
   deposit legal_deposits @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+  files   legal_deposit_transaction_files[]
 
   @@index([deposit_id])
   @@index([transaction_date])
   @@index([action])
+}
+
+model legal_deposit_transaction_files {
+  id             String   @id @default(uuid())
+  transaction_id String
+  file_path      String
+  file_name      String?
+  mime_type      String?
+  size_bytes     Int?
+  checksum       String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  transaction legal_deposit_transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
+
+  @@unique([transaction_id, file_path])
+  @@index([transaction_id])
 }
