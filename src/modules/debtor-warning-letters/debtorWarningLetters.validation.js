@@ -8,6 +8,7 @@ const fileSchema = Joi.object({
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
 }).unknown(true);
+const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 
 const payload = {
   debtor_id: uuid.required(),
@@ -18,6 +19,7 @@ const payload = {
   delivery_status: Joi.string().trim().max(50).default("BELUM_DIKIRIM"),
   description: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 };
 
 exports.createWarningLetterSchema = Joi.object(payload);

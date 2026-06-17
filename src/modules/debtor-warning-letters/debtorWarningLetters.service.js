@@ -5,7 +5,12 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
-const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  normalizeUploadFiles,
+  persistDomainFiles,
+  serializeFile,
+  serializeFiles,
+} = require("../../utils/domain-files");
 const {
   buildContractManageWhere,
   buildContractVisibilityWhere,
@@ -47,11 +52,25 @@ function serialize(req, item) {
       entityId: item.id,
       fallbackBaseName: item.letter_type,
     }),
+    files: serializeFiles(req, item, {
+      module: "debtor_information",
+      fallbackBaseName: item.letter_type,
+    }),
     debtor: item.debtor,
     contract: item.contract,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
+}
+
+function buildStoredFiles(fileMetas = []) {
+  return fileMetas.map((fileMeta) => ({
+    file_path: fileMeta.file_path,
+    file_name: fileMeta.file_name,
+    mime_type: fileMeta.mime_type,
+    size_bytes: fileMeta.size_bytes,
+    checksum: fileMeta.checksum,
+  }));
 }
 
 function buildWhere(query) {
@@ -185,19 +204,25 @@ exports.getByIdForManage = async ({ req, id, userId }) => {
 exports.create = async ({ req, payload, userId }) => {
   const data = normalizePayload(payload);
   await ensureReferences(data, userId);
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity: "debtor-warning-letters",
-        input: payload.file,
-        fallbackBaseName: data.letter_type,
-      })
-    : null;
+  const fileMetas = persistDomainFiles({
+    entity: "debtor-warning-letters",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: data.letter_type,
+  });
+  const primaryFile = fileMetas[0] || null;
 
   return serialize(
     req,
     await repository.create({
       ...data,
-      ...(fileMeta || {}),
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
       created_by: userId || null,
     }),
   );
@@ -207,21 +232,26 @@ exports.update = async ({ req, id, payload, userId }) => {
   const current = await exports.getByIdForManage({ req, id, userId });
   const data = normalizePayload(payload, current);
   await ensureReferences(data, userId);
-  const fileMeta =
-    payload.file !== undefined && payload.file !== null
-      ? persistDomainFile({
-          entity: "debtor-warning-letters",
-          input: payload.file,
-          previousPath: current.file_path,
-          fallbackBaseName: data.letter_type,
-        })
-      : null;
+  const fileMetas = persistDomainFiles({
+    entity: "debtor-warning-letters",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: data.letter_type,
+  });
+  const primaryFile =
+    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
 
   return serialize(
     req,
     await repository.update(id, {
       ...data,
-      ...(fileMeta || {}),
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
       updated_by: userId || null,
     }),
   );

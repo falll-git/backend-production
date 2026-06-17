@@ -780,5 +780,9 @@ exports.returnLoan = async ({ req, id, payload, userId }) => {
   });
 
   const updated = await repository.findById(id);
+  await notificationService.notifyArchiveLoanReturned({
+    item: updated,
+    actorId: userId,
+  });
   return serializeDigitalDocumentLoan(req, updated);
 };

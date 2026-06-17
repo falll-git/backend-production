@@ -254,6 +254,17 @@ async function getDebtorInformationFileMeta(payload) {
         },
       }),
     () =>
+      prisma.debtor_document_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.debtor_import_jobs.findFirst({
         where: {
           id: payload.entity_id,
@@ -316,6 +327,17 @@ async function getDebtorInformationFileMeta(payload) {
         },
       }),
     () =>
+      prisma.debtor_marketing_activity_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.debtor_warning_letters.findFirst({
         where: {
           id: payload.entity_id,
@@ -326,6 +348,17 @@ async function getDebtorInformationFileMeta(payload) {
           file_name: true,
           mime_type: true,
           letter_type: true,
+        },
+      }),
+    () =>
+      prisma.debtor_warning_letter_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
         },
       }),
   ]);
@@ -348,6 +381,17 @@ async function getLegalManagementFileMeta(payload) {
         },
       }),
     () =>
+      prisma.legal_document_template_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.legal_print_histories.findFirst({
         where: {
           id: payload.entity_id,
@@ -358,6 +402,17 @@ async function getLegalManagementFileMeta(payload) {
           generated_file_name: true,
           generated_mime_type: true,
           document_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_print_history_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
         },
       }),
     () =>
@@ -374,6 +429,17 @@ async function getLegalManagementFileMeta(payload) {
         },
       }),
     () =>
+      prisma.legal_notary_progress_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.legal_insurance_progress.findFirst({
         where: {
           id: payload.entity_id,
@@ -384,6 +450,17 @@ async function getLegalManagementFileMeta(payload) {
           file_name: true,
           mime_type: true,
           insurance_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_insurance_progress_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
         },
       }),
     () =>
@@ -400,6 +477,17 @@ async function getLegalManagementFileMeta(payload) {
         },
       }),
     () =>
+      prisma.legal_kjpp_progress_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
       prisma.legal_claims.findFirst({
         where: {
           id: payload.entity_id,
@@ -410,6 +498,28 @@ async function getLegalManagementFileMeta(payload) {
           file_name: true,
           mime_type: true,
           claim_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_claim_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
+        },
+      }),
+    () =>
+      prisma.legal_deposit_transaction_files.findFirst({
+        where: {
+          id: payload.entity_id,
+          file_path: payload.path,
+        },
+        select: {
+          file_name: true,
+          mime_type: true,
         },
       }),
   ]);
@@ -624,6 +734,13 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.debtor_document_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
     () => prisma.debtor_import_jobs.findFirst({
       where: {
         id: payload.entity_id,
@@ -663,11 +780,25 @@ async function debtorFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.debtor_marketing_activity_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
     () => prisma.debtor_warning_letters.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
         deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.debtor_warning_letter_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
       },
       select: { id: true },
     }),
@@ -690,11 +821,25 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.legal_document_template_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
     () => prisma.legal_print_histories.findFirst({
       where: {
         id: payload.entity_id,
         generated_file_path: payload.path,
         deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.legal_print_history_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
       },
       select: { id: true },
     }),
@@ -706,11 +851,25 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.legal_notary_progress_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
     () => prisma.legal_insurance_progress.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
         deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.legal_insurance_progress_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
       },
       select: { id: true },
     }),
@@ -722,11 +881,32 @@ async function legalFileExists(payload) {
       },
       select: { id: true },
     }),
+    () => prisma.legal_kjpp_progress_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
     () => prisma.legal_claims.findFirst({
       where: {
         id: payload.entity_id,
         file_path: payload.path,
         deleted_at: null,
+      },
+      select: { id: true },
+    }),
+    () => prisma.legal_claim_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
+      },
+      select: { id: true },
+    }),
+    () => prisma.legal_deposit_transaction_files.findFirst({
+      where: {
+        id: payload.entity_id,
+        file_path: payload.path,
       },
       select: { id: true },
     }),

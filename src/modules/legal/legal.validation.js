@@ -10,6 +10,7 @@ const fileSchema = Joi.object({
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
 }).unknown(true);
+const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 const depositType = Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN", "LAINNYA");
 const depositTransactionAction = Joi.string().valid("TITIPAN", "PEMBAYARAN", "REFUND");
 
@@ -22,6 +23,7 @@ exports.templateSchema = Joi.object({
   content_template: Joi.string().trim().allow("", null).optional(),
   is_active: Joi.boolean().default(true),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.printDocumentSchema = Joi.object({
@@ -35,6 +37,7 @@ exports.printDocumentSchema = Joi.object({
   payload_snapshot: Joi.object().optional(),
   generated_number: Joi.any().strip(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.printDocumentContextQuerySchema = Joi.object({
@@ -57,6 +60,7 @@ exports.notaryProgressSchema = Joi.object({
   deed_number: Joi.string().trim().allow("", null).optional(),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.insuranceProgressSchema = Joi.object({
@@ -72,6 +76,7 @@ exports.insuranceProgressSchema = Joi.object({
   status: Joi.string().valid("AKTIF", "EXPIRED", "KLAIM").default("AKTIF"),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.kjppProgressSchema = Joi.object({
@@ -88,6 +93,7 @@ exports.kjppProgressSchema = Joi.object({
   appraisal_value: amount.allow(null).optional(),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.claimSchema = Joi.object({
@@ -107,6 +113,7 @@ exports.claimSchema = Joi.object({
   rejection_reason: Joi.string().trim().allow("", null).optional(),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.depositSchema = Joi.object({
@@ -127,6 +134,7 @@ exports.depositSchema = Joi.object({
     notes: Joi.string().trim().allow("", null).optional(),
   }).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 exports.depositTransactionSchema = Joi.object({
@@ -136,6 +144,7 @@ exports.depositTransactionSchema = Joi.object({
   amount: positiveAmount.required(),
   notes: Joi.string().trim().allow("", null).optional(),
   file: fileSchema.optional(),
+  files: filesSchema.optional(),
 });
 
 function makeUpdate(schema) {

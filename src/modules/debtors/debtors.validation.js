@@ -8,6 +8,7 @@ const fileSchema = Joi.object({
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
 }).unknown(true);
+const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 
 const optionalText = Joi.string().trim().allow("", null).optional();
 const optionalDate = Joi.date().iso().allow("", null).optional();
@@ -127,5 +128,6 @@ exports.createDebtorDocumentSchema = Joi.object({
   document_type: Joi.string().trim().min(1).max(100).required(),
   category: Joi.string().valid("AWAL", "LAINNYA").default("LAINNYA"),
   description: Joi.string().trim().allow("", null).optional(),
-  file: fileSchema.required(),
-});
+  file: fileSchema.optional(),
+  files: filesSchema.optional(),
+}).or("file", "files");

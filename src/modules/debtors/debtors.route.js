@@ -2,7 +2,9 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
-const { uploadDomainFile } = require("../../middlewares/domain-upload.middleware");
+const {
+  uploadDomainFiles,
+} = require("../../middlewares/domain-upload.middleware");
 const {
   normalizePersuratanMultipartBody,
 } = require("../../middlewares/persuratan-upload.middleware");
@@ -38,7 +40,7 @@ router.post(
   "/:id/documents",
   auth,
   authorize(WRITE_URL, "create"),
-  uploadDomainFile("file"),
+  uploadDomainFiles("files", 20),
   normalizePersuratanMultipartBody({}),
   validate(createDebtorDocumentSchema),
   controller.createDocument,

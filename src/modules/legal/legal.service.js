@@ -6,7 +6,12 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
-const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  normalizeUploadFiles,
+  persistDomainFiles,
+  serializeFile,
+  serializeFiles,
+} = require("../../utils/domain-files");
 const {
   LEGAL_DATA_SCOPE_URLS,
   buildContractManageWhere,
@@ -92,6 +97,16 @@ const LEGAL_DOCUMENT_SOURCE = {
   AUTO_GENERATED_PDF: "AUTO_GENERATED_PDF",
   UPLOADED_FILE: "UPLOADED_FILE",
 };
+
+function buildStoredFiles(fileMetas = []) {
+  return fileMetas.map((fileMeta) => ({
+    file_path: fileMeta.file_path,
+    file_name: fileMeta.file_name,
+    mime_type: fileMeta.mime_type,
+    size_bytes: fileMeta.size_bytes,
+    checksum: fileMeta.checksum,
+  }));
+}
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -398,6 +413,10 @@ function serializeTemplate(req, item) {
       entityId: item.id,
       fallbackBaseName: item.title,
     }),
+    files: serializeFiles(req, item, {
+      module: "legal_management",
+      fallbackBaseName: item.title,
+    }),
   };
 }
 
@@ -410,6 +429,11 @@ function serializePrint(req, item) {
       prefix: "generated_",
       fallbackBaseName: item.document_type,
     }),
+    files: serializeFiles(req, item, {
+      module: "legal_management",
+      fallbackBaseName: item.document_type,
+      legacyPrefix: "generated_",
+    }),
   };
 }
 
@@ -419,6 +443,10 @@ function serializeWithFile(req, item, fallbackBaseName = "dokumen") {
     file: serializeFile(req, item, {
       module: "legal_management",
       entityId: item.id,
+      fallbackBaseName,
+    }),
+    files: serializeFiles(req, item, {
+      module: "legal_management",
       fallbackBaseName,
     }),
   };
@@ -477,6 +505,10 @@ function serializeDepositTransaction(req, item) {
     raw_action: item.action,
     amount: number(item.amount),
     file: depositTransactionFile(req, item),
+    files: serializeFiles(req, item, {
+      module: "legal_management",
+      fallbackBaseName: `bukti-${action || "titipan"}`,
+    }),
   };
 }
 
@@ -1013,13 +1045,12 @@ exports.createTemplate = async ({ req, payload, userId }) => {
   const type = normalizeUpper(payload.template_type);
   if (!LEGAL_TYPES.has(type)) throw new AppError("Jenis template legal tidak valid.", 422);
   assertTemplatePlaceholdersAllowed(payload.content_template || "");
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity: "legal/templates",
-        input: payload.file,
-        fallbackBaseName: payload.title,
-      })
-    : null;
+  const fileMetas = persistDomainFiles({
+    entity: "legal/templates",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: payload.title,
+  });
+  const primaryFile = fileMetas[0] || null;
   try {
     return serializeTemplate(
       req,
@@ -1029,7 +1060,14 @@ exports.createTemplate = async ({ req, payload, userId }) => {
         title: normalizeText(payload.title),
         content_template: normalizeText(payload.content_template),
         is_active: payload.is_active !== false,
-        ...(fileMeta || {}),
+        ...(primaryFile || {}),
+        ...(fileMetas.length > 0
+          ? {
+              files: {
+                create: buildStoredFiles(fileMetas),
+              },
+            }
+          : {}),
         created_by: userId || null,
       }),
     );
@@ -1049,15 +1087,13 @@ exports.updateTemplate = async ({ req, id, payload, userId }) => {
   if (payload.content_template !== undefined) {
     assertTemplatePlaceholdersAllowed(payload.content_template || "");
   }
-  const fileMeta =
-    payload.file !== undefined && payload.file !== null
-      ? persistDomainFile({
-          entity: "legal/templates",
-          input: payload.file,
-          previousPath: current.file_path,
-          fallbackBaseName: payload.title || current.title,
-        })
-      : null;
+  const fileMetas = persistDomainFiles({
+    entity: "legal/templates",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: payload.title || current.title,
+  });
+  const primaryFile =
+    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
   try {
     return serializeTemplate(
       req,
@@ -1071,7 +1107,14 @@ exports.updateTemplate = async ({ req, id, payload, userId }) => {
             : current.content_template,
         is_active:
           payload.is_active !== undefined ? payload.is_active : current.is_active,
-        ...(fileMeta || {}),
+        ...(primaryFile || {}),
+        ...(fileMetas.length > 0
+          ? {
+              files: {
+                create: buildStoredFiles(fileMetas),
+              },
+            }
+          : {}),
         updated_by: userId || null,
       }),
     );
@@ -1198,18 +1241,22 @@ exports.createPrint = async ({ req, payload, userId }) => {
       tx,
     });
     let generatedFileMeta = null;
+    let allFileMetas = [];
     let missingFields = [];
 
-    if (payload.file) {
+    const uploadedFileMetas = persistDomainFiles({
+      entity: "legal/generated",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: generated.generatedNumber || documentType,
+    });
+
+    if (uploadedFileMetas.length > 0) {
       missingFields = collectMissingFieldsForTemplate(
         template.content_template || "",
         context.values,
       );
-      generatedFileMeta = persistDomainFile({
-        entity: "legal/generated",
-        input: payload.file,
-        fallbackBaseName: generated.generatedNumber || documentType,
-      });
+      generatedFileMeta = uploadedFileMetas[0];
+      allFileMetas = uploadedFileMetas;
     } else {
       if (!normalizeText(template.content_template)) {
         throw new AppError(
@@ -1232,6 +1279,7 @@ exports.createPrint = async ({ req, payload, userId }) => {
         input: buildGeneratedPdfInput(pdfBuffer, generated.generatedNumber, documentType),
         fallbackBaseName: generated.generatedNumber || documentType,
       });
+      allFileMetas = generatedFileMeta ? [generatedFileMeta] : [];
     }
 
     return repository.create(
@@ -1244,7 +1292,7 @@ exports.createPrint = async ({ req, payload, userId }) => {
         generated_number: generated.generatedNumber,
         payload_snapshot: buildPrintSnapshot({
           payloadSnapshot: payload.payload_snapshot,
-          source: payload.file
+          source: uploadedFileMetas.length > 0
             ? LEGAL_DOCUMENT_SOURCE.UPLOADED_FILE
             : LEGAL_DOCUMENT_SOURCE.AUTO_GENERATED_PDF,
           missingFields,
@@ -1256,6 +1304,13 @@ exports.createPrint = async ({ req, payload, userId }) => {
               generated_file_name: generatedFileMeta.file_name,
               generated_mime_type: generatedFileMeta.mime_type,
               generated_size_bytes: generatedFileMeta.size_bytes,
+            }
+          : {}),
+        ...(allFileMetas.length > 0
+          ? {
+              files: {
+                create: buildStoredFiles(allFileMetas),
+              },
             }
           : {}),
         printed_by: userId || null,
@@ -1272,15 +1327,15 @@ async function createProgress({ req, modelName, payload, userId, category, entit
   await ensureContract(payload.contract_id, userId);
   await ensureCollateralForContract(payload.collateral_id, payload.contract_id);
   await ensureThirdParty(payload.third_party_id, category);
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity,
-        input: payload.file,
-        fallbackBaseName: category,
-      })
-    : null;
+  const fileMetas = persistDomainFiles({
+    entity,
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: category,
+  });
+  const primaryFile = fileMetas[0] || null;
   const data = { ...payload };
   delete data.file;
+  delete data.files;
   if (data.collateral_id !== undefined) {
     data.collateral_id = normalizeText(data.collateral_id);
   }
@@ -1314,7 +1369,14 @@ async function createProgress({ req, modelName, payload, userId, category, entit
   const saved = await repository.create(modelName, {
     ...data,
     status: normalizeUpper(data.status),
-    ...(fileMeta || {}),
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
     created_by: userId || null,
   });
   return category === "INSURANCE"
@@ -1335,17 +1397,16 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
     next.contract_id,
   );
   await ensureThirdParty(next.third_party_id, category);
-  const fileMeta =
-    payload.file !== undefined && payload.file !== null
-      ? persistDomainFile({
-          entity,
-          input: payload.file,
-          previousPath: current.file_path,
-          fallbackBaseName: category,
-        })
-      : null;
+  const fileMetas = persistDomainFiles({
+    entity,
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: category,
+  });
+  const primaryFile =
+    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
   const data = { ...payload };
   delete data.file;
+  delete data.files;
   if (data.collateral_id !== undefined) {
     data.collateral_id = normalizeText(data.collateral_id);
   }
@@ -1379,7 +1440,14 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
   if (data.status) data.status = normalizeUpper(data.status);
   const saved = await repository.update(modelName, id, {
     ...data,
-    ...(fileMeta || {}),
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
     updated_by: userId || null,
   });
   return category === "INSURANCE"
@@ -1556,15 +1624,15 @@ exports.createClaim = async ({ req, payload, userId }) => {
     throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
   }
   await ensureCollateralForContract(claimCollateralId, payload.contract_id);
-  const fileMeta = payload.file
-    ? persistDomainFile({
-        entity: "legal/claims",
-        input: payload.file,
-        fallbackBaseName: payload.claim_type,
-      })
-    : null;
+  const fileMetas = persistDomainFiles({
+    entity: "legal/claims",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: payload.claim_type,
+  });
+  const primaryFile = fileMetas[0] || null;
   const data = { ...payload };
   delete data.file;
+  delete data.files;
   data.collateral_id = claimCollateralId;
   data.claim_type = await resolveLegalProcessType(
     data.claim_type,
@@ -1579,7 +1647,14 @@ exports.createClaim = async ({ req, payload, userId }) => {
       status: normalizeUpper(data.status || "PENGAJUAN"),
       submitted_at: new Date(data.submitted_at),
       disbursed_at: data.disbursed_at ? new Date(data.disbursed_at) : null,
-      ...(fileMeta || {}),
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
       created_by: userId || null,
     }),
   );
@@ -1589,17 +1664,16 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   const current = await repository.findById("legal_claims", id, { deleted_at: null });
   if (!current) throw new AppError("Klaim tidak ditemukan.", 404);
   await ensureContract(current.contract_id, userId);
-  const fileMeta =
-    payload.file !== undefined && payload.file !== null
-      ? persistDomainFile({
-          entity: "legal/claims",
-          input: payload.file,
-          previousPath: current.file_path,
-          fallbackBaseName: payload.claim_type || current.claim_type,
-        })
-      : null;
+  const fileMetas = persistDomainFiles({
+    entity: "legal/claims",
+    inputs: normalizeUploadFiles(payload),
+    fallbackBaseName: payload.claim_type || current.claim_type,
+  });
+  const primaryFile =
+    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
   const data = { ...payload };
   delete data.file;
+  delete data.files;
   const targetContractId = data.contract_id || current.contract_id;
   if (data.claim_type !== undefined) {
     data.claim_type = await resolveLegalProcessType(
@@ -1654,7 +1728,14 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
     req,
     await repository.update("legal_claims", id, {
       ...data,
-      ...(fileMeta || {}),
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
       updated_by: userId || null,
     }),
   );
@@ -1675,12 +1756,13 @@ exports.createDeposit = async ({ req, payload, userId }) => {
   const depositTypeId = normalizeText(payload.deposit_type_id);
   const thirdPartyId = normalizeText(payload.third_party_id);
   const openingTransaction = payload.opening_transaction || null;
+  const openingInputs = normalizeUploadFiles(payload);
 
   await ensureContract(payload.contract_id, userId);
   await ensureDepositType(depositTypeId, type);
   await ensureDepositThirdParty(thirdPartyId, type);
 
-  if (payload.file && !openingTransaction) {
+  if (openingInputs.length > 0 && !openingTransaction) {
     throw new AppError(
       "File pendukung hanya bisa diunggah bersama transaksi awal titipan.",
       422,
@@ -1711,13 +1793,12 @@ exports.createDeposit = async ({ req, payload, userId }) => {
       if (action !== "TITIPAN") {
         throw new AppError("Transaksi awal dana titipan wajib berupa TITIPAN.", 422);
       }
-      const fileMeta = payload.file
-        ? persistDomainFile({
-            entity: "legal/deposit-transactions",
-            input: payload.file,
-            fallbackBaseName: `bukti-titipan-${deposit.id}`,
-          })
-        : null;
+      const openingFileMetas = persistDomainFiles({
+        entity: "legal/deposit-transactions",
+        inputs: openingInputs,
+        fallbackBaseName: `bukti-titipan-${deposit.id}`,
+      });
+      const primaryFile = openingFileMetas[0] || null;
       await repository.create(
         "legal_deposit_transactions",
         {
@@ -1726,7 +1807,14 @@ exports.createDeposit = async ({ req, payload, userId }) => {
           action,
           amount: openingTransaction.amount,
           notes: normalizeText(openingTransaction.notes),
-          ...depositTransactionFileFields(fileMeta),
+          ...depositTransactionFileFields(primaryFile),
+          ...(openingFileMetas.length > 0
+            ? {
+                files: {
+                  create: buildStoredFiles(openingFileMetas),
+                },
+              }
+            : {}),
           created_by: userId || null,
         },
         tx,
@@ -1827,13 +1915,12 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
     );
     if (!currentDeposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
     assertDepositCanDecreaseBalance(currentDeposit, action, amountValue);
-    const fileMeta = payload.file
-      ? persistDomainFile({
-          entity: "legal/deposit-transactions",
-          input: payload.file,
-          fallbackBaseName: `bukti-${action.toLowerCase()}-${payload.deposit_id}`,
-        })
-      : null;
+    const fileMetas = persistDomainFiles({
+      entity: "legal/deposit-transactions",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: `bukti-${action.toLowerCase()}-${payload.deposit_id}`,
+    });
+    const primaryFile = fileMetas[0] || null;
     const transaction = await repository.create(
       "legal_deposit_transactions",
       {
@@ -1842,7 +1929,14 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
         action,
         amount: payload.amount,
         notes: normalizeText(payload.notes),
-        ...depositTransactionFileFields(fileMeta),
+        ...depositTransactionFileFields(primaryFile),
+        ...(fileMetas.length > 0
+          ? {
+              files: {
+                create: buildStoredFiles(fileMetas),
+              },
+            }
+          : {}),
         created_by: userId || null,
       },
       tx,

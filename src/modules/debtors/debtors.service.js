@@ -14,7 +14,12 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
-const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
+const {
+  normalizeUploadFiles,
+  persistDomainFiles,
+  serializeFile,
+  serializeFiles,
+} = require("../../utils/domain-files");
 const {
   SLIK_REFERENCE_FIELD_MAPPINGS,
   resolveSlikReference,
@@ -37,6 +42,16 @@ const CUSTOMER_TYPE_STATUS_CODES = {
   INDIVIDUAL: "I",
   LEGAL_ENTITY: "B",
 };
+
+function buildStoredFiles(fileMetas = []) {
+  return fileMetas.map((fileMeta) => ({
+    file_path: fileMeta.file_path,
+    file_name: fileMeta.file_name,
+    mime_type: fileMeta.mime_type,
+    size_bytes: fileMeta.size_bytes,
+    checksum: fileMeta.checksum,
+  }));
+}
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -404,6 +419,10 @@ function serializeDocument(req, document) {
       entityId: document.id,
       fallbackBaseName: document.document_type,
     }),
+    files: serializeFiles(req, document, {
+      module: "debtor_information",
+      fallbackBaseName: document.document_type,
+    }),
     document_checklist: document.document_checklist || null,
     debtor: document.debtor ? serializeDebtor(document.debtor) : null,
     contract: document.contract || null,
@@ -435,6 +454,10 @@ function serializeMarketingActivity(req, item) {
     file: serializeFile(req, item, {
       module: "debtor_information",
       entityId: item.id,
+      fallbackBaseName: item.activity_kind,
+    }),
+    files: serializeFiles(req, item, {
+      module: "debtor_information",
       fallbackBaseName: item.activity_kind,
     }),
     contract: item.contract || null,
@@ -615,10 +638,24 @@ function serializeLegalFile(req, item, fallbackBaseName) {
   });
 }
 
+function serializeLegalFiles(req, item, fallbackBaseName) {
+  return serializeFiles(req, item, {
+    module: "legal_management",
+    fallbackBaseName,
+  });
+}
+
 function serializeDebtorFile(req, item, fallbackBaseName) {
   return serializeFile(req, item, {
     module: "debtor_information",
     entityId: item.id,
+    fallbackBaseName,
+  });
+}
+
+function serializeDebtorFiles(req, item, fallbackBaseName) {
+  return serializeFiles(req, item, {
+    module: "debtor_information",
     fallbackBaseName,
   });
 }
@@ -629,6 +666,14 @@ function serializeGeneratedLegalFile(req, item, fallbackBaseName) {
     entityId: item.id,
     prefix: "generated_",
     fallbackBaseName,
+  });
+}
+
+function serializeGeneratedLegalFiles(req, item, fallbackBaseName) {
+  return serializeFiles(req, item, {
+    module: "legal_management",
+    fallbackBaseName,
+    legacyPrefix: "generated_",
   });
 }
 
@@ -941,6 +986,7 @@ function serializePrint(req, item) {
   return {
     ...item,
     generated_file: serializeGeneratedLegalFile(req, item, item.document_type),
+    files: serializeGeneratedLegalFiles(req, item, item.document_type),
   };
 }
 
@@ -948,6 +994,7 @@ function serializeProgress(req, item, fallbackBaseName) {
   const serialized = {
     ...item,
     file: serializeLegalFile(req, item, fallbackBaseName),
+    files: serializeLegalFiles(req, item, fallbackBaseName),
   };
 
   if ("coverage_amount" in serialized) {
@@ -976,6 +1023,7 @@ function serializeWarningLetter(req, item) {
   return {
     ...item,
     file: serializeDebtorFile(req, item, item.letter_type),
+    files: serializeDebtorFiles(req, item, item.letter_type),
   };
 }
 
@@ -992,6 +1040,7 @@ function serializeClaim(req, item) {
     disbursed_amount:
       item.disbursed_amount === null ? null : decimalToNumber(item.disbursed_amount),
     file: serializeLegalFile(req, item, item.claim_type),
+    files: serializeLegalFiles(req, item, item.claim_type),
   };
 }
 
@@ -1001,6 +1050,7 @@ function serializeDepositTransaction(req, transaction) {
     raw_action: transaction.action,
     amount: decimalToNumber(transaction.amount),
     file: serializeLegalFile(req, transaction, `bukti-${transaction.action || "titipan"}`),
+    files: serializeLegalFiles(req, transaction, `bukti-${transaction.action || "titipan"}`),
   };
 }
 
@@ -1729,12 +1779,13 @@ exports.createDocument = async ({ req, debtorId, payload, userId }) => {
     }
   }
 
-  const fileMeta = persistDomainFile({
+  const fileMetas = persistDomainFiles({
     entity: "debtor-documents",
-    input: payload.file,
+    inputs: normalizeUploadFiles(payload),
     fallbackBaseName: payload.document_type,
   });
-  if (!fileMeta) throw new AppError("File dokumen wajib diunggah.", 422);
+  const primaryFile = fileMetas[0] || null;
+  if (!primaryFile) throw new AppError("File dokumen wajib diunggah.", 422);
 
   const document = await repository.createDocument({
     debtor_id: debtorId,
@@ -1743,7 +1794,10 @@ exports.createDocument = async ({ req, debtorId, payload, userId }) => {
     document_type: normalizeUpper(checklist?.document_type || payload.document_type),
     category: normalizeUpper(checklist?.category || payload.category || "LAINNYA"),
     description: normalizeText(payload.description),
-    ...fileMeta,
+    ...primaryFile,
+    files: {
+      create: buildStoredFiles(fileMetas),
+    },
     uploaded_by: userId || null,
     created_by: userId || null,
   });
