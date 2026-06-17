@@ -68,7 +68,7 @@ const DEBTOR_INCLUDE = {
       created_at: "desc",
     },
     include: {
-      files: true,
+      document_files: true,
     },
   },
 };
