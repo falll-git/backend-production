@@ -107,6 +107,8 @@ async function sendNotificationEmail(notification) {
     title: notification.title,
     message: notification.message,
     actionUrl: actionLink,
+    module: notification.module,
+    eventType: notification.event_type,
   });
 
   try {
@@ -319,7 +321,7 @@ exports.notifyArchiveLoanReturned = async ({ item, actorId }) => {
 
   return safeCreateNotifications(recipients, {
     module: "DIGITAL_ARCHIVE",
-    event_type: "INFO",
+    event_type: "RETURNED",
     entity_type: "DIGITAL_DOCUMENT_LOAN",
     entity_id: item.id,
     title: "Dokumen arsip telah dikembalikan",
@@ -399,7 +401,7 @@ exports.notifyIncomingMailDispositionCompleted = async ({
 
   return safeCreateNotifications(recipients, {
     module: "CORRESPONDENCE",
-    event_type: "INFO",
+    event_type: "COMPLETED",
     entity_type: "INCOMING_MAIL_DISPOSITION",
     entity_id: disposition?.id || incomingMail?.id,
     title: "Disposisi surat masuk selesai",
@@ -429,7 +431,7 @@ exports.notifyMemorandumDispositionCompleted = async ({
 
   return safeCreateNotifications(recipients, {
     module: "CORRESPONDENCE",
-    event_type: "INFO",
+    event_type: "COMPLETED",
     entity_type: "MEMORANDUM_DISPOSITION",
     entity_id: disposition?.id || memorandum?.id,
     title: "Disposisi memorandum selesai",
@@ -443,7 +445,7 @@ exports.notifyMemorandumDispositionCompleted = async ({
 };
 
 exports.notifyOutgoingMailFollowUpCreated = async ({ outgoingMail, actorId }) => {
-  if (!outgoingMail.created_by || (!outgoingMail.send_due_date && !outgoingMail.response_due_date)) {
+  if (!outgoingMail.created_by || !outgoingMail.response_due_date) {
     return null;
   }
 
@@ -453,8 +455,8 @@ exports.notifyOutgoingMailFollowUpCreated = async ({ outgoingMail, actorId }) =>
     event_type: "INFO",
     entity_type: "OUTGOING_MAIL",
     entity_id: outgoingMail.id,
-    title: "Pengingat surat keluar tercatat",
-    message: `${mailLabel(outgoingMail)} memiliki tenggat follow-up yang akan dipantau.`,
+    title: "Batas follow-up surat keluar tercatat",
+    message: `${mailLabel(outgoingMail)} memiliki batas follow-up yang akan dipantau.`,
     link_url: `/dashboard/manajemen-surat/laporan?kind=surat-keluar&id=${outgoingMail.id}`,
     priority: "NORMAL",
     dedupe_key: `correspondence:outgoing_followup_created:${outgoingMail.id}`,
@@ -633,17 +635,13 @@ async function generateOutgoingMailReminders(userId, now, nextThreeDays) {
       created_by: userId,
       deleted_at: null,
       status: "ACTIVE",
-      OR: [
-        { send_due_date: { lte: nextThreeDays } },
-        { response_due_date: { lte: nextThreeDays } },
-      ],
+      response_due_date: { lte: nextThreeDays },
     },
     take: 50,
   });
 
   for (const item of mails) {
     const reminders = [
-      { key: "send", value: item.send_due_date, label: "pengiriman" },
       { key: "response", value: item.response_due_date, label: "balasan/follow-up" },
     ].filter((entry) => entry.value);
 
@@ -655,10 +653,12 @@ async function generateOutgoingMailReminders(userId, now, nextThreeDays) {
         module: "CORRESPONDENCE",
         entityType: "OUTGOING_MAIL",
         entityId: item.id,
-        title: overdue ? "Surat keluar melewati tenggat" : "Surat keluar mendekati tenggat",
+        title: overdue
+          ? "Follow-up surat keluar melewati batas"
+          : "Follow-up surat keluar mendekati batas",
         message: overdue
-          ? `${mailLabel(item)} melewati tenggat ${reminder.label} ${dateLabel(reminder.value)}.`
-          : `${mailLabel(item)} memiliki tenggat ${reminder.label} pada ${dateLabel(reminder.value)}.`,
+          ? `${mailLabel(item)} melewati batas ${reminder.label} ${dateLabel(reminder.value)}.`
+          : `${mailLabel(item)} memiliki batas ${reminder.label} pada ${dateLabel(reminder.value)}.`,
         linkUrl: `/dashboard/manajemen-surat/laporan?kind=surat-keluar&id=${item.id}`,
         overdue,
         dedupeKey: `correspondence:outgoing_${reminder.key}_${overdue ? "overdue" : "due_soon"}:${item.id}:recipient:${userId}`,
@@ -727,5 +727,19 @@ exports.markAllRead = async ({ userId }) => {
   const result = await repository.markAllRead(userId);
   return {
     updated_count: result.count || 0,
+  };
+};
+
+exports.clearOne = async ({ id, userId }) => {
+  const result = await repository.softDeleteOne(id, userId);
+  return {
+    deleted_count: result.count || 0,
+  };
+};
+
+exports.clearAll = async ({ userId }) => {
+  const result = await repository.softDeleteAll(userId);
+  return {
+    deleted_count: result.count || 0,
   };
 };

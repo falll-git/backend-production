@@ -94,7 +94,6 @@ const URLS = {
   thirdPartyInsurance:
     "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
   thirdPartyKjpp: "/dashboard/parameter/pihak-ketiga/kjpp",
-  numberingTemplate: "/dashboard/parameter/template-penomoran",
   documentChecklist: "/dashboard/parameter/checklist-dokumen",
   financingProduct: "/dashboard/parameter/produk-pembiayaan",
   contractType: "/dashboard/parameter/jenis-akad",
@@ -118,7 +117,6 @@ const EXTENDED_PARAMETER_URLS = [
   URLS.thirdPartyNotary,
   URLS.thirdPartyInsurance,
   URLS.thirdPartyKjpp,
-  URLS.numberingTemplate,
   URLS.documentChecklist,
   URLS.financingProduct,
   URLS.contractType,
@@ -144,7 +142,6 @@ const DEBTOR_REPORT_URLS = [
   URLS.debtorReportMarketingActivity,
 ];
 const LEGAL_CRUD_URLS = [
-  URLS.legalTemplate,
   URLS.legalDepositInsurance,
   URLS.legalDepositNotary,
   URLS.legalDepositInstallment,
@@ -154,18 +151,8 @@ const LEGAL_CRUD_URLS = [
   URLS.legalProgressKjpp,
   URLS.legalProgressClaim,
 ];
-const LEGAL_PRINT_URLS = [
-  URLS.legalPrintAkad,
-  URLS.legalPrintHaftsheet,
-  URLS.legalPrintWarningLetter,
-  URLS.legalPrintCoverLetter,
-  URLS.legalPrintSkl,
-  URLS.legalPrintSamsat,
-  URLS.legalPrintOther,
-];
 const LEGAL_REPORT_URLS = [
   URLS.legalOverview,
-  URLS.legalReport,
   URLS.legalReportThirdPartyDocuments,
   URLS.legalReportThirdPartyDepositFunds,
 ];
@@ -173,7 +160,6 @@ const DASHBOARD_REPORT_WIDGET_URLS = [
   URLS.archiveReport,
   URLS.correspondenceReport,
   URLS.debtorReport,
-  URLS.legalReport,
   URLS.legalReportThirdPartyDocuments,
   URLS.legalReportThirdPartyDepositFunds,
   URLS.debtorReportNpf,
@@ -203,7 +189,18 @@ const CORRESPONDENCE_MONITOR_URLS = [
 ];
 const DISABLED_MENU_ROOT_NAMES = [];
 const DISABLED_MENU_BRANCHES = [];
-const DISABLED_MENU_URLS = [];
+const DISABLED_MENU_URLS = [
+  URLS.legalTemplate,
+  URLS.legalPrintAkad,
+  URLS.legalPrintHaftsheet,
+  URLS.legalPrintWarningLetter,
+  URLS.legalPrintCoverLetter,
+  URLS.legalPrintSkl,
+  URLS.legalPrintSamsat,
+  URLS.legalPrintOther,
+  URLS.legalReport,
+  "/dashboard/parameter/template-penomoran",
+];
 const ROLE_MENU_POLICIES = {
   Admin: [
     { url: URLS.dashboard, permissions: ["read"] },
@@ -311,11 +308,6 @@ const ROLE_MENU_POLICIES = {
     ...LEGAL_CRUD_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update", "delete"],
-      features: [MANAGE_ALL_FEATURE],
-    })),
-    ...LEGAL_PRINT_URLS.map((url) => ({
-      url,
-      permissions: ["create", "read"],
       features: [MANAGE_ALL_FEATURE],
     })),
     ...LEGAL_REPORT_URLS.map((url) => ({
@@ -446,11 +438,6 @@ const ROLE_MENU_POLICIES = {
       permissions: ["read"],
       features: [VIEW_DIVISION_FEATURE],
     })),
-    ...LEGAL_PRINT_URLS.map((url) => ({
-      url,
-      permissions: ["read"],
-      features: [VIEW_DIVISION_FEATURE],
-    })),
     ...LEGAL_REPORT_URLS.map((url) => ({
       url,
       permissions: ["read"],
@@ -569,18 +556,9 @@ const ROLE_MENU_POLICIES = {
       features: [VIEW_DIVISION_FEATURE],
     })),
 
-    {
-      url: URLS.legalTemplate,
-      permissions: ["read"],
-    },
-    ...LEGAL_CRUD_URLS.filter((url) => url !== URLS.legalTemplate).map((url) => ({
+    ...LEGAL_CRUD_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update"],
-      features: [VIEW_DIVISION_FEATURE],
-    })),
-    ...LEGAL_PRINT_URLS.map((url) => ({
-      url,
-      permissions: ["create", "read"],
       features: [VIEW_DIVISION_FEATURE],
     })),
     ...LEGAL_REPORT_URLS.map((url) => ({
@@ -632,14 +610,9 @@ const ROLE_MENU_POLICIES = {
       permissions: ["read"],
     })),
 
-    { url: URLS.legalTemplate, permissions: ["read"] },
-    ...LEGAL_CRUD_URLS.filter((url) => url !== URLS.legalTemplate).map((url) => ({
+    ...LEGAL_CRUD_URLS.map((url) => ({
       url,
       permissions: ["create", "read", "update"],
-    })),
-    ...LEGAL_PRINT_URLS.map((url) => ({
-      url,
-      permissions: ["create", "read"],
     })),
     ...LEGAL_REPORT_URLS.map((url) => ({
       url,

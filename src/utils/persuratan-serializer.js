@@ -365,6 +365,30 @@ function getDeadlineStatus(value) {
   };
 }
 
+function getOutgoingFollowUpStatus(value) {
+  if (!value) {
+    return {
+      follow_up_status: "NONE",
+      follow_up_status_label: "Tidak ada batas follow-up",
+      is_follow_up_overdue: false,
+    };
+  }
+
+  if (isOverdueDate(value)) {
+    return {
+      follow_up_status: "OVERDUE",
+      follow_up_status_label: "Lewat batas follow-up",
+      is_follow_up_overdue: true,
+    };
+  }
+
+  return {
+    follow_up_status: "ACTIVE",
+    follow_up_status_label: "Perlu follow-up",
+    is_follow_up_overdue: false,
+  };
+}
+
 function getTimeValue(value) {
   if (!value) return 0;
   const parsed = new Date(value);
@@ -405,16 +429,15 @@ function buildDispositionDeadlineMeta(dispositions) {
 }
 
 function buildOutgoingDeadlineMeta(record) {
-  const sendDueDate = toIsoDateTime(record.send_due_date);
   const responseDueDate = toIsoDateTime(record.response_due_date);
-  const followUpDueDate = responseDueDate || sendDueDate;
+  const followUpDueDate = responseDueDate;
 
   return {
-    send_due_date: sendDueDate,
+    send_due_date: null,
     response_due_date: responseDueDate,
     follow_up_due_date: followUpDueDate,
     follow_up_note: record.follow_up_note ?? null,
-    ...getDeadlineStatus(followUpDueDate),
+    ...getOutgoingFollowUpStatus(followUpDueDate),
   };
 }
 

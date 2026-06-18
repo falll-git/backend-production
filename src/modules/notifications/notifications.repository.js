@@ -106,6 +106,31 @@ function markAllRead(recipientId) {
   });
 }
 
+function softDeleteOne(id, recipientId) {
+  return prisma.notifications.updateMany({
+    where: {
+      id,
+      recipient_id: recipientId,
+      deleted_at: null,
+    },
+    data: {
+      deleted_at: new Date(),
+    },
+  });
+}
+
+function softDeleteAll(recipientId) {
+  return prisma.notifications.updateMany({
+    where: {
+      recipient_id: recipientId,
+      deleted_at: null,
+    },
+    data: {
+      deleted_at: new Date(),
+    },
+  });
+}
+
 function findUsersByIds(ids) {
   const uniqueIds = Array.from(new Set((ids || []).filter(Boolean)));
   if (uniqueIds.length === 0) return Promise.resolve([]);
@@ -159,5 +184,7 @@ module.exports = {
   findUsersWithMenuAction,
   markAllRead,
   markRead,
+  softDeleteAll,
+  softDeleteOne,
   update,
 };

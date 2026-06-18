@@ -58,6 +58,27 @@ function buildDateRange(start, end) {
   return range;
 }
 
+function toStartOfDay(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function isBeforeCalendarDate(left, right) {
+  const leftDay = toStartOfDay(left);
+  const rightDay = toStartOfDay(right);
+
+  if (!leftDay || !rightDay) {
+    return false;
+  }
+
+  return leftDay.getTime() < rightDay.getTime();
+}
+
 function buildSearchWhere(search) {
   const normalized = normalizeText(search);
   if (!normalized) return {};
@@ -674,10 +695,7 @@ exports.handover = async ({ req, id, payload, userId }) => {
   }
 
   const handoverAt = new Date(payload.handover_at);
-  if (
-    item.approved_at &&
-    handoverAt.getTime() < new Date(item.approved_at).getTime()
-  ) {
+  if (item.approved_at && isBeforeCalendarDate(handoverAt, item.approved_at)) {
     throw new AppError(
       "Tanggal penyerahan tidak boleh lebih awal dari waktu persetujuan",
       422,
@@ -743,10 +761,7 @@ exports.returnLoan = async ({ req, id, payload, userId }) => {
   }
 
   const returnedAt = new Date(payload.returned_at);
-  if (
-    item.handover_at &&
-    returnedAt.getTime() < new Date(item.handover_at).getTime()
-  ) {
+  if (item.handover_at && isBeforeCalendarDate(returnedAt, item.handover_at)) {
     throw new AppError(
       "Tanggal pengembalian tidak boleh lebih awal dari waktu penyerahan",
       422,
