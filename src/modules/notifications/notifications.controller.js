@@ -66,3 +66,34 @@ exports.markAllRead = async (req, res) => {
     });
   }
 };
+
+exports.clearOne = async (req, res) => {
+  try {
+    const data = await service.clearOne({
+      id: req.params.id,
+      userId: req.user?.id,
+    });
+    return successResponse(res, data, "Notifikasi dihapus.");
+  } catch (error) {
+    return res.status(status(error)).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.clearAll = async (req, res) => {
+  try {
+    const data = await service.clearAll({
+      userId: req.user?.id,
+    });
+    return successResponse(res, data, "Semua notifikasi dibersihkan.");
+  } catch (error) {
+    return res.status(status(error)).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};

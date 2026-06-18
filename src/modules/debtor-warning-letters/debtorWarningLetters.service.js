@@ -209,6 +209,9 @@ exports.create = async ({ req, payload, userId }) => {
     inputs: normalizeUploadFiles(payload),
     fallbackBaseName: data.letter_type,
   });
+  if (fileMetas.length === 0) {
+    throw new AppError("File surat peringatan wajib dipilih.", 400);
+  }
   const primaryFile = fileMetas[0] || null;
 
   return serialize(

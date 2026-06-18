@@ -22,7 +22,11 @@ const payload = {
   files: filesSchema.optional(),
 };
 
-exports.createWarningLetterSchema = Joi.object(payload);
+exports.createWarningLetterSchema = Joi.object(payload)
+  .or("file", "files")
+  .messages({
+    "object.missing": "File surat peringatan wajib dipilih.",
+  });
 exports.updateWarningLetterSchema = Joi.object(
   Object.fromEntries(
     Object.entries(payload).map(([field, schema]) => [

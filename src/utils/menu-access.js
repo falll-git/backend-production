@@ -310,8 +310,20 @@ const MENU_FEATURES = {
 const DEBTOR_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
   url.startsWith("/dashboard/informasi-debitur"),
 );
+const TEMPORARILY_DISABLED_LEGAL_MENU_URLS = new Set([
+  "/dashboard/legal/template-dokumen",
+  "/dashboard/legal/cetak/akad",
+  "/dashboard/legal/cetak/haftsheet",
+  "/dashboard/legal/cetak/surat-peringatan",
+  "/dashboard/legal/cetak/surat-pengantar",
+  "/dashboard/legal/cetak/keterangan-lunas",
+  "/dashboard/legal/cetak/surat-samsat",
+  "/dashboard/legal/cetak/dokumen-lainnya",
+  "/dashboard/legal/laporan",
+]);
 const LEGAL_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
-  url.startsWith("/dashboard/legal"),
+  url.startsWith("/dashboard/legal") &&
+    !TEMPORARILY_DISABLED_LEGAL_MENU_URLS.has(url),
 );
 
 function normalizeCapabilities(capabilities) {

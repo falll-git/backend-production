@@ -4,6 +4,22 @@ const { serializeMenuAccess } = require("../../utils/menu-access");
 const { resolveRequestUser } = require("../../utils/rbac");
 
 const DASHBOARD_WIDGET_MENU_TYPE = "DASHBOARD_WIDGET";
+const TEMPORARILY_DISABLED_MENU_URLS = new Set([
+  "/dashboard/parameter/template-dokumen-legal",
+  "/dashboard/parameter/template-penomoran",
+  "/dashboard/legal/template-dokumen",
+  "/dashboard/legal/cetak/akad",
+  "/dashboard/legal/cetak/haftsheet",
+  "/dashboard/legal/cetak/surat-peringatan",
+  "/dashboard/legal/cetak/surat-pengantar",
+  "/dashboard/legal/cetak/keterangan-lunas",
+  "/dashboard/legal/cetak/surat-samsat",
+  "/dashboard/legal/cetak/dokumen-lainnya",
+  "/dashboard/legal/laporan",
+]);
+const TEMPORARILY_DISABLED_COMPONENT_KEYS = new Set([
+  "dashboard.module_report.legal",
+]);
 const MAIN_REPORT_WIDGET_ORDER = {
   "dashboard.module_report.digital_archive": 10,
   "dashboard.module_report.correspondence": 20,
@@ -27,6 +43,16 @@ function normalizeMenuForResponse(menu, children) {
     url,
     children,
   });
+}
+
+function isTemporarilyDisabledMenu(menu) {
+  const url = typeof menu?.url === "string" ? menu.url : "";
+  if (TEMPORARILY_DISABLED_MENU_URLS.has(url)) return true;
+  return TEMPORARILY_DISABLED_COMPONENT_KEYS.has(menu?.component_key || "");
+}
+
+function filterTemporarilyDisabledMenus(menus) {
+  return menus.filter((menu) => !isTemporarilyDisabledMenu(menu));
 }
 
 function shouldRenderInSidebar(menu) {
@@ -136,7 +162,7 @@ async function normalizeMenuPayload(payload) {
 }
 
 exports.getAllMenus = async (requestUser) => {
-  const menus = await repository.findMany();
+  const menus = filterTemporarilyDisabledMenus(await repository.findMany());
   const access = await resolveMenuAccess(requestUser, menus);
   const visibleMenus = menus.filter((menu) => access.allowedMenuIds.has(menu.id));
 
@@ -144,7 +170,7 @@ exports.getAllMenus = async (requestUser) => {
 };
 
 exports.getAllMenusForManagement = async () => {
-  const menus = await repository.findMany();
+  const menus = filterTemporarilyDisabledMenus(await repository.findMany());
   return buildMenuTree(menus, null);
 };
 
@@ -163,6 +189,7 @@ exports.getDashboardWidgets = async (requestUser) => {
   );
 
   return roleMenus
+    .filter((roleMenu) => !isTemporarilyDisabledMenu(roleMenu.menu))
     .sort((left, right) => {
       const leftOrder = getDashboardWidgetOrder(left.menu);
       const rightOrder = getDashboardWidgetOrder(right.menu);
@@ -189,8 +216,11 @@ exports.getDashboardWidgets = async (requestUser) => {
 exports.getMenuById = async (id, requestUser) => {
   const menu = await repository.findById(id);
   if (!menu) throw new Error("Menu tidak ditemukan.");
+  if (isTemporarilyDisabledMenu(menu)) {
+    throw new AppError("Menu tidak ditemukan.", 404);
+  }
 
-  const menus = await repository.findMany();
+  const menus = filterTemporarilyDisabledMenus(await repository.findMany());
   const access = await resolveMenuAccess(requestUser, menus);
   if (!access.allowedMenuIds.has(menu.id)) {
     throw new AppError("Anda tidak memiliki izin untuk melihat menu ini.", 403);

@@ -303,64 +303,9 @@ const menuTree = [
     order: 5,
     children: [
       {
-        name: "Template Dokumen Legal",
-        url: "/dashboard/legal/template-dokumen",
-        icon: "lucide lucide-file-text",
-        order: 1,
-      },
-      {
-        name: "Cetak Dokumen Legal",
-        icon: "lucide lucide-printer",
-        order: 2,
-        children: [
-          {
-            name: "Dokumen Akad",
-            url: "/dashboard/legal/cetak/akad",
-            icon: "lucide lucide-file-text",
-            order: 1,
-          },
-          {
-            name: "Haftsheet",
-            url: "/dashboard/legal/cetak/haftsheet",
-            icon: "lucide lucide-check-square",
-            order: 2,
-          },
-          {
-            name: "Surat Peringatan",
-            url: "/dashboard/legal/cetak/surat-peringatan",
-            icon: "lucide lucide-mail",
-            order: 3,
-          },
-          {
-            name: "Surat Pengantar",
-            url: "/dashboard/legal/cetak/surat-pengantar",
-            icon: "lucide lucide-send",
-            order: 4,
-          },
-          {
-            name: "Surat Keterangan Lunas",
-            url: "/dashboard/legal/cetak/keterangan-lunas",
-            icon: "lucide lucide-award",
-            order: 5,
-          },
-          {
-            name: "Surat Samsat",
-            url: "/dashboard/legal/cetak/surat-samsat",
-            icon: "lucide lucide-car",
-            order: 6,
-          },
-          {
-            name: "Dokumen Lainnya",
-            url: "/dashboard/legal/cetak/dokumen-lainnya",
-            icon: "lucide lucide-files",
-            order: 7,
-          },
-        ],
-      },
-      {
         name: "Progress Pihak Ketiga",
         icon: "lucide lucide-clipboard-check",
-        order: 3,
+        order: 1,
         children: [
           {
             name: "Progress Notaris",
@@ -391,7 +336,7 @@ const menuTree = [
       {
         name: "Dana Titipan",
         icon: "lucide lucide-wallet",
-        order: 4,
+        order: 2,
         children: [
           {
             name: "Dana Titipan Asuransi",
@@ -420,21 +365,12 @@ const menuTree = [
         ],
       },
       {
-        name: "Laporan Legal",
-        url: "/dashboard/legal/laporan",
-        icon: "lucide lucide-bar-chart-2",
-        component_key: "dashboard.module_report.legal",
-        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
-        render_in_sidebar: false,
-        order: 5,
-      },
-      {
         name: "Laporan Pihak 3 - Dokumen",
         url: "/dashboard/legal/laporan/pihak-ketiga/dokumen",
         icon: "lucide lucide-file-text",
         component_key: "dashboard.report.third_party_documents",
         ...DASHBOARD_WIDGET_MENU,
-        order: 6,
+        order: 3,
       },
       {
         name: "Laporan Pihak 3 - Dana Titipan",
@@ -442,7 +378,7 @@ const menuTree = [
         icon: "lucide lucide-wallet",
         component_key: "dashboard.report.third_party_deposit_funds",
         ...DASHBOARD_WIDGET_MENU,
-        order: 7,
+        order: 4,
       },
     ],
   },
@@ -600,19 +536,6 @@ const menuTree = [
           },
         ],
       },
-      {
-        name: "Penomoran Dokumen",
-        icon: "lucide lucide-hash",
-        order: 6,
-        children: [
-          {
-            name: "Setup Template Penomoran",
-            url: "/dashboard/parameter/template-penomoran",
-            icon: "lucide lucide-hash",
-            order: 1,
-          },
-        ],
-      },
     ],
   },
 ];
@@ -629,23 +552,35 @@ const LEGACY_MENU_URLS = [
   "/dashboard/parameter/sla-pengingat",
   "/dashboard/arsip-digital/report",
   "/dashboard/arsip-digital/reports",
-    "/dashboard/arsip-digital/laporan-arsip-digital",
-    "/dashboard/arsip-digital/report-arsip-digital",
-    "/dashboard/informasi-debitur/admin/import-debitur",
-    "/dashboard/informasi-debitur/admin/import-kolektibilitas",
-    "/dashboard/parameter/kolektibilitas",
-    "/dashboard/informasi-debitur/dokumen",
+  "/dashboard/arsip-digital/laporan-arsip-digital",
+  "/dashboard/arsip-digital/report-arsip-digital",
+  "/dashboard/informasi-debitur/admin/import-debitur",
+  "/dashboard/informasi-debitur/admin/import-kolektibilitas",
+  "/dashboard/parameter/kolektibilitas",
+  "/dashboard/informasi-debitur/dokumen",
   "/dashboard/informasi-debitur/marketing/surat-peringatan",
   "/dashboard/legal/upload-ideb",
   "/dashboard/legal/cetak/formulir-asuransi",
+  "/dashboard/legal/template-dokumen",
+  "/dashboard/legal/cetak/akad",
+  "/dashboard/legal/cetak/haftsheet",
+  "/dashboard/legal/cetak/surat-peringatan",
+  "/dashboard/legal/cetak/surat-pengantar",
+  "/dashboard/legal/cetak/keterangan-lunas",
+  "/dashboard/legal/cetak/surat-samsat",
+  "/dashboard/legal/cetak/dokumen-lainnya",
+  "/dashboard/legal/laporan",
+  "/dashboard/parameter/template-penomoran",
 ];
 
 const LEGACY_EMPTY_MENU_NAMES = [
   "Admin",
+  "Cetak Dokumen Legal",
   "Input Progress",
   "Input Progres PHK3",
   "Laporan",
   "Master Pihak Ketiga",
+  "Penomoran Dokumen",
   "Setup Pihak Ketiga",
 ];
 

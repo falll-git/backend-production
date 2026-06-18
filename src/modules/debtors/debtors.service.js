@@ -1523,12 +1523,11 @@ exports.getWorkflow = async ({ req, id, userId }) => {
   const canViewLegalWorkflow = await userHasAnyMenuRead(userId, LEGAL_DATA_SCOPE_URLS);
   const canViewIdebWorkflow = await userHasAnyMenuRead(userId, [
     "/dashboard/informasi-debitur/admin/upload-ideb",
-    ...LEGAL_DATA_SCOPE_URLS,
+    "/dashboard/informasi-debitur/laporan-ideb",
   ]);
   const canViewWarningLetters = await userHasAnyMenuRead(userId, [
     "/dashboard/informasi-debitur",
     "/dashboard/informasi-debitur/master-debitur",
-    "/dashboard/legal/cetak/surat-peringatan",
   ]);
   const legalWorkflow = canViewLegalWorkflow
     ? {

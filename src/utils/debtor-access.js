@@ -21,24 +21,14 @@ const DEBTOR_DATA_SCOPE_URLS = [
 ];
 
 const LEGAL_DATA_SCOPE_URLS = [
-  "/dashboard/legal/template-dokumen",
-  "/dashboard/legal/cetak/akad",
-  "/dashboard/legal/cetak/haftsheet",
-  "/dashboard/legal/cetak/surat-peringatan",
-  "/dashboard/legal/cetak/surat-pengantar",
-  "/dashboard/legal/cetak/keterangan-lunas",
-  "/dashboard/legal/cetak/surat-samsat",
-  "/dashboard/legal/cetak/dokumen-lainnya",
   "/dashboard/legal/titipan/asuransi",
   "/dashboard/legal/titipan/notaris",
   "/dashboard/legal/titipan/angsuran",
+  "/dashboard/legal/titipan/lainnya",
   "/dashboard/legal/progress/notaris",
   "/dashboard/legal/progress/asuransi",
   "/dashboard/legal/progress/kjpp",
   "/dashboard/legal/progress/klaim",
-  "/dashboard/legal/laporan",
-  "/dashboard/legal/laporan/pihak-ketiga/dokumen",
-  "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
 ];
 
 async function getDebtorAccessScope(userId, urls = DEBTOR_DATA_SCOPE_URLS) {

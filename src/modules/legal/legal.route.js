@@ -2,6 +2,7 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
+const { AppError } = require("../../utils/errors");
 const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
@@ -12,15 +13,8 @@ const controller = require("./legal.controller");
 const validation = require("./legal.validation");
 
 const router = express.Router();
-const PRINT_URLS = [
-  "/dashboard/legal/cetak/akad",
-  "/dashboard/legal/cetak/haftsheet",
-  "/dashboard/legal/cetak/surat-peringatan",
-  "/dashboard/legal/cetak/surat-pengantar",
-  "/dashboard/legal/cetak/keterangan-lunas",
-  "/dashboard/legal/cetak/surat-samsat",
-  "/dashboard/legal/cetak/dokumen-lainnya",
-];
+const TEMPORARILY_DISABLED_FEATURE_MESSAGE =
+  "Fitur legal ini dinonaktifkan sementara.";
 const DEPOSIT_URLS = [
   "/dashboard/legal/titipan/asuransi",
   "/dashboard/legal/titipan/notaris",
@@ -51,50 +45,41 @@ const uploadBody = [
   }),
 ];
 
+function blockTemporarily(_req, _res, next) {
+  next(new AppError(TEMPORARILY_DISABLED_FEATURE_MESSAGE, 404));
+}
+
 router.get(
   "/templates",
   auth,
-  authorize("/dashboard/legal/template-dokumen", "read"),
-  controller.listTemplates,
+  blockTemporarily,
 );
 router.post(
   "/templates",
   auth,
-  authorize("/dashboard/legal/template-dokumen", "create"),
-  ...uploadBody,
-  validate(validation.templateSchema),
-  controller.createTemplate,
+  blockTemporarily,
 );
 router.put(
   "/templates/:id",
   auth,
-  authorize("/dashboard/legal/template-dokumen", "update"),
-  ...uploadBody,
-  validate(validation.updateTemplateSchema),
-  controller.updateTemplate,
+  blockTemporarily,
 );
 router.delete(
   "/templates/:id",
   auth,
-  authorize("/dashboard/legal/template-dokumen", "delete"),
-  controller.deleteTemplate,
+  blockTemporarily,
 );
 
 router.get(
   "/print-documents/context",
   auth,
-  authorize(PRINT_URLS, "read"),
-  validate(validation.printDocumentContextQuerySchema, { source: "query" }),
-  controller.printDocumentContext,
+  blockTemporarily,
 );
-router.get("/print-documents", auth, authorize(PRINT_URLS, "read"), controller.listPrints);
+router.get("/print-documents", auth, blockTemporarily);
 router.post(
   "/print-documents",
   auth,
-  authorize(PRINT_URLS, "create"),
-  ...uploadBody,
-  validate(validation.printDocumentSchema),
-  controller.createPrint,
+  blockTemporarily,
 );
 
 router.get(
@@ -249,7 +234,7 @@ router.post(
 router.get(
   "/reports/summary",
   auth,
-  authorize("/dashboard/legal/laporan", "read"),
+  authorize("/dashboard/legal", "read"),
   controller.summaryReport,
 );
 router.get(
