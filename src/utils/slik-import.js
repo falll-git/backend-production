@@ -686,6 +686,7 @@ module.exports = {
   parseSlikFiles,
   prepareParseOptions,
   streamSlikTextFile,
+  validateSlikFileMeta,
   defaultDateForPeriod,
   normalizeText,
   normalizeUpper,

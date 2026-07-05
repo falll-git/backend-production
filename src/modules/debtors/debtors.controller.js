@@ -45,6 +45,19 @@ exports.getWorkflow = async (req, res) => {
   }
 };
 
+exports.getActivityLogs = async (req, res) => {
+  try {
+    const result = await service.getActivityLogs({
+      debtorId: req.params.id,
+      query: req.query,
+      userId: req.user?.id,
+    });
+    return paginatedResponse(res, result.data, result.meta);
+  } catch (error) {
+    return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
+  }
+};
+
 exports.getIdebComparison = async (req, res) => {
   try {
     return successResponse(

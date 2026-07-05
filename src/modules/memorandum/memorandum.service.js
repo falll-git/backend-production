@@ -433,7 +433,7 @@ exports.getDispositionRecipients = async ({ query, currentUserId }) => {
 exports.createMemorandum = async ({ req, payload, userId }) => {
   const assignments = await resolveActiveDivisionManagers(
     resolveTargetDivisionIds(payload),
-    { menuUrls: [MEMORANDUM_MENU_URL] },
+    { menuUrls: [MEMORANDUM_MENU_URL], excludeUserId: userId },
   );
   const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({

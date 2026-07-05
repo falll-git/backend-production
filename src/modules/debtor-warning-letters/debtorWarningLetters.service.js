@@ -18,12 +18,34 @@ const {
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
+const {
+  auditSnapshot,
+  requestMetadata,
+  safeRecordDebtorActivity,
+} = require("../../utils/debtor-audit-log");
 
 const READ_SCOPE_URLS = [
   "/dashboard/informasi-debitur",
   "/dashboard/informasi-debitur/master-debitur",
 ];
 const MANAGE_SCOPE_URLS = ["/dashboard/informasi-debitur/master-debitur"];
+const WARNING_LETTER_AUDIT_FIELDS = [
+  "id",
+  "debtor_id",
+  "contract_id",
+  "letter_type",
+  "issued_at",
+  "sent_at",
+  "delivery_status",
+  "description",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+];
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -214,21 +236,37 @@ exports.create = async ({ req, payload, userId }) => {
   }
   const primaryFile = fileMetas[0] || null;
 
-  return serialize(
-    req,
-    await repository.create({
-      ...data,
-      ...(primaryFile || {}),
-      ...(fileMetas.length > 0
-        ? {
-            files: {
-              create: buildStoredFiles(fileMetas),
-            },
-          }
-        : {}),
-      created_by: userId || null,
-    }),
-  );
+  const created = await repository.create({
+    ...data,
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
+    created_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "UPLOAD_WARNING_LETTER",
+    source: "MANUAL",
+    entity_type: "debtor_warning_letters",
+    entity_id: created.id,
+    debtor_id: created.debtor_id,
+    contract_id: created.contract_id || null,
+    warning_letter_id: created.id,
+    title: `Upload surat peringatan ${created.letter_type}`,
+    after_data: auditSnapshot(created, WARNING_LETTER_AUDIT_FIELDS),
+    metadata: {
+      file_count: fileMetas.length,
+      file_names: fileMetas.map((file) => file.file_name).filter(Boolean),
+    },
+    ...requestMetadata(req),
+  });
+
+  return serialize(req, created);
 };
 
 exports.update = async ({ req, id, payload, userId }) => {
@@ -243,27 +281,58 @@ exports.update = async ({ req, id, payload, userId }) => {
   const primaryFile =
     !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
 
-  return serialize(
-    req,
-    await repository.update(id, {
-      ...data,
-      ...(primaryFile || {}),
-      ...(fileMetas.length > 0
-        ? {
-            files: {
-              create: buildStoredFiles(fileMetas),
-            },
-          }
-        : {}),
-      updated_by: userId || null,
-    }),
-  );
+  const updated = await repository.update(id, {
+    ...data,
+    ...(primaryFile || {}),
+    ...(fileMetas.length > 0
+      ? {
+          files: {
+            create: buildStoredFiles(fileMetas),
+          },
+        }
+      : {}),
+    updated_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "UPDATE_WARNING_LETTER",
+    source: "MANUAL",
+    entity_type: "debtor_warning_letters",
+    entity_id: updated.id,
+    debtor_id: updated.debtor_id,
+    contract_id: updated.contract_id || null,
+    warning_letter_id: updated.id,
+    title: `Ubah surat peringatan ${updated.letter_type}`,
+    before_data: auditSnapshot(current, WARNING_LETTER_AUDIT_FIELDS),
+    after_data: auditSnapshot(updated, WARNING_LETTER_AUDIT_FIELDS),
+    metadata: {
+      file_count: fileMetas.length,
+      file_names: fileMetas.map((file) => file.file_name).filter(Boolean),
+    },
+    ...requestMetadata(req),
+  });
+
+  return serialize(req, updated);
 };
 
 exports.delete = async ({ req, id, userId }) => {
-  await exports.getByIdForManage({ req, id, userId });
-  await repository.update(id, {
+  const current = await exports.getByIdForManage({ req, id, userId });
+  const deleted = await repository.update(id, {
     deleted_at: new Date(),
     deleted_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "DELETE_WARNING_LETTER",
+    source: "MANUAL",
+    entity_type: "debtor_warning_letters",
+    entity_id: deleted.id,
+    debtor_id: deleted.debtor_id,
+    contract_id: deleted.contract_id || null,
+    warning_letter_id: deleted.id,
+    title: `Hapus surat peringatan ${deleted.letter_type}`,
+    before_data: auditSnapshot(current, WARNING_LETTER_AUDIT_FIELDS),
+    after_data: auditSnapshot(deleted, WARNING_LETTER_AUDIT_FIELDS),
+    ...requestMetadata(req),
   });
 };

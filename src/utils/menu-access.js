@@ -33,6 +33,7 @@ const DIVISION_MANAGER_FEATURE = "division_manager";
 const REDISPOSE_FEATURE = "redispose";
 const APPROVE_FEATURE = "approve";
 const REJECT_FEATURE = "reject";
+const REVOKE_FEATURE = "revoke";
 const HANDOVER_FEATURE = "handover";
 const RETURN_FEATURE = "return";
 
@@ -44,6 +45,7 @@ const FEATURE_LABELS = {
   [REDISPOSE_FEATURE]: "Redisposisi",
   [APPROVE_FEATURE]: "Setujui",
   [REJECT_FEATURE]: "Tolak",
+  [REVOKE_FEATURE]: "Cabut Akses",
   [HANDOVER_FEATURE]: "Serahkan",
   [RETURN_FEATURE]: "Kembalikan",
 };
@@ -58,7 +60,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/arsip-digital/ruang-arsip/jatuh-tempo": READ_ONLY,
   "/dashboard/arsip-digital/disposisi/pengajuan": READ_CREATE,
   "/dashboard/arsip-digital/disposisi/permintaan": READ_UPDATE,
-  "/dashboard/arsip-digital/disposisi/historis": READ_ONLY,
+  "/dashboard/arsip-digital/disposisi/historis": READ_UPDATE,
   "/dashboard/arsip-digital/peminjaman/request": READ_CREATE,
   "/dashboard/arsip-digital/peminjaman/accept": READ_UPDATE,
   "/dashboard/arsip-digital/peminjaman/laporan": READ_ONLY,
@@ -82,18 +84,10 @@ const MENU_CAPABILITIES = {
   "/dashboard/informasi-debitur/admin/upload-ideb": READ_CREATE,
   "/dashboard/informasi-debitur/laporan-ideb": READ_ONLY,
   "/dashboard/informasi-debitur/laporan": READ_ONLY,
-  "/dashboard/informasi-debitur/laporan/npf": READ_ONLY,
-  "/dashboard/informasi-debitur/laporan/aktivitas-marketing": READ_ONLY,
+  "/dashboard/widgets/informasi-debitur/npf": READ_ONLY,
+  "/dashboard/widgets/informasi-debitur/aktivitas-marketing": READ_ONLY,
 
   "/dashboard/legal": READ_ONLY,
-  "/dashboard/legal/template-dokumen": CRUD,
-  "/dashboard/legal/cetak/akad": READ_CREATE,
-  "/dashboard/legal/cetak/haftsheet": READ_CREATE,
-  "/dashboard/legal/cetak/surat-peringatan": READ_CREATE,
-  "/dashboard/legal/cetak/surat-pengantar": READ_CREATE,
-  "/dashboard/legal/cetak/keterangan-lunas": READ_CREATE,
-  "/dashboard/legal/cetak/surat-samsat": READ_CREATE,
-  "/dashboard/legal/cetak/dokumen-lainnya": READ_CREATE,
   "/dashboard/legal/titipan/asuransi": CRUD,
   "/dashboard/legal/titipan/notaris": CRUD,
   "/dashboard/legal/titipan/angsuran": CRUD,
@@ -157,6 +151,7 @@ const MENU_FEATURES = {
   "/dashboard/arsip-digital/disposisi/historis": [
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
+    REVOKE_FEATURE,
   ],
   "/dashboard/arsip-digital/peminjaman/request": [
     REPORT_ALL_FEATURE,
@@ -214,6 +209,10 @@ const MENU_FEATURES = {
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
   ],
+  "/dashboard/informasi-debitur/laporan-ideb": [
+    REPORT_ALL_FEATURE,
+    VIEW_DIVISION_FEATURE,
+  ],
   "/dashboard/informasi-debitur": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
@@ -237,37 +236,15 @@ const MENU_FEATURES = {
   "/dashboard/informasi-debitur/admin/upload-slik": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/monitoring-import": [MANAGE_ALL_FEATURE],
   "/dashboard/informasi-debitur/admin/upload-ideb": [MANAGE_ALL_FEATURE],
-  "/dashboard/informasi-debitur/laporan/npf": [
+  "/dashboard/widgets/informasi-debitur/npf": [
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
   ],
-  "/dashboard/informasi-debitur/laporan/aktivitas-marketing": [
+  "/dashboard/widgets/informasi-debitur/aktivitas-marketing": [
     REPORT_ALL_FEATURE,
     VIEW_DIVISION_FEATURE,
   ],
   "/dashboard/legal": [REPORT_ALL_FEATURE, VIEW_DIVISION_FEATURE],
-  "/dashboard/legal/cetak/akad": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/cetak/haftsheet": [VIEW_DIVISION_FEATURE, MANAGE_ALL_FEATURE],
-  "/dashboard/legal/cetak/surat-peringatan": [
-    VIEW_DIVISION_FEATURE,
-    MANAGE_ALL_FEATURE,
-  ],
-  "/dashboard/legal/cetak/surat-pengantar": [
-    VIEW_DIVISION_FEATURE,
-    MANAGE_ALL_FEATURE,
-  ],
-  "/dashboard/legal/cetak/keterangan-lunas": [
-    VIEW_DIVISION_FEATURE,
-    MANAGE_ALL_FEATURE,
-  ],
-  "/dashboard/legal/cetak/surat-samsat": [
-    VIEW_DIVISION_FEATURE,
-    MANAGE_ALL_FEATURE,
-  ],
-  "/dashboard/legal/cetak/dokumen-lainnya": [
-    VIEW_DIVISION_FEATURE,
-    MANAGE_ALL_FEATURE,
-  ],
   "/dashboard/legal/titipan/asuransi": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
@@ -310,20 +287,8 @@ const MENU_FEATURES = {
 const DEBTOR_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
   url.startsWith("/dashboard/informasi-debitur"),
 );
-const TEMPORARILY_DISABLED_LEGAL_MENU_URLS = new Set([
-  "/dashboard/legal/template-dokumen",
-  "/dashboard/legal/cetak/akad",
-  "/dashboard/legal/cetak/haftsheet",
-  "/dashboard/legal/cetak/surat-peringatan",
-  "/dashboard/legal/cetak/surat-pengantar",
-  "/dashboard/legal/cetak/keterangan-lunas",
-  "/dashboard/legal/cetak/surat-samsat",
-  "/dashboard/legal/cetak/dokumen-lainnya",
-  "/dashboard/legal/laporan",
-]);
 const LEGAL_MENU_URLS = Object.keys(MENU_CAPABILITIES).filter((url) =>
-  url.startsWith("/dashboard/legal") &&
-    !TEMPORARILY_DISABLED_LEGAL_MENU_URLS.has(url),
+  url.startsWith("/dashboard/legal"),
 );
 
 function normalizeCapabilities(capabilities) {
@@ -472,6 +437,7 @@ module.exports = {
   REDISPOSE_FEATURE,
   REJECT_FEATURE,
   REPORT_ALL_FEATURE,
+  REVOKE_FEATURE,
   RETURN_FEATURE,
   VIEW_DIVISION_FEATURE,
   assertMenuFeaturesAllowed,

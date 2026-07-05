@@ -25,8 +25,8 @@ const REPORT_URLS = {
   facilities: "/dashboard/informasi-debitur/laporan",
   collaterals: "/dashboard/informasi-debitur/laporan",
   completeness: "/dashboard/informasi-debitur/laporan",
-  npf: "/dashboard/informasi-debitur/laporan/npf",
-  marketingActivity: "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+  npf: "/dashboard/widgets/informasi-debitur/npf",
+  marketingActivity: "/dashboard/widgets/informasi-debitur/aktivitas-marketing",
 };
 
 const ACTIVE_CONTRACT_STATUSES = ["ACTIVE", "AKTIF", "BERJALAN"];

@@ -16,6 +16,10 @@ const {
   SLIK_REFERENCE_FIELD_MAPPINGS,
   withSlikReferenceFields,
 } = require("../../utils/slik-reference-dictionary");
+const {
+  auditSnapshot,
+  safeRecordDebtorActivity,
+} = require("../../utils/debtor-audit-log");
 
 const SORTABLE_FIELDS = new Set([
   "no_kontrak",
@@ -26,6 +30,30 @@ const SORTABLE_FIELDS = new Set([
   "created_at",
   "updated_at",
 ]);
+const CONTRACT_AUDIT_FIELDS = [
+  "id",
+  "no_kontrak",
+  "debtor_id",
+  "product_id",
+  "akad_type_id",
+  "branch_id",
+  "marketing_user_id",
+  "tanggal_akad",
+  "tanggal_jatuh_tempo",
+  "plafond",
+  "pokok",
+  "margin",
+  "tenor",
+  "outstanding_pokok",
+  "outstanding_margin",
+  "status",
+  "objek_pembiayaan",
+  "agunan",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+];
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -376,12 +404,22 @@ exports.create = async ({ payload, userId }) => {
   await ensureReferences(normalized);
   await ensureDebtorAccessible(normalized.debtor_id, userId);
   try {
-    return serializeContract(
-      await repository.create({
+    const created = await repository.create({
         ...normalized,
         created_by: userId || null,
-      }),
-    );
+      });
+    await safeRecordDebtorActivity(undefined, {
+      actor_id: userId || null,
+      action: "CREATE",
+      source: "MANUAL",
+      entity_type: "debtor_contracts",
+      entity_id: created.id,
+      debtor_id: created.debtor_id,
+      contract_id: created.id,
+      title: `Input kontrak ${created.no_kontrak}`,
+      after_data: auditSnapshot(created, CONTRACT_AUDIT_FIELDS),
+    });
+    return serializeContract(created);
   } catch (error) {
     if (error?.code === "P2002") {
       throw new AppError("Nomor kontrak sudah digunakan.", 409);
@@ -416,17 +454,28 @@ async function getManageableContract(id, userId) {
 }
 
 exports.update = async ({ id, payload, userId }) => {
-  await getManageableContract(id, userId);
+  const current = await getManageableContract(id, userId);
   const normalized = compactUndefined(normalizePayload(payload));
   await ensureReferences(normalized);
   await ensureDebtorAccessible(normalized.debtor_id, userId);
   try {
-    return serializeContract(
-      await repository.update(id, {
+    const updated = await repository.update(id, {
         ...normalized,
         updated_by: userId || null,
-      }),
-    );
+      });
+    await safeRecordDebtorActivity(undefined, {
+      actor_id: userId || null,
+      action: "UPDATE",
+      source: "MANUAL",
+      entity_type: "debtor_contracts",
+      entity_id: updated.id,
+      debtor_id: updated.debtor_id,
+      contract_id: updated.id,
+      title: `Ubah kontrak ${updated.no_kontrak}`,
+      before_data: auditSnapshot(current, CONTRACT_AUDIT_FIELDS),
+      after_data: auditSnapshot(updated, CONTRACT_AUDIT_FIELDS),
+    });
+    return serializeContract(updated);
   } catch (error) {
     if (error?.code === "P2002") {
       throw new AppError("Nomor kontrak sudah digunakan.", 409);
@@ -436,10 +485,22 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  await getManageableContract(id, userId);
-  await repository.update(id, {
+  const current = await getManageableContract(id, userId);
+  const deleted = await repository.update(id, {
     status: "INACTIVE",
     deleted_at: new Date(),
     deleted_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "DELETE",
+    source: "MANUAL",
+    entity_type: "debtor_contracts",
+    entity_id: deleted.id,
+    debtor_id: deleted.debtor_id,
+    contract_id: deleted.id,
+    title: `Nonaktifkan kontrak ${deleted.no_kontrak}`,
+    before_data: auditSnapshot(current, CONTRACT_AUDIT_FIELDS),
+    after_data: auditSnapshot(deleted, CONTRACT_AUDIT_FIELDS),
   });
 };

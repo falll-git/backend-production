@@ -40,8 +40,6 @@ const DIGITAL_DOCUMENT_WRITE_URLS = [
 const DIGITAL_DOCUMENT_UPDATE_URLS = [
   "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
 ];
-const DIGITAL_DOCUMENT_REQUESTABLE_URL =
-  "/dashboard/arsip-digital/disposisi/pengajuan";
 
 async function queueDigitalDocumentWatermark(documentId) {
   try {
@@ -394,7 +392,7 @@ function buildDocumentWhere(query, scope) {
 }
 
 function buildRequestableDocumentWhere(query, scope) {
-  if (!scope?.userId || scope.canViewAllDocuments) {
+  if (!scope?.userId) {
     return {
       id: "__no_requestable_digital_documents__",
     };
@@ -403,13 +401,29 @@ function buildRequestableDocumentWhere(query, scope) {
   const canAccessRestrictedDocuments = Boolean(
     scope.canAccessRestrictedDocuments ?? scope.canAccessRestricted,
   );
+
+  if (scope.canViewAllDocuments && canAccessRestrictedDocuments) {
+    return {
+      id: "__no_requestable_digital_documents__",
+    };
+  }
+
   const clauses = [
     {
       deleted_at: null,
     },
-    canAccessRestrictedDocuments ? {} : { access_level: "NON_RESTRICT" },
     {
       NOT: buildDocumentVisibilityWhere(scope),
+    },
+    {
+      NOT: {
+        access_requests: {
+          some: {
+            requester_id: scope.userId,
+            status: "PENDING",
+          },
+        },
+      },
     },
     buildSearchWhere(query.search),
   ];
@@ -866,10 +880,7 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
 };
 
 exports.getRequestable = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(
-    userId,
-    DIGITAL_DOCUMENT_REQUESTABLE_URL,
-  );
+  const scope = await getDigitalArchiveAccessScope(userId);
   const where = buildRequestableDocumentWhere(query, scope);
   const pagination = resolvePagination(query, {
     ...PAGINATION_PROFILES.TABLE,

@@ -14,40 +14,6 @@ const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 const depositType = Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN", "LAINNYA");
 const depositTransactionAction = Joi.string().valid("TITIPAN", "PEMBAYARAN", "REFUND");
 
-exports.templateSchema = Joi.object({
-  template_type: Joi.string()
-    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
-    .required(),
-  version: Joi.number().integer().min(1).default(1),
-  title: Joi.string().trim().min(1).max(255).required(),
-  content_template: Joi.string().trim().allow("", null).optional(),
-  is_active: Joi.boolean().default(true),
-  file: fileSchema.optional(),
-  files: filesSchema.optional(),
-});
-
-exports.printDocumentSchema = Joi.object({
-  template_id: uuid.required(),
-  numbering_template_id: optionalUuid.optional(),
-  contract_id: uuid.required(),
-  collateral_id: optionalUuid.optional(),
-  document_type: Joi.string()
-    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
-    .required(),
-  payload_snapshot: Joi.object().optional(),
-  generated_number: Joi.any().strip(),
-  file: fileSchema.optional(),
-  files: filesSchema.optional(),
-});
-
-exports.printDocumentContextQuerySchema = Joi.object({
-  contract_id: uuid.required(),
-  document_type: Joi.string()
-    .valid("AKAD", "HAFTSHEET", "SURAT_PERINGATAN", "SURAT_PENGANTAR", "SKL", "SAMSAT", "DOKUMEN_LAINNYA")
-    .required(),
-  collateral_id: optionalUuid.optional(),
-});
-
 exports.notaryProgressSchema = Joi.object({
   contract_id: uuid.required(),
   collateral_id: optionalUuid.optional(),
@@ -157,7 +123,6 @@ function makeUpdate(schema) {
     .messages({ "object.min": "Tidak ada data yang diperbarui." });
 }
 
-exports.updateTemplateSchema = makeUpdate(exports.templateSchema);
 exports.updateNotaryProgressSchema = makeUpdate(exports.notaryProgressSchema);
 exports.updateInsuranceProgressSchema = makeUpdate(exports.insuranceProgressSchema);
 exports.updateKjppProgressSchema = makeUpdate(exports.kjppProgressSchema);

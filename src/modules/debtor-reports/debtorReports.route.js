@@ -7,9 +7,9 @@ const validation = require("./debtorReports.validation");
 
 const router = express.Router();
 const REPORT_URL = "/dashboard/informasi-debitur/laporan";
-const NPF_REPORT_URL = "/dashboard/informasi-debitur/laporan/npf";
+const NPF_REPORT_URL = "/dashboard/widgets/informasi-debitur/npf";
 const MARKETING_REPORT_URL =
-  "/dashboard/informasi-debitur/laporan/aktivitas-marketing";
+  "/dashboard/widgets/informasi-debitur/aktivitas-marketing";
 
 router.get(
   "/summary",
@@ -49,7 +49,7 @@ router.get(
 router.get(
   "/npf",
   auth,
-  authorize([NPF_REPORT_URL, REPORT_URL], "read"),
+  authorize(NPF_REPORT_URL, "read"),
   validate(validation.npfQuerySchema, { source: "query" }),
   controller.npf,
 );

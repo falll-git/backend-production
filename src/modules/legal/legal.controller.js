@@ -48,41 +48,13 @@ function update(method, message) {
 function remove(modelName, message) {
   return async (req, res) => {
     try {
-      await service.deleteRecord({ modelName, id: req.params.id, userId: req.user?.id });
+      await service.deleteRecord({ req, modelName, id: req.params.id, userId: req.user?.id });
       return successResponse(res, null, message);
     } catch (error) {
       return res.status(status(error)).json({ status: false, success: false, message: error.message });
     }
   };
 }
-
-exports.listTemplates = list("listTemplates");
-exports.createTemplate = create("createTemplate", "Template legal berhasil dibuat.");
-exports.updateTemplate = update("updateTemplate", "Template legal berhasil diperbarui.");
-exports.deleteTemplate = async (req, res) => {
-  try {
-    await service.deleteTemplate({ id: req.params.id, userId: req.user?.id });
-    return successResponse(res, null, "Template legal berhasil dihapus.");
-  } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
-  }
-};
-
-exports.listPrints = list("listPrints");
-exports.printDocumentContext = async (req, res) => {
-  try {
-    return successResponse(
-      res,
-      await service.getPrintDocumentContext({
-        query: req.query,
-        userId: req.user?.id,
-      }),
-    );
-  } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
-  }
-};
-exports.createPrint = create("createPrint", "Dokumen legal berhasil dicetak.");
 
 exports.listNotaryProgress = list("listNotaryProgress");
 exports.createNotaryProgress = create("createNotaryProgress", "Progress notaris berhasil dibuat.");
@@ -184,6 +156,14 @@ exports.thirdPartyDepositFundsReport = async (req, res) => {
       res,
       await service.getThirdPartyDepositFundsReport(req.query, req.user?.id),
     );
+  } catch (error) {
+    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+  }
+};
+exports.activityLogsReport = async (req, res) => {
+  try {
+    const result = await service.getActivityLogsReport(req.query, req.user?.id);
+    return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
     return res.status(status(error)).json({ status: false, success: false, message: error.message });
   }

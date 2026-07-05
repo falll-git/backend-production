@@ -9,8 +9,14 @@ const {
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
   canScopeAccessDocument,
+  isAccessRequestActive,
+  normalizeAccessExpiresAt,
 } = require("../../utils/digital-archive-access");
-const { APPROVE_FEATURE, REJECT_FEATURE } = require("../../utils/menu-access");
+const {
+  APPROVE_FEATURE,
+  REJECT_FEATURE,
+  REVOKE_FEATURE,
+} = require("../../utils/menu-access");
 const { roleHasFeature, roleHasPermission } = require("../../utils/rbac");
 const {
   PAGINATION_PROFILES,
@@ -20,22 +26,18 @@ const {
 
 const ACCESS_REQUEST_ACTION_URL =
   "/dashboard/arsip-digital/disposisi/permintaan";
+const ACCESS_REQUEST_HISTORY_URL =
+  "/dashboard/arsip-digital/disposisi/historis";
 const ACCESS_REQUEST_READ_URLS = [
   "/dashboard/arsip-digital/disposisi/pengajuan",
   "/dashboard/arsip-digital/disposisi/permintaan",
   "/dashboard/arsip-digital/disposisi/historis",
 ];
-const ACCESS_REQUEST_CREATE_URL =
-  "/dashboard/arsip-digital/disposisi/pengajuan";
 
 function normalizeText(value) {
   return String(value || "")
     .trim()
     .replace(/\s+/g, " ");
-}
-
-function isRestrictedDocument(document) {
-  return document?.access_level === "RESTRICT" || document?.is_restricted === true;
 }
 
 function buildSearchWhere(search) {
@@ -119,7 +121,7 @@ function buildWhere(query, userId) {
       .toLowerCase() === "history"
   ) {
     where.status = {
-      in: ["APPROVED", "REJECTED"],
+      in: ["APPROVED", "REJECTED", "REVOKED"],
     };
   } else if (query.status) {
     where.status = String(query.status).trim().toUpperCase();
@@ -170,6 +172,10 @@ function buildWhere(query, userId) {
   return where;
 }
 
+function isActiveApprovedAccess(item) {
+  return isAccessRequestActive(item);
+}
+
 async function getAccessRequestActionAccess(scope) {
   const [canReadActionQueue, canApprove, canReject] = await Promise.all([
     roleHasPermission(scope?.roleId, ACCESS_REQUEST_ACTION_URL, "read"),
@@ -218,10 +224,6 @@ function buildVisibilityWhere(scope, userId, actionAccess = {}) {
     document: buildDocumentVisibilityWhere(scope),
   };
 
-  if (scope?.canViewAllDocuments) {
-    return visibleDocumentWhere;
-  }
-
   if (!userId) {
     return visibleDocumentWhere;
   }
@@ -247,9 +249,6 @@ function buildVisibilityWhere(scope, userId, actionAccess = {}) {
 
 function canViewAccessRequest(item, scope, userId, actionAccess = {}) {
   if (!item) return false;
-  if (scope?.canViewAllDocuments) {
-    return canScopeAccessDocument(item.document, scope);
-  }
   if (!userId) return false;
   if (canViewActionQueueItem(item, scope, actionAccess)) return true;
 
@@ -262,6 +261,13 @@ function canViewAccessRequest(item, scope, userId, actionAccess = {}) {
 }
 
 async function assertAccessRequestActionActor({ item, userId, feature }) {
+  if (item.requester_id === userId) {
+    throw new AppError(
+      "Pemohon tidak dapat memproses pengajuan disposisi miliknya sendiri",
+      403,
+    );
+  }
+
   const scope = await getDigitalArchiveAccessScope(
     userId,
     ACCESS_REQUEST_ACTION_URL,
@@ -294,6 +300,28 @@ async function assertAccessRequestActionActor({ item, userId, feature }) {
 
   if (!canViewActionQueueItem(item, scope, { canReadActionQueue: true })) {
     throw new AppError("Pengajuan akses dokumen tidak ditemukan", 404);
+  }
+}
+
+async function assertAccessRequestRevokeActor({ item, userId }) {
+  const scope = await getDigitalArchiveAccessScope(
+    userId,
+    ACCESS_REQUEST_HISTORY_URL,
+  );
+  const [canUpdate, hasRevokeFeature] = await Promise.all([
+    roleHasPermission(scope.roleId, ACCESS_REQUEST_HISTORY_URL, "update"),
+    roleHasFeature(scope.roleId, ACCESS_REQUEST_HISTORY_URL, REVOKE_FEATURE),
+  ]);
+
+  if (!canUpdate || !hasRevokeFeature) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk mencabut akses dokumen",
+      403,
+    );
+  }
+
+  if (!canScopeAccessDocument(item.document, scope)) {
+    throw new AppError("Riwayat disposisi tidak ditemukan", 404);
   }
 }
 
@@ -355,13 +383,10 @@ exports.create = async ({ req, payload, userId }) => {
 
   const documentIds = Array.from(new Set(payload.document_ids));
   const createdIds = [];
-  const requesterScope = await getDigitalArchiveAccessScope(
-    userId,
-    ACCESS_REQUEST_CREATE_URL,
-  );
-  const expiresAt = new Date(payload.expires_at);
+  const requesterScope = await getDigitalArchiveAccessScope(userId);
+  const expiresAt = normalizeAccessExpiresAt(payload.expires_at);
 
-  if (expiresAt.getTime() <= Date.now()) {
+  if (!expiresAt || expiresAt.getTime() <= Date.now()) {
     throw new AppError(
       "Tanggal berakhir akses harus lebih besar dari waktu saat ini",
       422,
@@ -375,16 +400,6 @@ exports.create = async ({ req, payload, userId }) => {
       });
 
       if (!document) {
-        throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
-      }
-
-      if (
-        isRestrictedDocument(document) &&
-        !Boolean(
-          requesterScope.canAccessRestrictedDocuments ??
-            requesterScope.canAccessRestricted,
-        )
-      ) {
         throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
       }
 
@@ -487,8 +502,10 @@ exports.approve = async ({ req, id, payload, userId }) => {
     feature: APPROVE_FEATURE,
   });
 
-  const expiresAt = new Date(payload.expires_at || item.expires_at);
-  if (expiresAt.getTime() <= Date.now()) {
+  const expiresAt = normalizeAccessExpiresAt(
+    payload.expires_at || item.expires_at,
+  );
+  if (!expiresAt || expiresAt.getTime() <= Date.now()) {
     throw new AppError(
       "Tanggal berakhir akses harus lebih besar dari waktu saat ini",
       422,
@@ -587,5 +604,55 @@ exports.reject = async ({ req, id, payload, userId }) => {
     actorId: userId,
     approved: false,
   });
+  return serializeDigitalDocumentAccessRequest(req, updated);
+};
+
+exports.revoke = async ({ req, id, payload = {}, userId }) => {
+  if (!userId) {
+    throw new AppError("User tidak dikenali", 401);
+  }
+
+  const item = await repository.findById(id);
+  if (!item) {
+    throw new AppError("Riwayat disposisi tidak ditemukan", 404);
+  }
+
+  if (!isActiveApprovedAccess(item)) {
+    throw new AppError("Hanya akses aktif yang dapat dicabut", 409);
+  }
+
+  await assertAccessRequestRevokeActor({ item, userId });
+
+  await repository.withTransaction(async (client) => {
+    const actedAt = new Date();
+    const note =
+      normalizeText(payload.action_note) || "Akses dokumen dicabut";
+    const result = await repository.update(
+      id,
+      {
+        status: "REVOKED",
+        action_note: note,
+        acted_by: userId,
+        acted_at: actedAt,
+        expired_at: actedAt,
+      },
+      client,
+    );
+
+    await digitalDocumentRepository.createActivityLog(
+      {
+        document_id: result.document_id,
+        actor_id: userId,
+        action: "ACCESS_REVOKED",
+        to_storage_id: item.document.storage_id,
+        reference_type: "ACCESS_REQUEST",
+        reference_id: result.id,
+        description: "Akses dokumen dicabut",
+      },
+      client,
+    );
+  });
+
+  const updated = await repository.findById(id);
   return serializeDigitalDocumentAccessRequest(req, updated);
 };

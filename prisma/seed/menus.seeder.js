@@ -280,7 +280,7 @@ const menuTree = [
       },
       {
         name: "Laporan NPF",
-        url: "/dashboard/informasi-debitur/laporan/npf",
+        url: "/dashboard/widgets/informasi-debitur/npf",
         icon: "lucide lucide-trending-down",
         component_key: "dashboard.report.npf",
         ...DASHBOARD_WIDGET_MENU,
@@ -288,7 +288,7 @@ const menuTree = [
       },
       {
         name: "Laporan Aktivitas Marketing",
-        url: "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+        url: "/dashboard/widgets/informasi-debitur/aktivitas-marketing",
         icon: "lucide lucide-clipboard-check",
         component_key: "dashboard.report.marketing_activity",
         ...DASHBOARD_WIDGET_MENU,
@@ -365,20 +365,26 @@ const menuTree = [
         ],
       },
       {
-        name: "Laporan Pihak 3 - Dokumen",
+        name: "Laporan Legal",
+        url: "/dashboard/legal/laporan",
+        icon: "lucide lucide-clipboard-list",
+        order: 3,
+      },
+      {
+        name: "Laporan Progress Pihak Ketiga",
         url: "/dashboard/legal/laporan/pihak-ketiga/dokumen",
         icon: "lucide lucide-file-text",
         component_key: "dashboard.report.third_party_documents",
         ...DASHBOARD_WIDGET_MENU,
-        order: 3,
+        order: 4,
       },
       {
-        name: "Laporan Pihak 3 - Dana Titipan",
+        name: "Laporan Dana Titipan",
         url: "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
         icon: "lucide lucide-wallet",
         component_key: "dashboard.report.third_party_deposit_funds",
         ...DASHBOARD_WIDGET_MENU,
-        order: 4,
+        order: 5,
       },
     ],
   },
@@ -569,7 +575,6 @@ const LEGACY_MENU_URLS = [
   "/dashboard/legal/cetak/keterangan-lunas",
   "/dashboard/legal/cetak/surat-samsat",
   "/dashboard/legal/cetak/dokumen-lainnya",
-  "/dashboard/legal/laporan",
   "/dashboard/parameter/template-penomoran",
 ];
 

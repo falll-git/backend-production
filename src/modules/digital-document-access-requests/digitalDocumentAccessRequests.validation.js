@@ -41,8 +41,13 @@ const rejectAccessRequestSchema = Joi.object({
   }),
 });
 
+const revokeAccessRequestSchema = Joi.object({
+  action_note: Joi.string().trim().allow("", null).optional(),
+});
+
 module.exports = {
   approveAccessRequestSchema,
   createAccessRequestSchema,
   rejectAccessRequestSchema,
+  revokeAccessRequestSchema,
 };

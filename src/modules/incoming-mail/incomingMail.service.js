@@ -426,7 +426,7 @@ exports.getDispositionRecipients = async ({ query, currentUserId }) => {
 exports.createIncomingMailsWithDispo = async ({ req, payload, senderId }) => {
   const assignments = await resolveActiveDivisionManagers(
     resolveTargetDivisionIds(payload),
-    { menuUrls: [INCOMING_MAIL_MENU_URL] },
+    { menuUrls: [INCOMING_MAIL_MENU_URL], excludeUserId: senderId },
   );
   const storageId = await resolveActiveStorageId(payload.storage_id);
   const storedFile = persistPersuratanFile({

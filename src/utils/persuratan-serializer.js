@@ -365,30 +365,6 @@ function getDeadlineStatus(value) {
   };
 }
 
-function getOutgoingFollowUpStatus(value) {
-  if (!value) {
-    return {
-      follow_up_status: "NONE",
-      follow_up_status_label: "Tidak ada batas follow-up",
-      is_follow_up_overdue: false,
-    };
-  }
-
-  if (isOverdueDate(value)) {
-    return {
-      follow_up_status: "OVERDUE",
-      follow_up_status_label: "Lewat batas follow-up",
-      is_follow_up_overdue: true,
-    };
-  }
-
-  return {
-    follow_up_status: "ACTIVE",
-    follow_up_status_label: "Perlu follow-up",
-    is_follow_up_overdue: false,
-  };
-}
-
 function getTimeValue(value) {
   if (!value) return 0;
   const parsed = new Date(value);
@@ -420,24 +396,18 @@ function buildDispositionDeadlineMeta(dispositions) {
       .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
     null;
   const dueDate = dueItem?.due_date ?? null;
+  const hasActiveDueDate = activeDueItems.length > 0;
 
   return {
     due_date: dueDate,
     note: noteItem?.note ?? null,
-    ...getDeadlineStatus(dueDate),
-  };
-}
-
-function buildOutgoingDeadlineMeta(record) {
-  const responseDueDate = toIsoDateTime(record.response_due_date);
-  const followUpDueDate = responseDueDate;
-
-  return {
-    send_due_date: null,
-    response_due_date: responseDueDate,
-    follow_up_due_date: followUpDueDate,
-    follow_up_note: record.follow_up_note ?? null,
-    ...getOutgoingFollowUpStatus(followUpDueDate),
+    ...(dueDate && !hasActiveDueDate
+      ? {
+          follow_up_status: "COMPLETED",
+          follow_up_status_label: "Selesai",
+          is_follow_up_overdue: false,
+        }
+      : getDeadlineStatus(dueDate)),
   };
 }
 
@@ -731,7 +701,6 @@ async function serializeOutgoingMail({ req, record, deliveryMediaNames = null })
   });
   const status = resolveOutgoingMailStatus(record);
   const storage = serializeStorageSummary(record.storage);
-  const deadlineMeta = buildOutgoingDeadlineMeta(record);
 
   return {
     ...record,
@@ -754,7 +723,6 @@ async function serializeOutgoingMail({ req, record, deliveryMediaNames = null })
     physical_storage: storage,
     physical_storage_label: storage?.location_label ?? null,
     send_date: toIsoDateTime(record.send_date),
-    ...deadlineMeta,
     created_at: toIsoDateTime(record.created_at),
     updated_at: toIsoDateTime(record.updated_at),
     deleted_at: toIsoDateTime(record.deleted_at),

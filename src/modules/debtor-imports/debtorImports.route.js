@@ -79,6 +79,12 @@ router.patch(
   controller.resolveIdeb,
 );
 router.post(
+  "/slik/:jobId/retry",
+  auth,
+  authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  controller.retrySlik,
+);
+router.post(
   "/master",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),

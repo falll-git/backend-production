@@ -444,27 +444,6 @@ exports.notifyMemorandumDispositionCompleted = async ({
   });
 };
 
-exports.notifyOutgoingMailFollowUpCreated = async ({ outgoingMail, actorId }) => {
-  if (!outgoingMail.created_by || !outgoingMail.response_due_date) {
-    return null;
-  }
-
-  return safeCreateNotification({
-    recipient_id: outgoingMail.created_by,
-    module: "CORRESPONDENCE",
-    event_type: "INFO",
-    entity_type: "OUTGOING_MAIL",
-    entity_id: outgoingMail.id,
-    title: "Batas follow-up surat keluar tercatat",
-    message: `${mailLabel(outgoingMail)} memiliki batas follow-up yang akan dipantau.`,
-    link_url: `/dashboard/manajemen-surat/laporan?kind=surat-keluar&id=${outgoingMail.id}`,
-    priority: "NORMAL",
-    dedupe_key: `correspondence:outgoing_followup_created:${outgoingMail.id}`,
-    created_by: actorId,
-    email: false,
-  });
-};
-
 async function createDueNotification({ userId, module, entityType, entityId, title, message, linkUrl, overdue, dedupeKey }) {
   return safeCreateNotification({
     recipient_id: userId,
@@ -629,44 +608,6 @@ async function generateMemorandumReminders(userId, now, nextThreeDays) {
   }
 }
 
-async function generateOutgoingMailReminders(userId, now, nextThreeDays) {
-  const mails = await prisma.outgoing_mails.findMany({
-    where: {
-      created_by: userId,
-      deleted_at: null,
-      status: "ACTIVE",
-      response_due_date: { lte: nextThreeDays },
-    },
-    take: 50,
-  });
-
-  for (const item of mails) {
-    const reminders = [
-      { key: "response", value: item.response_due_date, label: "balasan/follow-up" },
-    ].filter((entry) => entry.value);
-
-    for (const reminder of reminders) {
-      if (reminder.value > nextThreeDays) continue;
-      const overdue = reminder.value < now;
-      await createDueNotification({
-        userId,
-        module: "CORRESPONDENCE",
-        entityType: "OUTGOING_MAIL",
-        entityId: item.id,
-        title: overdue
-          ? "Follow-up surat keluar melewati batas"
-          : "Follow-up surat keluar mendekati batas",
-        message: overdue
-          ? `${mailLabel(item)} melewati batas ${reminder.label} ${dateLabel(reminder.value)}.`
-          : `${mailLabel(item)} memiliki batas ${reminder.label} pada ${dateLabel(reminder.value)}.`,
-        linkUrl: `/dashboard/manajemen-surat/laporan?kind=surat-keluar&id=${item.id}`,
-        overdue,
-        dedupeKey: `correspondence:outgoing_${reminder.key}_${overdue ? "overdue" : "due_soon"}:${item.id}:recipient:${userId}`,
-      });
-    }
-  }
-}
-
 async function generateDueNotifications(userId) {
   if (!userId) return;
 
@@ -677,7 +618,6 @@ async function generateDueNotifications(userId) {
   await generateArchiveLoanReminders(userId, now, nextThreeDays);
   await generateIncomingMailReminders(userId, now, nextThreeDays);
   await generateMemorandumReminders(userId, now, nextThreeDays);
-  await generateOutgoingMailReminders(userId, now, nextThreeDays);
 }
 
 exports.getAll = async ({ query, userId }) => {
