@@ -17,6 +17,11 @@ const {
   buildDebtorVisibilityWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
+const {
+  auditSnapshot,
+  requestMetadata,
+  safeRecordDebtorActivity,
+} = require("../../utils/debtor-audit-log");
 
 const KIND_BY_SLUG = {
   "action-plans": "ACTION_PLAN",
@@ -28,6 +33,32 @@ const REQUIRED_FIELD_BY_KIND = {
   VISIT_RESULT: "visit_result",
   HANDLING_STEP: "handling_step",
 };
+const MARKETING_ACTIVITY_AUDIT_FIELDS = [
+  "id",
+  "activity_kind",
+  "debtor_id",
+  "contract_id",
+  "timeline_id",
+  "timeline_group_id",
+  "related_activity_id",
+  "activity_date",
+  "target_date",
+  "status",
+  "action_plan",
+  "visit_address",
+  "visit_result",
+  "conclusion",
+  "handling_step",
+  "handling_result",
+  "notes",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+];
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -360,6 +391,23 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
     created_by: userId || null,
   });
   await syncTimelineState(timeline, kind, data, userId);
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "CREATE",
+    source: "MANUAL",
+    entity_type: "debtor_marketing_activities",
+    entity_id: created.id,
+    debtor_id: created.debtor_id,
+    contract_id: created.contract_id || null,
+    marketing_activity_id: created.id,
+    title: `Input ${kind.replaceAll("_", " ").toLowerCase()}`,
+    after_data: auditSnapshot(created, MARKETING_ACTIVITY_AUDIT_FIELDS),
+    metadata: {
+      file_count: fileMetas.length,
+      file_names: fileMetas.map((file) => file.file_name).filter(Boolean),
+    },
+    ...requestMetadata(req),
+  });
   return serialize(req, created);
 };
 
@@ -408,6 +456,24 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
     updated_by: userId || null,
   });
   await syncTimelineState(timeline, current.activity_kind, data, userId);
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "UPDATE",
+    source: "MANUAL",
+    entity_type: "debtor_marketing_activities",
+    entity_id: updated.id,
+    debtor_id: updated.debtor_id,
+    contract_id: updated.contract_id || null,
+    marketing_activity_id: updated.id,
+    title: `Ubah ${current.activity_kind.replaceAll("_", " ").toLowerCase()}`,
+    before_data: auditSnapshot(current, MARKETING_ACTIVITY_AUDIT_FIELDS),
+    after_data: auditSnapshot(updated, MARKETING_ACTIVITY_AUDIT_FIELDS),
+    metadata: {
+      file_count: fileMetas.length,
+      file_names: fileMetas.map((file) => file.file_name).filter(Boolean),
+    },
+    ...requestMetadata(req),
+  });
   return serialize(req, updated);
 };
 
@@ -422,8 +488,21 @@ exports.delete = async ({ kindSlug, id, userId }) => {
       : {}),
   });
   if (!current) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
-  await repository.update(id, {
+  const deleted = await repository.update(id, {
     deleted_at: new Date(),
     deleted_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "DELETE",
+    source: "MANUAL",
+    entity_type: "debtor_marketing_activities",
+    entity_id: deleted.id,
+    debtor_id: deleted.debtor_id,
+    contract_id: deleted.contract_id || null,
+    marketing_activity_id: deleted.id,
+    title: `Hapus ${current.activity_kind.replaceAll("_", " ").toLowerCase()}`,
+    before_data: auditSnapshot(current, MARKETING_ACTIVITY_AUDIT_FIELDS),
+    after_data: auditSnapshot(deleted, MARKETING_ACTIVITY_AUDIT_FIELDS),
   });
 };

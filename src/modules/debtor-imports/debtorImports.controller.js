@@ -58,6 +58,22 @@ exports.getIdebResumePdf = async (req, res) => {
   }
 };
 
+exports.retrySlik = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.retrySlikJob({
+        req,
+        jobId: req.params.jobId,
+        userId: req.user?.id,
+      }),
+      "Job Import SLIK dijadwalkan ulang.",
+    );
+  } catch (error) {
+    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+  }
+};
+
 function createHandler(type) {
   return async (req, res) => {
     try {

@@ -3,6 +3,9 @@ const {
   USER_SUMMARY_SELECT,
   getDocumentInclude,
 } = require("../digital-documents/digitalDocuments.repository");
+const {
+  buildApprovedDocumentAccessWhere,
+} = require("../../utils/digital-archive-access");
 
 function withTransaction(callback) {
   return prisma.$transaction(callback);
@@ -84,11 +87,7 @@ function findActiveApprovedByDocumentAndRequester(
   return client.digital_document_access_requests.findFirst({
     where: {
       document_id: documentId,
-      requester_id: requesterId,
-      status: "APPROVED",
-      expires_at: {
-        gte: new Date(),
-      },
+      ...buildApprovedDocumentAccessWhere(requesterId),
     },
   });
 }

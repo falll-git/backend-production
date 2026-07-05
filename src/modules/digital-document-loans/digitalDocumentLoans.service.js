@@ -338,10 +338,6 @@ function buildVisibilityWhere(scope, userId, actionAccess = {}) {
     document: buildDocumentVisibilityWhere(scope),
   };
 
-  if (scope?.canViewAllDocuments) {
-    return visibleDocumentWhere;
-  }
-
   if (!userId) {
     return visibleDocumentWhere;
   }
@@ -373,9 +369,6 @@ function buildVisibilityWhere(scope, userId, actionAccess = {}) {
 
 function canViewLoan(item, scope, userId, actionAccess = {}) {
   if (!item) return false;
-  if (scope?.canViewAllDocuments) {
-    return canScopeAccessDocument(item.document, scope);
-  }
   if (!userId) return false;
   if (canViewActionQueueItem(item, scope, actionAccess)) {
     return true;

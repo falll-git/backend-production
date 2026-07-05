@@ -90,70 +90,124 @@ async function getDigitalArchiveAccessScope(
   };
 }
 
-function buildApprovedDocumentAccessWhere(userId, referenceDate = new Date()) {
+function toValidDate(value) {
+  const date =
+    value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfLocalDay(value) {
+  const date = toValidDate(value) || new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function endOfLocalDay(value) {
+  const date = toValidDate(value);
+  if (!date) return null;
+
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function normalizeAccessExpiresAt(value) {
+  return endOfLocalDay(value);
+}
+
+function isAccessRequestActive(item, referenceDate = new Date()) {
+  if (!item || item.status !== "APPROVED") return false;
+  if (!item.expires_at) return true;
+
+  const expiresAt = normalizeAccessExpiresAt(item.expires_at);
+  if (!expiresAt) return false;
+
+  return expiresAt >= referenceDate;
+}
+
+function buildActiveApprovedAccessWhere(referenceDate = new Date()) {
   return {
-    requester_id: userId,
     status: "APPROVED",
     expires_at: {
-      gte: referenceDate,
+      gte: startOfLocalDay(referenceDate),
     },
   };
 }
 
-function buildDocumentVisibilityWhere(scope) {
-  const canAccessRestrictedDocuments = Boolean(
+function buildApprovedDocumentAccessWhere(userId, referenceDate = new Date()) {
+  return {
+    requester_id: userId,
+    ...buildActiveApprovedAccessWhere(referenceDate),
+  };
+}
+
+function canAccessRestrictedDocuments(scope) {
+  return Boolean(
     scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
   );
-  const restrictedDocumentWhere = canAccessRestrictedDocuments
-    ? {}
-    : { access_level: "NON_RESTRICT" };
+}
 
-  let ownershipWhere = {};
+function buildDirectDocumentAccessConditions(userId) {
+  if (!userId) return [];
+
+  return [
+    {
+      created_by: userId,
+    },
+    {
+      owner_user_id: userId,
+    },
+    {
+      related_users: {
+        some: {
+          user_id: userId,
+        },
+      },
+    },
+    {
+      access_requests: {
+        some: buildApprovedDocumentAccessWhere(userId),
+      },
+    },
+  ];
+}
+
+function buildRestrictedAwareScopeWhere(baseWhere, canAccessRestricted) {
+  if (canAccessRestricted) return baseWhere;
+
+  return {
+    ...baseWhere,
+    access_level: "NON_RESTRICT",
+  };
+}
+
+function buildDocumentVisibilityWhere(scope) {
+  const canAccessRestricted = canAccessRestrictedDocuments(scope);
+  const conditions = buildDirectDocumentAccessConditions(scope?.userId);
 
   if (scope?.canViewAllDocuments) {
-    ownershipWhere = {};
-  } else if (scope?.userId) {
-    const conditions = [
-      {
-        created_by: scope.userId,
-      },
-      {
-        owner_user_id: scope.userId,
-      },
-      {
-        related_users: {
-          some: {
-            user_id: scope.userId,
-          },
+    if (canAccessRestricted) return {};
+    conditions.push({ access_level: "NON_RESTRICT" });
+  } else if (scope?.canAccessDivisionDocuments && scope?.divisionId) {
+    conditions.push(
+      buildRestrictedAwareScopeWhere(
+        {
+          owner_division_id: scope.divisionId,
         },
-      },
-      {
-        access_requests: {
-          some: buildApprovedDocumentAccessWhere(scope.userId),
-        },
-      },
-    ];
+        canAccessRestricted,
+      ),
+    );
+  }
 
-    if (scope.canAccessDivisionDocuments && scope.divisionId) {
-      conditions.push({
-        owner_division_id: scope.divisionId,
-      });
-    }
-
-    ownershipWhere = {
-      OR: conditions,
-    };
-  } else {
-    ownershipWhere = {
+  if (conditions.length === 0) {
+    return {
       id: "__no_digital_archive_access__",
     };
   }
 
-  if (Object.keys(ownershipWhere).length === 0) return restrictedDocumentWhere;
-  if (Object.keys(restrictedDocumentWhere).length === 0) return ownershipWhere;
+  if (conditions.length === 1) return conditions[0];
 
   return {
-    AND: [ownershipWhere, restrictedDocumentWhere],
+    OR: conditions,
   };
 }
 
@@ -162,48 +216,54 @@ function canScopeAccessDocument(document, scope) {
 
   const isRestricted =
     document.access_level === "RESTRICT" || document.is_restricted === true;
-  const canAccessRestrictedDocuments = Boolean(
-    scope?.canAccessRestrictedDocuments ?? scope?.canAccessRestricted,
-  );
+  const canAccessRestricted = canAccessRestrictedDocuments(scope);
+  const userId = scope?.userId;
 
-  if (isRestricted && !canAccessRestrictedDocuments) return false;
-  if (scope?.canViewAllDocuments) return true;
-  if (!scope?.userId) return false;
+  if (!userId) return false;
 
-  if (document.created_by === scope.userId) return true;
-  if (document.owner_user_id === scope.userId) return true;
-
-  if (
-    scope.canAccessDivisionDocuments &&
-    scope.divisionId &&
-    document.owner_division_id === scope.divisionId
-  ) {
-    return true;
-  }
+  if (document.created_by === userId) return true;
+  if (document.owner_user_id === userId) return true;
 
   const relatedUsers = Array.isArray(document.related_users)
     ? document.related_users
     : [];
-  if (relatedUsers.some((item) => item.user_id === scope.userId)) {
+  if (relatedUsers.some((item) => item.user_id === userId)) {
     return true;
   }
 
   const accessRequests = Array.isArray(document.access_requests)
     ? document.access_requests
     : [];
-  return accessRequests.some((item) => {
-    if (item.requester_id !== scope.userId || item.status !== "APPROVED") {
-      return false;
-    }
+  if (
+    accessRequests.some(
+      (item) => item.requester_id === userId && isAccessRequestActive(item),
+    )
+  ) {
+    return true;
+  }
 
-    return new Date(item.expires_at) >= new Date();
-  });
+  if (scope?.canViewAllDocuments) {
+    return !isRestricted || canAccessRestricted;
+  }
+
+  if (
+    scope?.canAccessDivisionDocuments &&
+    scope.divisionId &&
+    document.owner_division_id === scope.divisionId
+  ) {
+    return !isRestricted || canAccessRestricted;
+  }
+
+  return false;
 }
 
 module.exports = {
+  buildActiveApprovedAccessWhere,
   buildApprovedDocumentAccessWhere,
   canScopeAccessDocument,
   DIGITAL_ARCHIVE_DATA_SCOPE_URLS,
   getDigitalArchiveAccessScope,
   buildDocumentVisibilityWhere,
+  isAccessRequestActive,
+  normalizeAccessExpiresAt,
 };

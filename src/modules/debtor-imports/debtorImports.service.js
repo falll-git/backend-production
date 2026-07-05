@@ -11,7 +11,20 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { persistDomainFile, serializeFile } = require("../../utils/domain-files");
-const { resolveStoredFilePath } = require("../../utils/digital-archive-files");
+const {
+  deleteStoredFile,
+  resolveStoredFilePath,
+} = require("../../utils/digital-archive-files");
+const {
+  buildContractVisibilityWhere,
+  buildDebtorVisibilityWhere,
+  getDebtorAccessScope,
+} = require("../../utils/debtor-access");
+const {
+  buildIdebReportMetrics,
+  buildIdebReportSummary,
+  parseIdebNumber,
+} = require("../../utils/ideb-report");
 const {
   defaultDateForPeriod,
   normalizeText,
@@ -19,15 +32,28 @@ const {
   parseSlikDate,
   prepareParseOptions,
   streamSlikTextFile,
+  validateSlikFileMeta,
 } = require("../../utils/slik-import");
 const {
   collectUnmappedSlikReferences,
   mergeUnmappedSlikReferences,
 } = require("../../utils/slik-reference-dictionary");
+const {
+  auditSnapshot,
+  requestMetadata,
+  safeRecordDebtorActivity,
+} = require("../../utils/debtor-audit-log");
 
 const IMPORT_TYPES = new Set(["SLIK", "IDEB"]);
 const SLIK_IMPORT_SEGMENTS = new Set(["D01", "D02", "F01", "A01"]);
 const IDEB_IMPORT_EXTENSIONS = new Set(["json", "txt"]);
+const IDEB_REPORT_URL = "/dashboard/informasi-debitur/laporan-ideb";
+const IDEB_READ_URLS = [
+  "/dashboard/informasi-debitur/admin/upload-slik",
+  "/dashboard/informasi-debitur/admin/monitoring-import",
+  "/dashboard/informasi-debitur/admin/upload-ideb",
+  IDEB_REPORT_URL,
+];
 const ACTIVE_SLIK_JOBS = new Set();
 const RAW_RECORD_CHUNK_SIZE = 500;
 const DEFAULT_SLIK_IMPORT_MAX_FILE_SIZE_MB = 500;
@@ -45,6 +71,61 @@ const FIXED_COLLECTIBILITY_LEVELS = {
   4: { code: "KOL_4", name: "Diragukan", is_npf: true },
   5: { code: "KOL_5", name: "Macet", is_npf: true },
 };
+const IMPORT_JOB_AUDIT_FIELDS = [
+  "id",
+  "type",
+  "status",
+  "import_segment",
+  "cif_status",
+  "period_month",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "total_rows",
+  "success_rows",
+  "failed_rows",
+  "processing_summary",
+  "error_summary",
+  "started_at",
+  "completed_at",
+  "created_by",
+  "updated_by",
+];
+const IDEB_UPLOAD_AUDIT_FIELDS = [
+  "id",
+  "import_job_id",
+  "debtor_id",
+  "contract_id",
+  "month",
+  "year",
+  "status",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "uploaded_by",
+  "created_by",
+];
+
+function readBooleanEnv(key, fallback = true) {
+  const value = process.env[key];
+  if (value === undefined || value === null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function importAuditSource(type) {
+  return `${String(type || "IMPORT").toUpperCase()}_IMPORT`;
+}
+
+function fileAuditMetadata(fileMetas = []) {
+  return {
+    file_count: fileMetas.length,
+    file_names: fileMetas.map((file) => file.file_name || file.name).filter(Boolean),
+    total_size_bytes: fileMetas.reduce(
+      (total, file) => total + Number(file.size_bytes || 0),
+      0,
+    ),
+  };
+}
 
 function serializeJob(req, job) {
   return {
@@ -74,6 +155,51 @@ function serializeJob(req, job) {
   };
 }
 
+function serializeIdebUploader(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    division_id: user.division_id,
+    division: user.division || null,
+  };
+}
+
+function internalIdebCollateralRows(item) {
+  const rows = Array.isArray(item?.contract?.collaterals) && item.contract.collaterals.length > 0
+    ? item.contract.collaterals
+    : Array.isArray(item?.debtor?.collaterals)
+      ? item.debtor.collaterals
+      : [];
+  const seen = new Set();
+
+  return rows
+    .filter((collateral) => {
+      const key = collateral.collateral_number || collateral.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((collateral) => ({
+      id: collateral.id,
+      source: "A01",
+      collateral_number: collateral.collateral_number,
+      facility_number: collateral.facility_number,
+      type: collateral.collateral_type,
+      owner_name: collateral.owner_name,
+      proof_number: collateral.proof_number,
+      location: collateral.address,
+      value:
+        parseCurrencyNumber(collateral.independent_appraisal_value) ??
+        parseCurrencyNumber(collateral.appraisal_value) ??
+        parseCurrencyNumber(collateral.market_value),
+      period_month: collateral.period_month,
+      description: collateral.description,
+    }));
+}
+
 function serializeIdebPendingUpload(req, item) {
   const externalRecord = item.import_job?.records?.find(
     (record) => record.source_type === "IDEB",
@@ -86,6 +212,7 @@ function serializeIdebPendingUpload(req, item) {
   return {
     id: item.id,
     import_job_id: item.import_job_id,
+    source_fingerprint: item.source_fingerprint || null,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
     month: item.month,
@@ -104,6 +231,8 @@ function serializeIdebPendingUpload(req, item) {
     current_collectibility: resultSummary.current_collectibility || null,
     outstanding_pokok: Number(resultSummary.outstanding_pokok || 0),
     summary_detail: resultSummary,
+    uploaded_by: item.uploaded_by || null,
+    uploader: serializeIdebUploader(item.uploader),
     debtor: item.debtor || null,
     contract: item.contract || null,
     file: serializeFile(req, item, {
@@ -136,6 +265,9 @@ function serializeIdebReportUpload(req, item) {
       ? item.result_summary
       : {};
   const metrics = getIdebResumeMetrics(summary);
+  const reportSummary = buildIdebReportSummary(metrics, {
+    fallbackCollaterals: internalIdebCollateralRows(item),
+  });
   const totalParts =
     parseCurrencyNumber(summary.total_parts) ||
     Math.max(...(Array.isArray(item.files) ? item.files.map((file) => file.total_parts || 1) : [1]));
@@ -147,20 +279,28 @@ function serializeIdebReportUpload(req, item) {
     ...base,
     link_status: item.debtor_id ? "TERHUBUNG" : "BELUM_TERHUBUNG",
     result_date: summary.result_date || summary.processed_at || null,
-    reporter_count: metrics.reporterCount,
-    facilities_count: metrics.facilities.length,
-    active_facilities_count: metrics.activeFacilities.length,
-    paid_off_facilities_count: metrics.paidOffFacilities.length,
-    active_outstanding: metrics.activeOutstanding,
-    paid_off_plafond: metrics.paidOffPlafond,
-    total_plafond: metrics.totalPlafond,
-    total_outstanding: metrics.totalOutstanding,
-    total_arrears: metrics.totalArrears,
-    worst_collectibility: metrics.worstCollectibility,
+    reporter_count: reportSummary.reporter_count,
+    facilities_count: reportSummary.facilities_count,
+    active_facilities_count: reportSummary.active_facilities_count,
+    paid_off_facilities_count: reportSummary.paid_off_facilities_count,
+    write_off_facilities_count: reportSummary.write_off_facilities_count,
+    active_outstanding: reportSummary.active_outstanding,
+    active_arrears: reportSummary.active_arrears,
+    paid_off_plafond: reportSummary.paid_off_plafond,
+    write_off_plafond: reportSummary.write_off_plafond,
+    write_off_outstanding: reportSummary.write_off_outstanding,
+    write_off_arrears: reportSummary.write_off_arrears,
+    total_plafond: reportSummary.total_plafond,
+    total_outstanding: reportSummary.total_outstanding,
+    total_arrears: reportSummary.total_arrears,
+    reported_worst_collectibility: reportSummary.reported_worst_collectibility,
+    active_worst_collectibility: reportSummary.active_worst_collectibility,
+    worst_collectibility: reportSummary.worst_collectibility,
     officer_name: metrics.officerName,
     total_parts: totalParts || 1,
     received_parts: receivedParts || 1,
     part_display: `${receivedParts || 1}/${totalParts || 1}`,
+    report_summary: reportSummary,
   };
 }
 
@@ -267,6 +407,41 @@ function normalizeSlikImportPayload(payload) {
   };
 }
 
+function assertSlikFileNamesMatchPayload(files, metadata) {
+  if (!metadata) return;
+
+  const periods = new Set();
+  for (const file of files) {
+    try {
+      const meta = validateSlikFileMeta(file.name, {
+        importSegment: metadata.import_segment,
+      });
+      if (meta.period_month) periods.add(meta.period_month);
+    } catch (error) {
+      throw new AppError(error.message, 422);
+    }
+  }
+
+  if (periods.size > 1) {
+    throw new AppError(
+      "Semua file SLIK dalam satu import harus memiliki periode yang sama.",
+      422,
+    );
+  }
+
+  const [filePeriod] = [...periods];
+  if (
+    metadata.period_month &&
+    filePeriod &&
+    metadata.period_month !== filePeriod
+  ) {
+    throw new AppError(
+      `Periode form ${metadata.period_month} tidak sesuai file SLIK ${filePeriod}.`,
+      422,
+    );
+  }
+}
+
 function persistImportFiles(type, files) {
   return files.map((file) => {
     const fileMeta = persistDomainFile({
@@ -279,9 +454,107 @@ function persistImportFiles(type, files) {
   });
 }
 
+function cleanupPersistedImportFiles(fileMetas) {
+  for (const fileMeta of fileMetas || []) {
+    if (fileMeta?.file_path) deleteStoredFile(fileMeta.file_path);
+  }
+}
+
+function buildIdebSourceFingerprint(idebImport, summary) {
+  const stableParts = [
+    summary?.source_format,
+    summary?.report_number,
+    summary?.reference_number,
+    summary?.identity_number,
+    summary?.result_date,
+    summary?.period_month,
+    summary?.total_parts,
+  ].map((value) => normalizeUpper(value));
+  const hasStableIdentity = Boolean(
+    stableParts[1] && stableParts[3] && (stableParts[2] || stableParts[4]),
+  );
+  const checksums = (idebImport?.parts || [])
+    .map((part) => normalizeText(part.checksum))
+    .filter(Boolean)
+    .sort();
+  const source = hasStableIdentity ? stableParts.join("|") : checksums.join("|");
+  if (!source) return null;
+  return crypto.createHash("sha256").update(source).digest("hex");
+}
+
+async function ensureIdebFilesNotDuplicated(tx, idebImport, sourceFingerprint) {
+  const checksums = Array.from(
+    new Set(
+      (idebImport?.parts || [])
+        .map((part) => normalizeText(part.checksum))
+        .filter(Boolean),
+    ),
+  );
+  if (sourceFingerprint) {
+    const duplicateFingerprint = await tx.debtor_ideb_uploads.findFirst({
+      where: {
+        source_fingerprint: sourceFingerprint,
+        deleted_at: null,
+      },
+      select: {
+        file_name: true,
+      },
+    });
+    if (duplicateFingerprint) {
+      throw new AppError(
+        `Hasil IDEB yang sama sudah pernah diunggah${
+          duplicateFingerprint.file_name ? `: ${duplicateFingerprint.file_name}` : "."
+        }`,
+        409,
+      );
+    }
+  }
+
+  if (checksums.length === 0) return;
+
+  const duplicatePart = await tx.debtor_ideb_upload_files.findFirst({
+    where: {
+      checksum: { in: checksums },
+      upload: {
+        deleted_at: null,
+      },
+    },
+    select: {
+      file_name: true,
+      upload_id: true,
+    },
+  });
+
+  if (duplicatePart) {
+    throw new AppError(
+      `File IDEB sudah pernah diunggah${duplicatePart.file_name ? `: ${duplicatePart.file_name}` : "."}`,
+      409,
+    );
+  }
+
+  const duplicateUpload = await tx.debtor_ideb_uploads.findFirst({
+    where: {
+      deleted_at: null,
+      checksum: { in: checksums },
+    },
+    select: {
+      file_name: true,
+      id: true,
+    },
+  });
+
+  if (duplicateUpload) {
+    throw new AppError(
+      `File IDEB sudah pernah diunggah${duplicateUpload.file_name ? `: ${duplicateUpload.file_name}` : "."}`,
+      409,
+    );
+  }
+}
+
 function parsePeriodParts(periodMonth) {
   const normalized = normalizeText(periodMonth);
-  const match = normalized ? /^(\d{4})-(0[1-9]|1[0-2])$/.exec(normalized) : null;
+  if (!normalized) return null;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(normalized);
   if (match) {
     return {
       year: Number(match[1]),
@@ -289,11 +562,7 @@ function parsePeriodParts(periodMonth) {
     };
   }
 
-  const now = new Date();
-  return {
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-  };
+  throw new AppError("Periode IDEB harus menggunakan format YYYY-MM.", 422);
 }
 
 function readStoredFileText(fileMeta) {
@@ -597,7 +866,7 @@ function normalizeCompactDate(value) {
 }
 
 function normalizeNumber(value) {
-  return parseCurrencyNumber(value) ?? 0;
+  return parseCurrencyNumber(value);
 }
 
 function formatCodeLabel(code, label) {
@@ -611,6 +880,31 @@ function normalizeIdebObjectArray(value) {
   return asArray(value)
     .map((item) => asObject(item))
     .filter(Boolean);
+}
+
+function collectRawIdebNumericWarnings(facilities) {
+  const fields = [
+    ["plafonAwal", "Plafon awal"],
+    ["plafon", "Plafon"],
+    ["bakiDebet", "Baki debet"],
+    ["jumlahHariTunggakan", "DPD"],
+    ["tunggakanPokok", "Tunggakan pokok"],
+    ["tunggakanBunga", "Tunggakan bunga"],
+    ["denda", "Denda"],
+  ];
+  const warnings = [];
+
+  facilities.forEach((facility, index) => {
+    for (const [key, label] of fields) {
+      const value = facility[key];
+      if (value === undefined || value === null || value === "") continue;
+      if (parseCurrencyNumber(value) === null) {
+        warnings.push(`${label} fasilitas ${index + 1} tidak dapat dibaca sebagai angka.`);
+      }
+    }
+  });
+
+  return warnings.slice(0, 50);
 }
 
 function normalizeIdebFacilityHistory(facility) {
@@ -744,6 +1038,7 @@ function normalizeOjkiDebIndividualSummary(raw) {
     ]),
   ).filter((item) => asObject(item));
   const facilities = rawFacilities.map((item) => normalizeIdebFacility(item));
+  const dataQualityWarnings = collectRawIdebNumericWarnings(rawFacilities);
   const mainFacility = facilities[0] || {};
   const periodMonth =
     normalizeYearMonth(individual.posisiDataTerakhir) ||
@@ -849,19 +1144,135 @@ function normalizeOjkiDebIndividualSummary(raw) {
       collectibility: facility.collectibility || facility.collectibility_code,
       outstanding_pokok: facility.outstanding || 0,
     })),
+    data_quality_warnings: dataQualityWarnings,
+  };
+}
+
+function normalizeLegacyIdebFacility(value) {
+  const facility = asObject(value) || {};
+  const history = normalizeIdebObjectArray(
+    readObjectValue(facility, [
+      "monthly_collectibility_history",
+      "riwayat_kolektibilitas",
+      "riwayat_kol",
+    ]),
+  );
+
+  return {
+    ...facility,
+    reporter_code: normalizeText(
+      readObjectValue(facility, ["reporter_code", "kode_pelapor", "ljk"]),
+    ),
+    reporter_name: normalizeText(
+      readObjectValue(facility, [
+        "reporter_name",
+        "pelapor",
+        "nama_bprs",
+        "bprs",
+        "bank",
+        "ljkKet",
+      ]),
+    ),
+    account_number: normalizeText(
+      readObjectValue(facility, [
+        "account_number",
+        "no_rekening",
+        "no_rekening_fasilitas",
+        "no_kontrak",
+        "contract_number",
+      ]),
+    ),
+    credit_type: normalizeText(
+      readObjectValue(facility, ["credit_type", "jenis_kredit", "jenis_pembiayaan"]),
+    ),
+    financing_scheme: normalizeText(
+      readObjectValue(facility, ["financing_scheme", "akad", "jenis_akad"]),
+    ),
+    initial_akad_number: normalizeText(
+      readObjectValue(facility, ["initial_akad_number", "no_akad_awal"]),
+    ),
+    initial_akad_date: normalizeCompactDate(
+      readObjectValue(facility, ["initial_akad_date", "tanggal_akad_awal"]),
+    ),
+    final_akad_number: normalizeText(
+      readObjectValue(facility, ["final_akad_number", "no_akad_akhir"]),
+    ),
+    final_akad_date: normalizeCompactDate(
+      readObjectValue(facility, ["final_akad_date", "tanggal_akad_akhir"]),
+    ),
+    initial_plafond: normalizeNumber(
+      readObjectValue(facility, ["initial_plafond", "plafon_awal", "plafond_awal"]),
+    ),
+    plafond: normalizeNumber(
+      readObjectValue(facility, ["plafond", "plafon", "plafon_efektif"]),
+    ),
+    outstanding: normalizeNumber(
+      readObjectValue(facility, ["outstanding", "baki_debet", "outstanding_pokok"]),
+    ),
+    collectibility: normalizeText(
+      readObjectValue(facility, ["collectibility", "kolektibilitas", "kol"]),
+    ),
+    days_past_due: normalizeNumber(
+      readObjectValue(facility, ["days_past_due", "dpd", "jumlah_hari_tunggakan"]),
+    ),
+    principal_arrears: normalizeNumber(
+      readObjectValue(facility, ["principal_arrears", "tunggakan_pokok"]),
+    ),
+    interest_arrears: normalizeNumber(
+      readObjectValue(facility, ["interest_arrears", "tunggakan_bunga"]),
+    ),
+    penalty: normalizeNumber(readObjectValue(facility, ["penalty", "denda"])),
+    condition_code: normalizeText(
+      readObjectValue(facility, ["condition_code", "kode_kondisi"]),
+    ),
+    condition: normalizeText(
+      readObjectValue(facility, ["condition", "kondisi", "status"]),
+    ),
+    condition_date: normalizeCompactDate(
+      readObjectValue(facility, ["condition_date", "tanggal_kondisi"]),
+    ),
+    collaterals: normalizeIdebObjectArray(
+      readObjectValue(facility, ["collaterals", "agunan", "jaminan"]),
+    ),
+    guarantors: normalizeIdebObjectArray(
+      readObjectValue(facility, ["guarantors", "penjamin"]),
+    ),
+    monthly_collectibility_history: history,
   };
 }
 
 function normalizeLegacyIdebSummary(raw) {
   const debtor = readObjectValue(raw, ["debitur", "debtor", "nasabah"]) || {};
   const summary = readObjectValue(raw, ["ringkasan", "summary", "hasil"]) || {};
-  const facilities = readObjectValue(raw, ["fasilitas", "facilities", "pembiayaan"]) || [];
-  const mainFacility = Array.isArray(facilities) ? facilities[0] || {} : {};
+  const rawFacilities = readObjectValue(raw, ["fasilitas", "facilities", "pembiayaan"]) || [];
+  const facilities = Array.isArray(rawFacilities)
+    ? rawFacilities.map(normalizeLegacyIdebFacility)
+    : [];
+  const mainFacility = facilities[0] || {};
+  const monthlyCollectibilityHistory = normalizeIdebObjectArray(
+    readObjectValue(raw, [
+      "monthly_collectibility_history",
+      "riwayat_kolektibilitas",
+      "riwayat_kol",
+    ]),
+  );
 
   return {
     schema_version: normalizeText(raw.schema_version || raw.version) || "ideb-v1",
-    source_format: "IDEB_JSON",
-    period_month: normalizeText(raw.periode || raw.period_month || raw.period),
+    source_format: normalizeText(raw.source_format) || "IDEB_JSON",
+    period_month: normalizeYearMonth(raw.periode || raw.period_month || raw.period),
+    report_number: normalizeText(
+      readObjectValue(raw, ["report_number", "nomor_laporan", "no_laporan"]),
+    ),
+    reference_number: normalizeText(
+      readObjectValue(raw, ["reference_number", "nomor_referensi", "no_referensi"]),
+    ),
+    request_date: normalizeCompactDate(
+      readObjectValue(raw, ["request_date", "tanggal_permintaan"]),
+    ),
+    result_date: normalizeCompactDate(
+      readObjectValue(raw, ["result_date", "tanggal_hasil"]),
+    ),
     officer_name: normalizeText(
       readObjectValue(raw, ["officer_name", "petugas", "dibuatOleh", "created_by_name"]),
     ),
@@ -903,20 +1314,45 @@ function normalizeLegacyIdebSummary(raw) {
       readObjectValue(summary, ["kesimpulan", "conclusion", "summary"]),
     ),
     processed_at: normalizeText(raw.processed_at || raw.tanggal_proses || raw.created_at),
-    other_bprs: Array.isArray(facilities)
-      ? facilities.map((item) => ({
-          name: normalizeText(
-            readObjectValue(item, ["pelapor", "nama_bprs", "bprs", "bank", "name"]),
-          ) || "-",
-          collectibility: normalizeText(
-            readObjectValue(item, ["kol", "collectibility", "kolektibilitas"]),
-          ),
-          outstanding_pokok:
-            parseCurrencyNumber(
-              readObjectValue(item, ["baki_debet", "outstanding", "outstanding_pokok"]),
-            ) || 0,
-        }))
-      : [],
+    identity: asObject(debtor),
+    summary: {
+      ...asObject(summary),
+      bank_creditor_count: normalizeNumber(
+        readObjectValue(summary, ["bank_creditor_count", "jumlah_bank"]),
+      ),
+      bpr_bprs_creditor_count: normalizeNumber(
+        readObjectValue(summary, ["bpr_bprs_creditor_count", "jumlah_bpr_bprs"]),
+      ),
+      lp_creditor_count: normalizeNumber(
+        readObjectValue(summary, ["lp_creditor_count", "jumlah_lembaga_pembiayaan"]),
+      ),
+      other_creditor_count: normalizeNumber(
+        readObjectValue(summary, ["other_creditor_count", "jumlah_pelapor_lain"]),
+      ),
+      total_plafond: normalizeNumber(
+        readObjectValue(summary, ["total_plafond", "total_plafon", "plafon_efektif"]),
+      ),
+      total_outstanding: normalizeNumber(
+        readObjectValue(summary, ["total_outstanding", "total_baki_debet"]),
+      ),
+      worst_collectibility: normalizeText(
+        readObjectValue(summary, [
+          "worst_collectibility",
+          "kolektibilitas_terburuk",
+          "current_collectibility",
+          "kol",
+        ]),
+      ),
+    },
+    facilities,
+    monthly_collectibility_history: monthlyCollectibilityHistory.length > 0
+      ? monthlyCollectibilityHistory
+      : facilities.flatMap((facility) => facility.monthly_collectibility_history),
+    other_bprs: facilities.map((facility) => ({
+      name: facility.reporter_name || facility.reporter_code || "-",
+      collectibility: facility.collectibility,
+      outstanding_pokok: facility.outstanding || 0,
+    })),
   };
 }
 
@@ -1003,19 +1439,6 @@ function formatIdebNumber(value) {
   }).format(amount);
 }
 
-function idebSourceFormatLabel(value) {
-  const text = normalizeText(value);
-  if (text === "OJK_IDEB_INDIVIDUAL") return "OJK IDEB";
-  if (text === "IDEB_JSON") return "JSON IDEB";
-  return text || "-";
-}
-
-function idebFacilityArray(summary) {
-  return Array.isArray(summary?.facilities)
-    ? summary.facilities.filter((item) => item && typeof item === "object" && !Array.isArray(item))
-    : [];
-}
-
 function idebMonthlyHistoryArray(summary) {
   return Array.isArray(summary?.monthly_collectibility_history)
     ? summary.monthly_collectibility_history.filter(
@@ -1024,102 +1447,8 @@ function idebMonthlyHistoryArray(summary) {
     : [];
 }
 
-function idebReporterCount(summary, facilities) {
-  const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
-  const aggregateCount =
-    (parseCurrencyNumber(stats.bank_creditor_count) || 0) +
-    (parseCurrencyNumber(stats.bpr_bprs_creditor_count) || 0) +
-    (parseCurrencyNumber(stats.lp_creditor_count) || 0) +
-    (parseCurrencyNumber(stats.other_creditor_count) || 0);
-  if (aggregateCount > 0) return aggregateCount;
-
-  const names = new Set(
-    facilities
-      .map((facility) => recordValue(facility, ["reporter_name", "reporter_code", "ljk", "bank"]))
-      .filter(Boolean)
-      .map((value) => String(value).trim()),
-  );
-  return names.size || facilities.length;
-}
-
-function idebReporterNames(facilities) {
-  const names = [];
-  const seen = new Set();
-  for (const facility of facilities) {
-    const name =
-      recordValue(facility, ["reporter_name", "reporter_code", "ljk", "bank"]) || "-";
-    const normalized = String(name).trim().toUpperCase();
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    names.push(String(name));
-  }
-  return names;
-}
-
-function idebFacilityPlafond(facility) {
-  return parseCurrencyNumber(
-    recordValue(facility, ["plafond", "initial_plafond", "plafon", "plafon_awal"]),
-  ) || 0;
-}
-
-function idebFacilityOutstanding(facility) {
-  return parseCurrencyNumber(
-    recordValue(facility, ["outstanding", "baki_debet", "outstanding_pokok"]),
-  ) || 0;
-}
-
-function idebFacilityArrears(facility) {
-  return (
-    (parseCurrencyNumber(recordValue(facility, ["principal_arrears", "tunggakan_pokok"])) || 0) +
-    (parseCurrencyNumber(recordValue(facility, ["interest_arrears", "tunggakan_bunga"])) || 0) +
-    (parseCurrencyNumber(recordValue(facility, ["penalty", "denda"])) || 0)
-  );
-}
-
-function idebFacilityCondition(facility) {
-  return valueOrDash(recordValue(facility, ["condition", "condition_code", "status"]));
-}
-
-function isIdebPaidOffFacility(facility) {
-  return idebFacilityCondition(facility).toUpperCase().includes("LUNAS");
-}
-
 function getIdebResumeMetrics(summary) {
-  const facilities = idebFacilityArray(summary);
-  const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
-  const activeFacilities = facilities.filter((facility) => !isIdebPaidOffFacility(facility));
-  const paidOffFacilities = facilities.filter(isIdebPaidOffFacility);
-  const totalPlafond =
-    parseCurrencyNumber(recordValue(stats, ["total_plafond", "effective_plafond_credit"])) ??
-    facilities.reduce((total, facility) => total + idebFacilityPlafond(facility), 0);
-  const totalOutstanding =
-    parseCurrencyNumber(recordValue(stats, ["total_outstanding", "outstanding_credit"])) ??
-    parseCurrencyNumber(summary?.outstanding_pokok) ??
-    facilities.reduce((total, facility) => total + idebFacilityOutstanding(facility), 0);
-
-  return {
-    facilities,
-    activeFacilities,
-    paidOffFacilities,
-    reporterCount: idebReporterCount(summary, facilities),
-    reporterNames: idebReporterNames(facilities),
-    officerName: normalizeText(summary?.officer_name),
-    totalPlafond,
-    totalOutstanding,
-    activeOutstanding: activeFacilities.reduce(
-      (total, facility) => total + idebFacilityOutstanding(facility),
-      0,
-    ),
-    paidOffPlafond: paidOffFacilities.reduce(
-      (total, facility) => total + idebFacilityPlafond(facility),
-      0,
-    ),
-    totalArrears: facilities.reduce((total, facility) => total + idebFacilityArrears(facility), 0),
-    worstCollectibility:
-      summary?.current_collectibility ||
-      recordValue(stats, ["worst_collectibility", "worst_collectibility_code"]) ||
-      "-",
-  };
+  return buildIdebReportMetrics(summary);
 }
 
 function normalizePdfText(value) {
@@ -1132,22 +1461,52 @@ function normalizePdfText(value) {
 }
 
 function wrapPdfText(text, font, fontSize, maxWidth) {
-  const words = normalizePdfText(text).split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [""];
-
   const lines = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (font.widthOfTextAtSize(next, fontSize) <= maxWidth) {
-      current = next;
+  const paragraphs = normalizePdfText(text).split(/\r?\n/);
+
+  function splitLongWord(word) {
+    const chunks = [];
+    let chunk = "";
+    for (const character of word) {
+      const next = `${chunk}${character}`;
+      if (chunk && font.widthOfTextAtSize(next, fontSize) > maxWidth) {
+        chunks.push(chunk);
+        chunk = character;
+      } else {
+        chunk = next;
+      }
+    }
+    if (chunk) chunks.push(chunk);
+    return chunks;
+  }
+
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      if (lines.length > 0) lines.push("");
       continue;
     }
+
+    let current = "";
+    for (const originalWord of words) {
+      const chunks =
+        font.widthOfTextAtSize(originalWord, fontSize) > maxWidth
+          ? splitLongWord(originalWord)
+          : [originalWord];
+      for (const word of chunks) {
+        const next = current ? `${current} ${word}` : word;
+        if (font.widthOfTextAtSize(next, fontSize) <= maxWidth) {
+          current = next;
+          continue;
+        }
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
     if (current) lines.push(current);
-    current = word;
   }
-  if (current) lines.push(current);
-  return lines;
+
+  return lines.length > 0 ? lines : [""];
 }
 
 function compactIdebDateForFile(value) {
@@ -1209,11 +1568,11 @@ async function renderIdebResumePdf(upload) {
       ? summary.identity
       : {};
   const metrics = getIdebResumeMetrics(summary);
+  const canonicalReport = buildIdebReportSummary(metrics, {
+    fallbackCollaterals: internalIdebCollateralRows(upload),
+  });
   const monthlyHistory = idebMonthlyHistoryArray(summary);
-  const sourceFiles = Array.isArray(summary.source_files) ? summary.source_files : [];
-  const collaterals = metrics.facilities.flatMap((facility) =>
-    Array.isArray(facility.collaterals) ? facility.collaterals : [],
-  );
+  const collaterals = canonicalReport.collaterals;
   const guarantors = metrics.facilities.flatMap((facility) =>
     Array.isArray(facility.guarantors) ? facility.guarantors : [],
   );
@@ -1228,8 +1587,8 @@ async function renderIdebResumePdf(upload) {
     soft: rgb(0.96, 0.98, 1),
     softGray: rgb(0.97, 0.98, 0.99),
     panel: rgb(0.975, 0.982, 0.992),
-    accent: rgb(0.79, 0.84, 0.92),
-    yellow: rgb(0.97, 0.88, 0.03),
+    accent: rgb(0.68, 0.84, 0.96),
+    brand: rgb(0.02, 0.45, 0.72),
     white: rgb(1, 1, 1),
   };
   const pageSizes = {
@@ -1274,7 +1633,12 @@ async function renderIdebResumePdf(upload) {
     }
     lines.forEach((line, index) => {
       const textWidth = font.widthOfTextAtSize(normalizePdfText(line), size);
-      const lineX = options.align === "right" ? Math.max(x, x + width - textWidth) : x;
+      const lineX =
+        options.align === "right"
+          ? Math.max(x, x + width - textWidth)
+          : options.align === "center"
+            ? Math.max(x, x + (width - textWidth) / 2)
+            : x;
       page.drawText(normalizePdfText(line), {
         x: lineX,
         y: startY - index * lineHeight,
@@ -1318,7 +1682,7 @@ async function renderIdebResumePdf(upload) {
       y: y - 3,
       width: 9,
       height: 15,
-      color: colors.yellow,
+      color: colors.brand,
     });
     page.drawText(normalizePdfText(title), {
       x: margin + 15,
@@ -1331,13 +1695,27 @@ async function renderIdebResumePdf(upload) {
   }
 
   function drawBadge(text, x, baselineY, options = {}) {
-    const label = valueOrDash(text);
-    const fontSize = options.size || 7.2;
+    let label = valueOrDash(text);
+    let fontSize = options.size || 7.2;
+    const minFontSize = options.minFontSize || 5.5;
     const padX = options.padX || 6;
-    const width = Math.min(
-      options.maxWidth || 110,
-      Math.max(28, (options.font || boldFont).widthOfTextAtSize(normalizePdfText(label), fontSize) + padX * 2),
-    );
+    const font = options.font || boldFont;
+    const maxWidth = Math.max(24, options.maxWidth || 110);
+    while (
+      fontSize > minFontSize &&
+      font.widthOfTextAtSize(normalizePdfText(label), fontSize) + padX * 2 > maxWidth
+    ) {
+      fontSize -= 0.25;
+    }
+    while (
+      label.length > 1 &&
+      font.widthOfTextAtSize(normalizePdfText(`${label}...`), fontSize) + padX * 2 > maxWidth
+    ) {
+      label = label.slice(0, -1);
+    }
+    if (normalizePdfText(label) !== normalizePdfText(valueOrDash(text))) label = `${label}...`;
+    const textWidth = font.widthOfTextAtSize(normalizePdfText(label), fontSize);
+    const width = Math.min(maxWidth, Math.max(28, textWidth + padX * 2));
     const height = options.height || 15;
     page.drawRectangle({
       x,
@@ -1349,10 +1727,10 @@ async function renderIdebResumePdf(upload) {
       borderWidth: 0.6,
     });
     page.drawText(normalizePdfText(label), {
-      x: x + padX,
+      x: x + Math.max(padX, (width - textWidth) / 2),
       y: baselineY + 1,
       size: fontSize,
-      font: options.font || boldFont,
+      font,
       color: options.textColor || colors.navy,
     });
     return width;
@@ -1529,37 +1907,58 @@ async function renderIdebResumePdf(upload) {
   }
 
   function drawNoteBox(title, body, options = {}) {
-    const bodyLines = wrapPdfText(valueOrDash(body), regularFont, 8.2, contentWidth - 22);
-    const height = 38 + bodyLines.length * 10;
-    ensureSpace(height + 8);
-    page.drawRectangle({
-      x: margin,
-      y: y - height,
-      width: contentWidth,
-      height,
-      color: options.color || colors.soft,
-      borderColor: options.borderColor || colors.border,
-      borderWidth: 0.8,
-    });
-    page.drawText(normalizePdfText(title), {
-      x: margin + 10,
-      y: y - 15,
-      size: 8,
-      font: boldFont,
-      color: colors.navy,
-    });
-    drawWrappedTextAt(body, margin + 10, y - 30, contentWidth - 22, {
-      size: 8.2,
-      lineHeight: 10.5,
-      color: colors.slate,
-    });
-    y -= height + 10;
+    let bodyLines = wrapPdfText(valueOrDash(body), regularFont, 8.2, contentWidth - 22);
+    if (options.maxLines && bodyLines.length > options.maxLines) {
+      bodyLines = bodyLines.slice(0, options.maxLines);
+      const lastIndex = bodyLines.length - 1;
+      let last = bodyLines[lastIndex] || "";
+      while (
+        last.length > 0 &&
+        regularFont.widthOfTextAtSize(`${last}...`, 8.2) > contentWidth - 22
+      ) {
+        last = last.slice(0, -1);
+      }
+      bodyLines[lastIndex] = `${last}...`;
+    }
+
+    const noteLineHeight = 10.5;
+    const maxLinesPerBox = Math.max(
+      1,
+      Math.floor((pageHeight - margin * 2 - 48) / noteLineHeight),
+    );
+    for (let offset = 0; offset < bodyLines.length; offset += maxLinesPerBox) {
+      const chunk = bodyLines.slice(offset, offset + maxLinesPerBox);
+      const height = 38 + chunk.length * noteLineHeight;
+      ensureSpace(height + 8);
+      page.drawRectangle({
+        x: margin,
+        y: y - height,
+        width: contentWidth,
+        height,
+        color: options.color || colors.soft,
+        borderColor: options.borderColor || colors.border,
+        borderWidth: 0.8,
+      });
+      page.drawText(normalizePdfText(offset === 0 ? title : `${title} (lanjutan)`), {
+        x: margin + 10,
+        y: y - 15,
+        size: 8,
+        font: boldFont,
+        color: colors.navy,
+      });
+      drawWrappedTextAt(chunk.join("\n"), margin + 10, y - 30, contentWidth - 22, {
+        size: 8.2,
+        lineHeight: noteLineHeight,
+        color: colors.slate,
+      });
+      y -= height + 10;
+    }
   }
 
   function drawTable(columns, rows, options = {}) {
     const tableWidth = columns.reduce((total, column) => total + column.width, 0);
     const startX = margin;
-    const headerHeight = options.headerHeight || 22;
+    const headerHeight = options.headerHeight || 28;
     const fontSize = options.fontSize || 7;
     const lineHeight = fontSize + 2.5;
 
@@ -1583,12 +1982,13 @@ async function renderIdebResumePdf(upload) {
       });
       let x = startX;
       columns.forEach((column) => {
-        page.drawText(normalizePdfText(column.header.toUpperCase()), {
-          x: x + 4,
-          y: y - 14,
-          size: 6.4,
-          font: boldFont,
+        drawWrappedTextAt(column.header.toUpperCase(), x + 4, y - 11, column.width - 8, {
+          size: 6.2,
+          lineHeight: 7.3,
+          maxLines: 2,
+          bold: true,
           color: colors.slate,
+          align: column.align === "right" ? "right" : "center",
         });
         x += column.width;
       });
@@ -1599,16 +1999,23 @@ async function renderIdebResumePdf(upload) {
     rows.forEach((row, rowIndex) => {
       const cellLines = columns.map((column) => {
         if (column.type === "kol") return [collectibilityLabel(row[column.key])];
-        return wrapPdfText(
+        const lines = wrapPdfText(
           valueOrDash(row[column.key]),
           row.__isTotal || column.bold ? boldFont : regularFont,
           fontSize,
           column.width - 8,
         );
+        return lines.slice(0, column.maxLines || 3);
       });
       const rowHeight = Math.max(24, Math.max(...cellLines.map((lines) => lines.length)) * lineHeight + 12);
       if (y < margin + rowHeight + 24) {
         addPage(orientation);
+        if (options.continuationTitle) {
+          drawContinuationBand(
+            options.continuationTitle,
+            options.continuationSubtitle || "",
+          );
+        }
         drawHeader();
       }
       page.drawRectangle({
@@ -1657,63 +2064,6 @@ async function renderIdebResumePdf(upload) {
     y -= 12;
   }
 
-  function isWriteOffFacility(facility) {
-    const code = normalizeText(recordValue(facility, ["condition_code"]));
-    const condition = normalizeText(idebFacilityCondition(facility)).toUpperCase();
-    return code === "03" || condition.includes("HAPUS BUKU") || condition.includes("DIHAPUSBUKUKAN");
-  }
-
-  function facilityInitialPlafond(facility) {
-    return (
-      parseCurrencyNumber(
-        recordValue(facility, ["initial_plafond", "plafond", "plafon_awal", "plafon"]),
-      ) || 0
-    );
-  }
-
-  function facilityCreditDisplay(facility) {
-    const product = valueOrDash(recordValue(facility, ["credit_type", "credit_type_code"]));
-    const scheme = valueOrDash(recordValue(facility, ["financing_scheme", "financing_scheme_code"]));
-    if (product === "-" && scheme === "-") return "-";
-    if (scheme === "-") return product;
-    if (product === "-") return scheme;
-    return `${product}\n${scheme}`;
-  }
-
-  function facilityAkadDate(facility) {
-    return formatIdebDate(
-      recordValue(facility, ["initial_akad_date", "final_akad_date", "start_date", "initial_credit_date"]),
-    );
-  }
-
-  function facilityCollateralSummary(facility) {
-    const items = Array.isArray(facility.collaterals) ? facility.collaterals : [];
-    if (items.length === 0) return "-";
-    const labels = items
-      .slice(0, 2)
-      .map((collateral) =>
-        idebObjectLabel(collateral, [
-          "type",
-          "jenis_agunan",
-          "jenisAgunan",
-          "collateral_type",
-          "agunanKet",
-          "description",
-          "keterangan",
-        ]),
-      )
-      .filter((label) => label && label !== "-");
-    if (labels.length === 0) return "-";
-    return items.length > 2 ? `${labels.join(", ")} +${items.length - 2}` : labels.join(", ");
-  }
-
-  function facilityDaysPastDue(facility) {
-    const value = parseCurrencyNumber(
-      recordValue(facility, ["days_past_due", "dpd", "jumlah_hari_tunggakan"]),
-    );
-    return value === null ? null : value;
-  }
-
   function reporterBreakdownText() {
     const stats = summary?.summary && typeof summary.summary === "object" ? summary.summary : {};
     const buckets = [
@@ -1727,70 +2077,76 @@ async function renderIdebResumePdf(upload) {
     if (buckets.length > 0) {
       return buckets.map(([label, value]) => `${formatIdebNumber(value)} ${label}`).join(", ");
     }
-    if (metrics.reporterNames.length > 0) {
-      return metrics.reporterNames.map((name, index) => `${index + 1}) ${name}`).join("  ");
+    if (metrics.reporterGroups.length > 0) {
+      const visible = metrics.priorityReporters;
+      const extraCount = Math.max(metrics.reporterCount - visible.length, 0);
+      return `${visible
+        .map((group, index) => `${index + 1}) ${group.reporterName}`)
+        .join("  ")}${extraCount > 0 ? `  +${formatIdebNumber(extraCount)} lembaga lainnya` : ""}`;
     }
     return "-";
   }
 
   function drawCreditPositionTable() {
-    const rows = metrics.facilities.map((facility) => ({
-      reporter: valueOrDash(recordValue(facility, ["reporter_name", "reporter_code"])),
-      product: facilityCreditDisplay(facility),
-      akadDate: facilityAkadDate(facility),
-      plafond: formatIdebMoney(facilityInitialPlafond(facility)),
-      outstanding: formatIdebMoney(idebFacilityOutstanding(facility)),
-      kol: recordValue(facility, ["collectibility", "collectibility_code", "kol"]),
-      dpd:
-        facilityDaysPastDue(facility) === null
-          ? "-"
-          : `${formatIdebNumber(facilityDaysPastDue(facility))} hari`,
-      arrears: formatIdebMoney(idebFacilityArrears(facility)),
-      collateral: facilityCollateralSummary(facility),
+    const priorityReporters = metrics.priorityReporters;
+    const rows = priorityReporters.map((group) => ({
+      reporter: group.reporterCode
+        ? `${group.reporterName}\n${group.reporterCode}`
+        : group.reporterName,
+      facilities: formatIdebNumber(group.facilityCount),
+      plafond: formatIdebMoney(group.totalPlafond),
+      outstanding: formatIdebMoney(group.activeOutstanding),
+      kol: group.worstCollectibility,
+      dpd: `${formatIdebNumber(group.highestDaysPastDue)} hari`,
+      arrears: formatIdebMoney(group.totalArrears),
+      writeOff:
+        group.writeOffFacilityCount > 0
+          ? `${formatIdebMoney(group.writeOffOutstanding)}\n${formatIdebNumber(
+              group.writeOffFacilityCount,
+            )} fasilitas`
+          : "-",
+      collateral: formatIdebNumber(group.collateralCount),
     }));
-    const totalInitialPlafond = metrics.facilities.reduce(
-      (total, facility) => total + facilityInitialPlafond(facility),
-      0,
-    );
-    const totalOutstanding = metrics.facilities.reduce(
-      (total, facility) => total + idebFacilityOutstanding(facility),
-      0,
-    );
-    const totalArrears = metrics.facilities.reduce(
-      (total, facility) => total + idebFacilityArrears(facility),
-      0,
-    );
+    if (metrics.reporterCount > priorityReporters.length) {
+      drawNoteBox(
+        "DAFTAR PRIORITAS RISIKO",
+        `Menampilkan ${formatIdebNumber(priorityReporters.length)} lembaga paling prioritas berdasarkan KOL, DPD, tunggakan, dan baki debet dari total ${formatIdebNumber(metrics.reporterCount)} lembaga. Total keseluruhan tetap dihitung dari seluruh fasilitas IDEB.`,
+        { color: rgb(0.985, 0.99, 0.995) },
+      );
+    }
     if (rows.length > 0) {
       rows.push({
         reporter: "TOTAL KESELURUHAN",
-        product: "",
-        akadDate: "",
-        plafond: formatIdebMoney(totalInitialPlafond),
-        outstanding: formatIdebMoney(totalOutstanding),
+        facilities: formatIdebNumber(metrics.facilities.length),
+        plafond: formatIdebMoney(metrics.calculatedTotalPlafond),
+        outstanding: formatIdebMoney(metrics.activeOutstanding),
         kol: "",
-        dpd: "",
-        arrears: formatIdebMoney(totalArrears),
-        collateral: "",
+        dpd: `${formatIdebNumber(metrics.highestDaysPastDue)} hari`,
+        arrears: formatIdebMoney(metrics.totalArrears),
+        writeOff: formatIdebMoney(metrics.writeOffOutstanding),
+        collateral: formatIdebNumber(canonicalReport.collaterals.length),
         __isTotal: true,
       });
     }
     drawTable(
       [
-        { key: "reporter", header: "Pelapor", width: 102, bold: true, maxLines: 3 },
-        { key: "product", header: "Jenis Kredit / Pembiayaan", width: 148, maxLines: 3 },
-        { key: "akadDate", header: "Tanggal Akad", width: 62, maxLines: 2 },
-        { key: "plafond", header: "Plafon Awal", width: 70, align: "right", maxLines: 2 },
-        { key: "outstanding", header: "Baki Debet Saat Ini", width: 76, align: "right", maxLines: 2 },
-        { key: "kol", header: "Kolektibilitas", width: 66, type: "kol" },
-        { key: "dpd", header: "DPD / Hari Tunggakan", width: 62, align: "center", maxLines: 2 },
-        { key: "arrears", header: "Tunggakan", width: 68, align: "right", maxLines: 2 },
-        { key: "collateral", header: "Jaminan / Agunan", width: 115, maxLines: 3 },
+        { key: "reporter", header: "Lembaga Pelapor", width: 150, bold: true, maxLines: 3 },
+        { key: "facilities", header: "Fasilitas", width: 50, align: "center", maxLines: 2 },
+        { key: "plafond", header: "Total Plafon", width: 85, align: "right", maxLines: 2 },
+        { key: "outstanding", header: "Baki Debet Aktif", width: 90, align: "right", maxLines: 2 },
+        { key: "kol", header: "KOL Terburuk", width: 90, type: "kol" },
+        { key: "dpd", header: "DPD Tertinggi", width: 65, align: "center", maxLines: 2 },
+        { key: "arrears", header: "Total Tunggakan", width: 85, align: "right", maxLines: 2 },
+        { key: "writeOff", header: "Hapus Buku", width: 94, align: "right", maxLines: 3 },
+        { key: "collateral", header: "Agunan", width: 60, align: "center", maxLines: 2 },
       ],
       rows,
       {
         emptyTitle: "Ringkasan Posisi Fasilitas Kredit",
         emptyText: "Belum ada data fasilitas IDEB pada hasil ini.",
         fontSize: 6.5,
+        continuationTitle: "RINGKASAN FASILITAS IDEB (LANJUTAN)",
+        continuationSubtitle: `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`,
       },
     );
   }
@@ -1857,7 +2213,7 @@ async function renderIdebResumePdf(upload) {
       y: topY - 24,
       width: 7,
       height: 14,
-      color: colors.yellow,
+      color: colors.brand,
     });
     page.drawText(normalizePdfText(title), {
       x: x + 23,
@@ -1931,7 +2287,7 @@ async function renderIdebResumePdf(upload) {
       y: pageHeight - margin - 8,
       width: 50,
       height: 5,
-      color: colors.yellow,
+      color: colors.brand,
     });
     page.drawText(normalizePdfText(title), {
       x: margin,
@@ -1971,6 +2327,39 @@ async function renderIdebResumePdf(upload) {
     y = pageHeight - bandHeight - 18;
   }
 
+  function drawContinuationBand(title, subtitle) {
+    const bandHeight = 58;
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - bandHeight,
+      width: pageWidth,
+      height: bandHeight,
+      color: rgb(0.978, 0.986, 0.996),
+    });
+    page.drawRectangle({
+      x: margin,
+      y: pageHeight - margin + 4,
+      width: 34,
+      height: 4,
+      color: colors.brand,
+    });
+    page.drawText(normalizePdfText(title), {
+      x: margin,
+      y: pageHeight - margin - 12,
+      size: 11.5,
+      font: boldFont,
+      color: colors.navy,
+    });
+    drawWrappedTextAt(subtitle, margin + 270, pageHeight - margin - 12, contentWidth - 270, {
+      size: 7.2,
+      bold: true,
+      maxLines: 1,
+      color: colors.slate,
+      align: "right",
+    });
+    y = pageHeight - bandHeight - 14;
+  }
+
   function shortPeriod(value) {
     const text = normalizeText(value);
     const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(text);
@@ -1979,14 +2368,6 @@ async function renderIdebResumePdf(upload) {
       new Date(Number(match[1]), Number(match[2]) - 1, 1),
     );
     return `${month} ${match[1].slice(2)}`;
-  }
-
-  function formatFileBytes(value) {
-    const size = parseCurrencyNumber(value);
-    if (!size || size <= 0) return "-";
-    if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
-    if (size >= 1024) return `${(size / 1024).toFixed(size >= 100 * 1024 ? 0 : 1)} KB`;
-    return `${Math.round(size)} B`;
   }
 
   function drawHistoryMatrix(history) {
@@ -2061,13 +2442,19 @@ async function renderIdebResumePdf(upload) {
           color: colors.slate,
         });
         chunk.forEach((entry, index) => {
-          page.drawText(shortPeriod(recordValue(entry, ["period_month"])), {
-            x: margin + labelWidth + index * cellWidth + 4,
-            y: y - 12,
-            size: 6.2,
-            font: boldFont,
-            color: colors.slate,
-          });
+          drawWrappedTextAt(
+            shortPeriod(recordValue(entry, ["period_month"])),
+            margin + labelWidth + index * cellWidth,
+            y - 12,
+            cellWidth,
+            {
+              size: 6.2,
+              bold: true,
+              color: colors.slate,
+              align: "center",
+              maxLines: 1,
+            },
+          );
         });
         y -= headerHeight;
         page.drawRectangle({
@@ -2099,19 +2486,18 @@ async function renderIdebResumePdf(upload) {
             borderColor: colors.border,
             borderWidth: 0.35,
           });
-          page.drawText(`KOL ${valueOrDash(kol)}`, {
-            x: x + 4,
-            y: y - 13,
+          drawWrappedTextAt(`KOL ${valueOrDash(kol)}`, x, y - 13, cellWidth, {
             size: 6.2,
-            font: boldFont,
+            bold: true,
             color: collectibilityLevel(kol) ? style.fg : colors.slate,
+            align: "center",
+            maxLines: 1,
           });
-          page.drawText(`DPD ${valueOrDash(dpd)}`, {
-            x: x + 4,
-            y: y - 25,
+          drawWrappedTextAt(`DPD ${valueOrDash(dpd)}`, x, y - 25, cellWidth, {
             size: 5.8,
-            font: regularFont,
             color: collectibilityLevel(kol) ? style.fg : colors.slate,
+            align: "center",
+            maxLines: 1,
           });
         });
         y -= rowHeight + 10;
@@ -2162,42 +2548,26 @@ async function renderIdebResumePdf(upload) {
           upload?.contract?.no_kontrak ? `, kontrak ${upload.contract.no_kontrak}` : ""
         }. Perbandingan rinci tetap tersedia di modal Hasil IDEB pada aplikasi.`
       : "Belum terhubung ke debitur internal, sehingga perbandingan F01 internal belum tersedia.";
-  const writeOffFacilities = metrics.facilities.filter(isWriteOffFacility);
-  const writeOffPlafond = writeOffFacilities.reduce(
-    (total, facility) => total + facilityInitialPlafond(facility),
-    0,
-  );
-  const writeOffOutstanding = writeOffFacilities.reduce(
-    (total, facility) => total + idebFacilityOutstanding(facility),
-    0,
-  );
-  const writeOffArrears = writeOffFacilities.reduce(
-    (total, facility) => total + idebFacilityArrears(facility),
-    0,
-  );
-  const highestDaysPastDue = metrics.facilities.reduce((current, facility) => {
-    const value = facilityDaysPastDue(facility);
-    if (value === null) return current;
-    return current === null ? value : Math.max(current, value);
-  }, null);
+  const uploaderName = upload?.uploader?.name || upload?.uploaded_by || null;
+  const highestDaysPastDue = metrics.highestDaysPastDue;
 
   addPage("landscape");
   drawHeaderBand("RESUME HASIL IDEB", `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`, [
     `Tanggal IDEB: ${latestIdebDate}`,
-    `Petugas: ${valueOrDash(summary.officer_name)}`,
+    `Petugas IDEB: ${valueOrDash(summary.officer_name)}`,
+    `Diunggah oleh: ${valueOrDash(uploaderName)}`,
     `No Laporan: ${valueOrDash(summary.report_number)}`,
-    `Bagian: ${formatIdebNumber(summary.received_parts || sourceFiles.length || 1)}/${formatIdebNumber(summary.total_parts || sourceFiles.length || 1)}`,
     `Referensi: ${valueOrDash(summary.reference_number)}`,
   ]);
 
   drawMetricGrid([
     {
-      label: "KOL Terburuk",
+      label: "KOL Terburuk IDEB",
       value: metrics.worstCollectibility,
       type: "kol",
       description: `${formatIdebNumber(metrics.reporterCount)} PJK | ${formatIdebNumber(
         metrics.activeFacilities.length,
-      )} aktif | DPD ${highestDaysPastDue === null ? "-" : `${formatIdebNumber(highestDaysPastDue)} hari`}`,
+      )} aktif | DPD ${formatIdebNumber(highestDaysPastDue)} hari`,
     },
     {
       label: "Total Baki Debet Aktif",
@@ -2213,11 +2583,11 @@ async function renderIdebResumePdf(upload) {
     },
     {
       label: "Pembiayaan Hapus Buku",
-      value: formatIdebMoney(writeOffOutstanding || writeOffPlafond),
+      value: formatIdebMoney(metrics.writeOffOutstanding),
       small: true,
-      description: `${formatIdebNumber(writeOffFacilities.length)} fasilitas | Tunggakan ${formatIdebMoney(
-        writeOffArrears,
-      )}`,
+      description: `${formatIdebNumber(metrics.writeOffFacilities.length)} fasilitas | Plafon ${formatIdebMoney(
+        metrics.writeOffPlafond,
+      )} | Tunggakan ${formatIdebMoney(metrics.writeOffArrears)}`,
     },
   ]);
 
@@ -2244,24 +2614,43 @@ async function renderIdebResumePdf(upload) {
     "RESUME HASIL IDEB",
     [
       { label: "Tanggal Pengecekan IDEB", value: latestIdebDate },
-      { label: "Petugas", value: summary.officer_name },
+      { label: "Petugas IDEB", value: summary.officer_name },
+      { label: "Diunggah Oleh", value: uploaderName },
       { label: "Jumlah Lembaga / PJK", value: formatIdebNumber(metrics.reporterCount), bold: true },
-      { label: "Kualitas Terburuk", value: collectibilityLabel(metrics.worstCollectibility), bold: true },
+      { label: "KOL Terburuk IDEB", value: collectibilityLabel(metrics.worstCollectibility), bold: true },
+      { label: "KOL Terburuk Aktif", value: collectibilityLabel(metrics.activeWorstCollectibility), bold: true },
       {
         label: "DPD Tertinggi",
-        value: highestDaysPastDue === null ? "-" : `${formatIdebNumber(highestDaysPastDue)} hari`,
+        value: `${formatIdebNumber(highestDaysPastDue)} hari`,
         bold: true,
       },
       { label: "Fasilitas Aktif", value: formatIdebNumber(metrics.activeFacilities.length) },
       { label: "Sisa Baki Debet", value: formatIdebMoney(metrics.activeOutstanding), bold: true },
       { label: "Total Plafon", value: formatIdebMoney(metrics.totalPlafond), bold: true },
-      { label: "Total Tunggakan", value: formatIdebMoney(metrics.totalArrears), bold: true },
+      { label: "Tunggakan Aktif", value: formatIdebMoney(metrics.activeArrears), bold: true },
     ],
     margin + panelWidth + panelGap,
     panelTop,
     panelWidth,
   );
   y -= Math.max(profilePanelHeight, resumePanelHeight) + 14;
+
+  addPage("landscape");
+  drawContinuationBand(
+    "RINGKASAN FASILITAS IDEB",
+    `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`,
+  );
+  if (canonicalReport.data_quality_warnings.length > 0) {
+    drawNoteBox(
+      "CATATAN VALIDASI DATA",
+      canonicalReport.data_quality_warnings.join(" | "),
+      {
+        color: rgb(1, 0.98, 0.9),
+        borderColor: rgb(0.91, 0.72, 0.25),
+        maxLines: 8,
+      },
+    );
+  }
 
   drawNoteBox(
     "JUMLAH LEMBAGA PEMBUAT PELAPORAN/KREDITUR",
@@ -2275,8 +2664,8 @@ async function renderIdebResumePdf(upload) {
   addPage("landscape");
   drawHeaderBand("DETAIL LANJUTAN IDEB", `${valueOrDash(debtorName)} | ${valueOrDash(identityNumber)}`, [
     `Tanggal IDEB: ${latestIdebDate}`,
-    `Format: ${idebSourceFormatLabel(summary.source_format)}`,
-    `Bagian: ${formatIdebNumber(summary.received_parts || sourceFiles.length || 1)}/${formatIdebNumber(summary.total_parts || sourceFiles.length || 1)}`,
+    `Status: ${upload.debtor_id || upload.contract_id ? "Terhubung" : "Belum terhubung"}`,
+    `No Laporan: ${valueOrDash(summary.report_number)}`,
   ]);
 
   drawSectionTitle("PERBANDINGAN DENGAN F01 INTERNAL");
@@ -2305,6 +2694,8 @@ async function renderIdebResumePdf(upload) {
     {
       emptyTitle: "Agunan",
       emptyText: "Tidak ada data agunan pada file IDEB ini.",
+      continuationTitle: "DAFTAR AGUNAN (LANJUTAN)",
+      continuationSubtitle: `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`,
     },
   );
 
@@ -2325,7 +2716,16 @@ async function renderIdebResumePdf(upload) {
     {
       emptyTitle: "Penjamin",
       emptyText: "Tidak ada data penjamin pada file IDEB ini.",
+      continuationTitle: "DAFTAR PENJAMIN (LANJUTAN)",
+      continuationSubtitle: `${valueOrDash(debtorName)} | NIK ${valueOrDash(identityNumber)}`,
     },
+  );
+
+  drawSectionTitle("KESIMPULAN");
+  drawNoteBox(
+    "Kesimpulan Hasil IDEB",
+    normalizeText(summary.conclusion) || "Tidak ada kesimpulan pada hasil IDEB ini.",
+    { color: colors.softGray },
   );
 
   drawDocumentFooter();
@@ -2338,17 +2738,7 @@ async function renderIdebResumePdf(upload) {
 }
 
 function parseCurrencyNumber(value) {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const text = String(value)
-    .trim()
-    .replace(/[^\d,.-]/g, "");
-  if (!text) return null;
-  const normalized = text.includes(",")
-    ? text.replace(/\./g, "").replace(",", ".")
-    : text.replace(/,/g, "");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseIdebNumber(value);
 }
 
 async function inferIdebTargets(tx, payload, summary) {
@@ -2469,6 +2859,22 @@ exports.getAll = async ({ req, query }) => {
   if (query.type) clauses.push({ type: String(query.type).trim().toUpperCase() });
   if (query.status) clauses.push({ status: String(query.status).trim().toUpperCase() });
   if (query.period_month) clauses.push({ period_month: String(query.period_month).trim() });
+  const search = normalizeText(query.search);
+  if (search) {
+    clauses.push({
+      OR: [
+        { file_name: { contains: search, mode: "insensitive" } },
+        { type: { contains: search, mode: "insensitive" } },
+        {
+          segments: {
+            some: {
+              file_name: { contains: search, mode: "insensitive" },
+            },
+          },
+        },
+      ],
+    });
+  }
   const where = { AND: clauses };
   const [data, total] = await Promise.all([
     repository.findJobs({
@@ -2523,8 +2929,32 @@ exports.getPendingIdeb = async ({ req, query }) => {
   };
 };
 
-function buildIdebReportWhere(query = {}) {
-  const clauses = [{ deleted_at: null }];
+function buildIdebUploadVisibilityWhere(scope) {
+  if (scope?.canViewAll || scope?.canManageAll) return {};
+  if (!scope?.userId) return { id: "__no_ideb_access__" };
+
+  const clauses = [
+    { uploaded_by: scope.userId },
+    { created_by: scope.userId },
+    { debtor: { is: buildDebtorVisibilityWhere(scope) } },
+    { contract: { is: buildContractVisibilityWhere(scope) } },
+  ];
+
+  if (scope.canViewDivision && scope.divisionId) {
+    clauses.push({
+      uploader: {
+        is: {
+          division_id: scope.divisionId,
+        },
+      },
+    });
+  }
+
+  return { OR: clauses };
+}
+
+function buildIdebReportWhere(query = {}, visibilityWhere = {}) {
+  const clauses = [{ deleted_at: null }, visibilityWhere];
   const linkStatus = normalizeUpper(query.link_status || query.status_link);
   const periodMonth = normalizeText(query.period_month);
   const search = normalizeText(query.search);
@@ -2582,7 +3012,8 @@ function buildIdebReportWhere(query = {}) {
 
 exports.getIdebReports = async ({ req, query }) => {
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
-  const where = buildIdebReportWhere(query);
+  const scope = await getDebtorAccessScope(req.user?.id, [IDEB_REPORT_URL]);
+  const where = buildIdebReportWhere(query, buildIdebUploadVisibilityWhere(scope));
   const [data, total] = await Promise.all([
     repository.findIdebReports({
       where,
@@ -2600,7 +3031,13 @@ exports.getIdebReports = async ({ req, query }) => {
 };
 
 exports.getIdebReportDetail = async ({ req, uploadId }) => {
-  const upload = await repository.findIdebUploadById(uploadId);
+  const scope = await getDebtorAccessScope(req.user?.id, [IDEB_REPORT_URL]);
+  const upload = await repository.findIdebUploadById(
+    uploadId,
+    repository.prisma,
+    buildIdebUploadVisibilityWhere(scope),
+    { includeInternalCollaterals: true },
+  );
   if (!upload) throw new AppError("Laporan IDEB tidak ditemukan.", 404);
   return serializeIdebReportUpload(req, upload);
 };
@@ -2611,7 +3048,7 @@ exports.resolveIdeb = async ({ req, uploadId, payload, userId }) => {
     if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
     const targets = await ensureResolveTargets(tx, payload);
 
-    await tx.debtor_ideb_uploads.update({
+    const updatedUpload = await tx.debtor_ideb_uploads.update({
       where: { id: upload.id },
       data: {
         debtor_id: targets.debtorId,
@@ -2637,44 +3074,40 @@ exports.resolveIdeb = async ({ req, uploadId, payload, userId }) => {
       },
     });
 
-    return tx.debtor_ideb_uploads.findFirst({
-      where: { id: upload.id, deleted_at: null },
-      include: {
-        import_job: {
-          include: {
-            records: {
-              where: {
-                deleted_at: null,
-                source_type: "IDEB",
-              },
-            },
-          },
-        },
-        debtor: {
-          select: {
-            id: true,
-            debtor_number: true,
-            identity_number: true,
-            name: true,
-          },
-        },
-        contract: {
-          select: {
-            id: true,
-            debtor_id: true,
-            no_kontrak: true,
-            status: true,
-          },
-        },
+    const resolvedUpload = await repository.findIdebUploadById(upload.id, tx);
+    await safeRecordDebtorActivity(tx, {
+      actor_id: userId || null,
+      action: "RESOLVE_IDEB",
+      source: importAuditSource("IDEB"),
+      entity_type: "debtor_ideb_uploads",
+      entity_id: updatedUpload.id,
+      debtor_id: updatedUpload.debtor_id || null,
+      contract_id: updatedUpload.contract_id || null,
+      import_job_id: updatedUpload.import_job_id || null,
+      ideb_upload_id: updatedUpload.id,
+      title: `Hubungkan IDEB ${updatedUpload.file_name || updatedUpload.id}`,
+      before_data: auditSnapshot(upload, IDEB_UPLOAD_AUDIT_FIELDS),
+      after_data: auditSnapshot(updatedUpload, IDEB_UPLOAD_AUDIT_FIELDS),
+      metadata: {
+        match_status: "MATCHED",
       },
+      ...requestMetadata(req),
     });
+
+    return resolvedUpload;
   });
 
   return serializeIdebPendingUpload(req, resolved);
 };
 
-exports.getIdebResumePdf = async ({ uploadId }) => {
-  const upload = await repository.findIdebUploadById(uploadId);
+exports.getIdebResumePdf = async ({ uploadId, userId }) => {
+  const scope = await getDebtorAccessScope(userId, IDEB_READ_URLS);
+  const upload = await repository.findIdebUploadById(
+    uploadId,
+    repository.prisma,
+    buildIdebUploadVisibilityWhere(scope),
+    { includeInternalCollaterals: true },
+  );
   if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
   if (!upload.result_summary || typeof upload.result_summary !== "object") {
     throw new AppError("Ringkasan hasil IDEB belum tersedia.", 422);
@@ -2693,113 +3126,211 @@ exports.createJob = async ({ req, type, payload, userId }) => {
   assertImportFiles(normalizedType, files);
   const slikMetadata =
     normalizedType === "SLIK" ? normalizeSlikImportPayload(payload) : null;
+  if (normalizedType === "SLIK") {
+    assertSlikFileNamesMatchPayload(files, slikMetadata);
+  }
   await ensureTargets(payload);
   const fileMetas = persistImportFiles(normalizedType, files);
   const primaryFile = fileMetas[0];
-  const idebImport =
-    normalizedType === "IDEB" ? buildIdebImportPayload(fileMetas) : null;
-  const idebRaw = idebImport?.raw || null;
-  const idebSummary = idebImport?.summary || null;
-  const resolvedPeriodMonth =
-    slikMetadata?.period_month ||
-    normalizeText(payload.period_month) ||
-    idebSummary?.period_month ||
-    null;
+  const importFilesMetadata = fileAuditMetadata(fileMetas);
+  let job;
 
-  const job = await repository.transaction(async (tx) => {
-    const created = await tx.debtor_import_jobs.create({
-      data: {
-        type: normalizedType,
-        status: normalizedType === "SLIK" ? "PENDING" : "COMPLETED",
-        import_segment: slikMetadata?.import_segment || null,
-        cif_status: slikMetadata?.cif_status || null,
-        period_month: resolvedPeriodMonth,
-        file_path: primaryFile.file_path,
-        file_name: primaryFile.file_name,
-        mime_type: primaryFile.mime_type,
-        size_bytes: primaryFile.size_bytes,
-        checksum: primaryFile.checksum,
-        files: fileMetas,
-        total_rows:
-          normalizedType === "IDEB"
-            ? idebSummary?.received_parts || fileMetas.length
-            : payload.total_rows || 0,
-        success_rows:
-          normalizedType === "IDEB" ? idebSummary?.received_parts || fileMetas.length : 0,
-        failed_rows: 0,
-        completed_at: normalizedType === "SLIK" ? null : new Date(),
-        created_by: userId || null,
-      },
-    });
+  try {
+    const idebImport =
+      normalizedType === "IDEB" ? buildIdebImportPayload(fileMetas) : null;
+    const idebRaw = idebImport?.raw || null;
+    const idebSummary = idebImport?.summary || null;
+    const requestedPeriodMonth = normalizeText(payload.period_month);
+    const sourceIdebPeriodMonth = normalizeText(idebSummary?.period_month);
+    if (
+      normalizedType === "IDEB" &&
+      requestedPeriodMonth &&
+      sourceIdebPeriodMonth &&
+      requestedPeriodMonth !== sourceIdebPeriodMonth
+    ) {
+      throw new AppError(
+        `Periode input ${requestedPeriodMonth} tidak sesuai dengan periode pada file IDEB ${sourceIdebPeriodMonth}.`,
+        422,
+      );
+    }
+    const resolvedPeriodMonth =
+      slikMetadata?.period_month ||
+      sourceIdebPeriodMonth ||
+      requestedPeriodMonth ||
+      null;
+    const idebPeriod = normalizedType === "IDEB" ? parsePeriodParts(resolvedPeriodMonth) : null;
+    if (normalizedType === "IDEB" && !idebPeriod) {
+      throw new AppError(
+        "Periode IDEB tidak ditemukan atau tidak valid pada file yang diunggah.",
+        422,
+      );
+    }
+    const sourceFingerprint =
+      normalizedType === "IDEB" ? buildIdebSourceFingerprint(idebImport, idebSummary) : null;
 
-    if (normalizedType === "IDEB") {
-      const targets = await inferIdebTargets(tx, payload, idebSummary);
-      const period = parsePeriodParts(resolvedPeriodMonth);
-      await tx.debtor_external_records.create({
+    job = await repository.transaction(async (tx) => {
+      const created = await tx.debtor_import_jobs.create({
         data: {
-          import_job_id: created.id,
-          source_type: normalizedType,
-          debtor_id: targets.debtorId,
-          contract_id: targets.contractId,
+          type: normalizedType,
+          status: normalizedType === "SLIK" ? "PENDING" : "COMPLETED",
+          import_segment: slikMetadata?.import_segment || null,
+          cif_status: slikMetadata?.cif_status || null,
           period_month: resolvedPeriodMonth,
-          raw_reference: normalizeText(payload.raw_reference),
-          summary: {
-            format: idebSummary.source_format || "IDEB_JSON",
-            raw: idebRaw,
-            parsed: idebSummary,
-          },
-          file_path: primaryFile.file_path,
-          file_name: primaryFile.file_name,
-          mime_type: primaryFile.mime_type,
-          size_bytes: primaryFile.size_bytes,
-          status: targets.debtorId || targets.contractId ? "MATCHED" : "MATCH_PENDING",
-          created_by: userId || null,
-        },
-      });
-      const upload = await tx.debtor_ideb_uploads.create({
-        data: {
-          import_job_id: created.id,
-          debtor_id: targets.debtorId,
-          contract_id: targets.contractId,
-          month: period.month,
-          year: period.year,
-          status: "CHECKED",
-          result_summary: {
-            ...idebSummary,
-            raw_reference: normalizeText(payload.raw_reference),
-          },
           file_path: primaryFile.file_path,
           file_name: primaryFile.file_name,
           mime_type: primaryFile.mime_type,
           size_bytes: primaryFile.size_bytes,
           checksum: primaryFile.checksum,
-          uploaded_by: userId || null,
+          files: fileMetas,
+          total_rows:
+            normalizedType === "IDEB"
+              ? idebSummary?.received_parts || fileMetas.length
+              : payload.total_rows || 0,
+          success_rows:
+            normalizedType === "IDEB" ? idebSummary?.received_parts || fileMetas.length : 0,
+          failed_rows: 0,
+          completed_at: normalizedType === "SLIK" ? null : new Date(),
           created_by: userId || null,
         },
       });
-      await tx.debtor_ideb_upload_files.createMany({
-        data: (idebImport?.parts || []).map((part) => ({
-          id: crypto.randomUUID(),
-          upload_id: upload.id,
-          part_number: part.part_number || 1,
-          total_parts: part.total_parts || idebSummary.total_parts || 1,
-          file_path: part.file_path,
-          file_name: part.file_name,
-          mime_type: part.mime_type,
-          size_bytes: part.size_bytes,
-          checksum: part.checksum,
-        })),
-      });
-    }
 
-    return tx.debtor_import_jobs.findUnique({
-      where: { id: created.id },
-      include: {
-        records: true,
-        segments: true,
-      },
+      if (normalizedType === "IDEB") {
+        await ensureIdebFilesNotDuplicated(tx, idebImport, sourceFingerprint);
+        const targets = await inferIdebTargets(tx, payload, idebSummary);
+        await tx.debtor_external_records.create({
+          data: {
+            import_job_id: created.id,
+            source_type: normalizedType,
+            debtor_id: targets.debtorId,
+            contract_id: targets.contractId,
+            period_month: resolvedPeriodMonth,
+            raw_reference: normalizeText(payload.raw_reference),
+            summary: {
+              format: idebSummary.source_format || "IDEB_JSON",
+              raw: idebRaw,
+              parsed: idebSummary,
+            },
+            file_path: primaryFile.file_path,
+            file_name: primaryFile.file_name,
+            mime_type: primaryFile.mime_type,
+            size_bytes: primaryFile.size_bytes,
+            status: targets.debtorId || targets.contractId ? "MATCHED" : "MATCH_PENDING",
+            created_by: userId || null,
+          },
+        });
+        const upload = await tx.debtor_ideb_uploads.create({
+          data: {
+            import_job_id: created.id,
+            debtor_id: targets.debtorId,
+            contract_id: targets.contractId,
+            source_fingerprint: sourceFingerprint,
+            month: idebPeriod.month,
+            year: idebPeriod.year,
+            status: "CHECKED",
+            result_summary: {
+              ...idebSummary,
+              raw_reference: normalizeText(payload.raw_reference),
+            },
+            file_path: primaryFile.file_path,
+            file_name: primaryFile.file_name,
+            mime_type: primaryFile.mime_type,
+            size_bytes: primaryFile.size_bytes,
+            checksum: primaryFile.checksum,
+            uploaded_by: userId || null,
+            created_by: userId || null,
+          },
+        });
+        await tx.debtor_ideb_upload_files.createMany({
+          data: (idebImport?.parts || []).map((part) => ({
+            id: crypto.randomUUID(),
+            upload_id: upload.id,
+            part_number: part.part_number || 1,
+            total_parts: part.total_parts || idebSummary.total_parts || 1,
+            file_path: part.file_path,
+            file_name: part.file_name,
+            mime_type: part.mime_type,
+            size_bytes: part.size_bytes,
+            checksum: part.checksum,
+          })),
+        });
+        await safeRecordDebtorActivity(tx, {
+          actor_id: userId || null,
+          action: "IMPORT_COMPLETED",
+          source: importAuditSource(normalizedType),
+          entity_type: "debtor_import_jobs",
+          entity_id: created.id,
+          debtor_id: targets.debtorId || null,
+          contract_id: targets.contractId || null,
+          import_job_id: created.id,
+          ideb_upload_id: upload.id,
+          title: `Import IDEB ${resolvedPeriodMonth || ""}`.trim(),
+          after_data: auditSnapshot(created, IMPORT_JOB_AUDIT_FIELDS),
+          metadata: {
+            ...importFilesMetadata,
+            period_month: resolvedPeriodMonth,
+            source_format: idebSummary.source_format || "IDEB_JSON",
+            report_number: idebSummary.report_number || null,
+            reference_number: idebSummary.reference_number || null,
+            link_status:
+              targets.debtorId || targets.contractId ? "MATCHED" : "MATCH_PENDING",
+          },
+          ...requestMetadata(req),
+        });
+        await safeRecordDebtorActivity(tx, {
+          actor_id: userId || null,
+          action: "UPLOAD_IDEB",
+          source: importAuditSource(normalizedType),
+          entity_type: "debtor_ideb_uploads",
+          entity_id: upload.id,
+          debtor_id: upload.debtor_id || null,
+          contract_id: upload.contract_id || null,
+          import_job_id: created.id,
+          ideb_upload_id: upload.id,
+          title: `Upload IDEB ${upload.file_name || resolvedPeriodMonth || upload.id}`,
+          after_data: auditSnapshot(upload, IDEB_UPLOAD_AUDIT_FIELDS),
+          metadata: {
+            ...importFilesMetadata,
+            period_month: resolvedPeriodMonth,
+            total_parts: idebSummary.total_parts || null,
+            received_parts: idebSummary.received_parts || fileMetas.length,
+          },
+          ...requestMetadata(req),
+        });
+      } else {
+        await safeRecordDebtorActivity(tx, {
+          actor_id: userId || null,
+          action: "IMPORT_QUEUED",
+          source: importAuditSource(normalizedType),
+          entity_type: "debtor_import_jobs",
+          entity_id: created.id,
+          import_job_id: created.id,
+          title: `Import SLIK ${slikMetadata?.import_segment || ""} ${resolvedPeriodMonth || ""}`.trim(),
+          after_data: auditSnapshot(created, IMPORT_JOB_AUDIT_FIELDS),
+          metadata: {
+            ...importFilesMetadata,
+            import_segment: slikMetadata?.import_segment || null,
+            cif_status: slikMetadata?.cif_status || null,
+            period_month: resolvedPeriodMonth,
+          },
+          ...requestMetadata(req),
+        });
+      }
+
+      return tx.debtor_import_jobs.findUnique({
+        where: { id: created.id },
+        include: {
+          records: true,
+          segments: true,
+        },
+      });
     });
-  });
+  } catch (error) {
+    if (normalizedType === "IDEB") cleanupPersistedImportFiles(fileMetas);
+    if (normalizedType === "IDEB" && error?.code === "P2002") {
+      throw new AppError("Hasil atau file IDEB yang sama sudah pernah diunggah.", 409);
+    }
+    throw error;
+  }
 
   if (normalizedType === "SLIK") {
     await scheduleSlikJob(job.id, userId);
@@ -4161,8 +4692,9 @@ async function processSlikJob(jobId, userId = null) {
   try {
     const job = await repository.findJobById(jobId);
     if (!job || job.type !== "SLIK" || job.status === "COMPLETED") return;
+    const actorId = userId || job.created_by || null;
 
-    await repository.prisma.debtor_import_jobs.update({
+    const processingJob = await repository.prisma.debtor_import_jobs.update({
       where: { id: job.id },
       data: {
         status: "PROCESSING",
@@ -4180,10 +4712,22 @@ async function processSlikJob(jobId, userId = null) {
         total_rows: 0,
       },
     });
+    await safeRecordDebtorActivity(undefined, {
+      actor_id: actorId,
+      action: "IMPORT_PROCESSING",
+      source: importAuditSource(job.type),
+      entity_type: "debtor_import_jobs",
+      entity_id: processingJob.id,
+      import_job_id: processingJob.id,
+      title: `Proses import SLIK ${processingJob.import_segment || ""} ${processingJob.period_month || ""}`.trim(),
+      before_data: auditSnapshot(job, IMPORT_JOB_AUDIT_FIELDS),
+      after_data: auditSnapshot(processingJob, IMPORT_JOB_AUDIT_FIELDS),
+      metadata: fileAuditMetadata(Array.isArray(job.files) ? job.files : []),
+    });
 
-    const result = await processSlikJobStreaming(job, userId || job.created_by);
+    const result = await processSlikJobStreaming(job, actorId);
 
-    await repository.prisma.debtor_import_jobs.update({
+    const completedJob = await repository.prisma.debtor_import_jobs.update({
       where: { id: job.id },
       data: {
         status: result.failedRows > 0 ? "COMPLETED_WITH_ERRORS" : "COMPLETED",
@@ -4197,9 +4741,25 @@ async function processSlikJob(jobId, userId = null) {
         completed_at: new Date(),
       },
     });
+    await safeRecordDebtorActivity(undefined, {
+      actor_id: actorId,
+      action: result.failedRows > 0 ? "IMPORT_COMPLETED_WITH_ERRORS" : "IMPORT_COMPLETED",
+      source: importAuditSource(completedJob.type),
+      entity_type: "debtor_import_jobs",
+      entity_id: completedJob.id,
+      import_job_id: completedJob.id,
+      title: `Selesai import SLIK ${completedJob.import_segment || ""} ${completedJob.period_month || ""}`.trim(),
+      before_data: auditSnapshot(processingJob, IMPORT_JOB_AUDIT_FIELDS),
+      after_data: auditSnapshot(completedJob, IMPORT_JOB_AUDIT_FIELDS),
+      metadata: {
+        ...fileAuditMetadata(Array.isArray(job.files) ? job.files : []),
+        error_total: result.errorTotal || 0,
+        stats: result.processing_summary?.stats || null,
+      },
+    });
   } catch (error) {
     console.error("[debtor-imports] SLIK import failed", { jobId, error });
-    await repository.prisma.debtor_import_jobs.update({
+    const failedJob = await repository.prisma.debtor_import_jobs.update({
       where: { id: jobId },
       data: {
         status: "FAILED",
@@ -4209,22 +4769,55 @@ async function processSlikJob(jobId, userId = null) {
         completed_at: new Date(),
       },
     });
+    await safeRecordDebtorActivity(undefined, {
+      actor_id: userId || failedJob.created_by || null,
+      action: "IMPORT_FAILED",
+      source: importAuditSource(failedJob.type || "SLIK"),
+      entity_type: "debtor_import_jobs",
+      entity_id: failedJob.id,
+      import_job_id: failedJob.id,
+      title: `Gagal import SLIK ${failedJob.import_segment || ""} ${failedJob.period_month || ""}`.trim(),
+      after_data: auditSnapshot(failedJob, IMPORT_JOB_AUDIT_FIELDS),
+      metadata: {
+        ...fileAuditMetadata(Array.isArray(failedJob.files) ? failedJob.files : []),
+        error_message: error.message || "Gagal memproses import SLIK.",
+      },
+    });
     throw error;
   } finally {
     ACTIVE_SLIK_JOBS.delete(jobId);
   }
 }
 
-async function scheduleSlikJob(jobId, userId = null, { markFailedOnError = true } = {}) {
+function scheduleLocalSlikJob(jobId, userId = null) {
+  setImmediate(() => {
+    processSlikJob(jobId, userId).catch((error) => {
+      console.error("[debtor-imports] local SLIK processing failed", {
+        jobId,
+        error,
+      });
+    });
+  });
+}
+
+async function scheduleSlikJob(
+  jobId,
+  userId = null,
+  { force = false, markFailedOnError = true } = {},
+) {
   try {
-    await enqueueSlikImportJob({ jobId, userId });
+    await enqueueSlikImportJob({ jobId, userId, force });
   } catch (error) {
     console.error("[debtor-imports] SLIK queue enqueue failed", {
       jobId,
       error,
     });
+    if (readBooleanEnv("SLIK_IMPORT_LOCAL_FALLBACK_ENABLED", true)) {
+      scheduleLocalSlikJob(jobId, userId);
+      return;
+    }
     if (markFailedOnError) {
-      await repository.prisma.debtor_import_jobs.update({
+      const failedJob = await repository.prisma.debtor_import_jobs.update({
         where: { id: jobId },
         data: {
           status: "FAILED",
@@ -4236,6 +4829,22 @@ async function scheduleSlikJob(jobId, userId = null, { markFailedOnError = true 
           completed_at: new Date(),
         },
       });
+      await safeRecordDebtorActivity(undefined, {
+        actor_id: userId || failedJob.created_by || null,
+        action: "IMPORT_FAILED",
+        source: importAuditSource(failedJob.type || "SLIK"),
+        entity_type: "debtor_import_jobs",
+        entity_id: failedJob.id,
+        import_job_id: failedJob.id,
+        title: `Gagal menjadwalkan import SLIK ${failedJob.import_segment || ""} ${failedJob.period_month || ""}`.trim(),
+        after_data: auditSnapshot(failedJob, IMPORT_JOB_AUDIT_FIELDS),
+        metadata: {
+          ...fileAuditMetadata(Array.isArray(failedJob.files) ? failedJob.files : []),
+          error_message:
+            "Queue import SLIK tidak tersedia. Pastikan Redis dan worker import berjalan.",
+          error_detail: error.message || "Gagal enqueue job import SLIK.",
+        },
+      });
     }
     throw new AppError(
       "Queue import SLIK tidak tersedia. Pastikan Redis dan worker import berjalan.",
@@ -4243,6 +4852,48 @@ async function scheduleSlikJob(jobId, userId = null, { markFailedOnError = true 
     );
   }
 }
+
+exports.retrySlikJob = async ({ req, jobId, userId }) => {
+  const job = await repository.findJobById(jobId);
+  if (!job) throw new AppError("Job Import SLIK tidak ditemukan.", 404);
+  if (job.type !== "SLIK") {
+    throw new AppError("Hanya Job Import SLIK yang dapat dijadwalkan ulang.", 422);
+  }
+  if (job.status !== "FAILED") {
+    throw new AppError("Hanya Job Import SLIK berstatus gagal yang dapat dijadwalkan ulang.", 422);
+  }
+
+  const retriedJob = await repository.prisma.debtor_import_jobs.update({
+    where: { id: job.id },
+    data: {
+      status: "PENDING",
+      total_rows: 0,
+      success_rows: 0,
+      failed_rows: 0,
+      processing_summary: null,
+      error_summary: null,
+      started_at: null,
+      completed_at: null,
+      updated_by: userId || null,
+    },
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || job.created_by || null,
+    action: "IMPORT_RETRY",
+    source: importAuditSource(job.type),
+    entity_type: "debtor_import_jobs",
+    entity_id: retriedJob.id,
+    import_job_id: retriedJob.id,
+    title: `Jadwalkan ulang import SLIK ${retriedJob.import_segment || ""} ${retriedJob.period_month || ""}`.trim(),
+    before_data: auditSnapshot(job, IMPORT_JOB_AUDIT_FIELDS),
+    after_data: auditSnapshot(retriedJob, IMPORT_JOB_AUDIT_FIELDS),
+    metadata: fileAuditMetadata(Array.isArray(job.files) ? job.files : []),
+    ...requestMetadata(req),
+  });
+
+  await scheduleSlikJob(job.id, userId, { force: true });
+  return serializeJob(req, await repository.findJobById(job.id));
+};
 
 exports.recoverPendingDebtorImportJobs = async () => {
   const jobs = await repository.prisma.debtor_import_jobs.findMany({

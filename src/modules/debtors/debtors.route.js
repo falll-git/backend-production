@@ -27,6 +27,7 @@ router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);
 router.post("/", auth, authorize(WRITE_URL, "create"), validate(createDebtorSchema), controller.create);
 router.get("/collaterals", auth, authorize(READ_URLS, "read"), controller.getCollaterals);
 router.get("/:id/workflow", auth, authorize(READ_URLS, "read"), controller.getWorkflow);
+router.get("/:id/activity-logs", auth, authorize(READ_URLS, "read"), controller.getActivityLogs);
 router.get("/:id/contracts", auth, authorize(READ_URLS, "read"), controller.getContracts);
 router.post(
   "/:id/contracts",

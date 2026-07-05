@@ -8,6 +8,7 @@ const {
   REDISPOSE_FEATURE,
   REJECT_FEATURE,
   REPORT_ALL_FEATURE,
+  REVOKE_FEATURE,
   RETURN_FEATURE,
   VIEW_DIVISION_FEATURE,
   getMenuCapabilities,
@@ -56,18 +57,10 @@ const URLS = {
   debtorImportMonitoring:
     "/dashboard/informasi-debitur/admin/monitoring-import",
   debtorUploadIdeb: "/dashboard/informasi-debitur/admin/upload-ideb",
-  debtorReportNpf: "/dashboard/informasi-debitur/laporan/npf",
+  debtorReportNpf: "/dashboard/widgets/informasi-debitur/npf",
   debtorReportMarketingActivity:
-    "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+    "/dashboard/widgets/informasi-debitur/aktivitas-marketing",
   legalOverview: "/dashboard/legal",
-  legalTemplate: "/dashboard/legal/template-dokumen",
-  legalPrintAkad: "/dashboard/legal/cetak/akad",
-  legalPrintHaftsheet: "/dashboard/legal/cetak/haftsheet",
-  legalPrintWarningLetter: "/dashboard/legal/cetak/surat-peringatan",
-  legalPrintCoverLetter: "/dashboard/legal/cetak/surat-pengantar",
-  legalPrintSkl: "/dashboard/legal/cetak/keterangan-lunas",
-  legalPrintSamsat: "/dashboard/legal/cetak/surat-samsat",
-  legalPrintOther: "/dashboard/legal/cetak/dokumen-lainnya",
   legalDepositInsurance: "/dashboard/legal/titipan/asuransi",
   legalDepositNotary: "/dashboard/legal/titipan/notaris",
   legalDepositInstallment: "/dashboard/legal/titipan/angsuran",
@@ -153,6 +146,7 @@ const LEGAL_CRUD_URLS = [
 ];
 const LEGAL_REPORT_URLS = [
   URLS.legalOverview,
+  URLS.legalReport,
   URLS.legalReportThirdPartyDocuments,
   URLS.legalReportThirdPartyDepositFunds,
 ];
@@ -190,15 +184,14 @@ const CORRESPONDENCE_MONITOR_URLS = [
 const DISABLED_MENU_ROOT_NAMES = [];
 const DISABLED_MENU_BRANCHES = [];
 const DISABLED_MENU_URLS = [
-  URLS.legalTemplate,
-  URLS.legalPrintAkad,
-  URLS.legalPrintHaftsheet,
-  URLS.legalPrintWarningLetter,
-  URLS.legalPrintCoverLetter,
-  URLS.legalPrintSkl,
-  URLS.legalPrintSamsat,
-  URLS.legalPrintOther,
-  URLS.legalReport,
+  "/dashboard/legal/template-dokumen",
+  "/dashboard/legal/cetak/akad",
+  "/dashboard/legal/cetak/haftsheet",
+  "/dashboard/legal/cetak/surat-peringatan",
+  "/dashboard/legal/cetak/surat-pengantar",
+  "/dashboard/legal/cetak/keterangan-lunas",
+  "/dashboard/legal/cetak/surat-samsat",
+  "/dashboard/legal/cetak/dokumen-lainnya",
   "/dashboard/parameter/template-penomoran",
 ];
 const ROLE_MENU_POLICIES = {
@@ -237,6 +230,11 @@ const ROLE_MENU_POLICIES = {
       url: URLS.archiveAccessApproval,
       permissions: ["read", "update"],
       features: [APPROVE_FEATURE, REJECT_FEATURE],
+    },
+    {
+      url: URLS.archiveAccessHistory,
+      permissions: ["read", "update"],
+      features: [REPORT_ALL_FEATURE, REVOKE_FEATURE],
     },
     { url: URLS.archiveLoanRequest, permissions: ["create", "read"] },
     {
@@ -359,8 +357,8 @@ const ROLE_MENU_POLICIES = {
     },
     {
       url: URLS.archiveAccessHistory,
-      permissions: ["read"],
-      features: [VIEW_DIVISION_FEATURE],
+      permissions: ["read", "update"],
+      features: [VIEW_DIVISION_FEATURE, REVOKE_FEATURE],
     },
     {
       url: URLS.archiveLoanReport,
@@ -479,8 +477,8 @@ const ROLE_MENU_POLICIES = {
     },
     {
       url: URLS.archiveAccessHistory,
-      permissions: ["read"],
-      features: [VIEW_DIVISION_FEATURE],
+      permissions: ["read", "update"],
+      features: [VIEW_DIVISION_FEATURE, REVOKE_FEATURE],
     },
     {
       url: URLS.archiveLoanApproval,

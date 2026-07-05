@@ -2,7 +2,6 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
-const { AppError } = require("../../utils/errors");
 const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
@@ -13,20 +12,29 @@ const controller = require("./legal.controller");
 const validation = require("./legal.validation");
 
 const router = express.Router();
-const TEMPORARILY_DISABLED_FEATURE_MESSAGE =
-  "Fitur legal ini dinonaktifkan sementara.";
 const DEPOSIT_URLS = [
   "/dashboard/legal/titipan/asuransi",
   "/dashboard/legal/titipan/notaris",
   "/dashboard/legal/titipan/angsuran",
   "/dashboard/legal/titipan/lainnya",
 ];
+const LEGAL_REPORT_URLS = [
+  "/dashboard/legal",
+  "/dashboard/legal/laporan",
+];
+const THIRD_PARTY_PROGRESS_REPORT_URLS = [
+  "/dashboard/legal/laporan",
+  "/dashboard/legal/laporan/pihak-ketiga/dokumen",
+];
+const DEPOSIT_FUNDS_REPORT_URLS = [
+  "/dashboard/legal/laporan",
+  "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
+];
 const uploadBody = [
   uploadDomainFiles("files", 20),
   normalizePersuratanMultipartBody({
-    jsonFields: ["payload_snapshot", "result_summary", "opening_transaction"],
+    jsonFields: ["opening_transaction"],
     numberFields: [
-      "version",
       "month",
       "year",
       "coverage_amount",
@@ -41,46 +49,8 @@ const uploadBody = [
       "remaining_amount",
       "amount",
     ],
-    booleanFields: ["is_active"],
   }),
 ];
-
-function blockTemporarily(_req, _res, next) {
-  next(new AppError(TEMPORARILY_DISABLED_FEATURE_MESSAGE, 404));
-}
-
-router.get(
-  "/templates",
-  auth,
-  blockTemporarily,
-);
-router.post(
-  "/templates",
-  auth,
-  blockTemporarily,
-);
-router.put(
-  "/templates/:id",
-  auth,
-  blockTemporarily,
-);
-router.delete(
-  "/templates/:id",
-  auth,
-  blockTemporarily,
-);
-
-router.get(
-  "/print-documents/context",
-  auth,
-  blockTemporarily,
-);
-router.get("/print-documents", auth, blockTemporarily);
-router.post(
-  "/print-documents",
-  auth,
-  blockTemporarily,
-);
 
 router.get(
   "/progress/notary",
@@ -234,20 +204,26 @@ router.post(
 router.get(
   "/reports/summary",
   auth,
-  authorize("/dashboard/legal", "read"),
+  authorize(LEGAL_REPORT_URLS, "read"),
   controller.summaryReport,
 );
 router.get(
   "/reports/third-party-documents",
   auth,
-  authorize("/dashboard/legal/laporan/pihak-ketiga/dokumen", "read"),
+  authorize(THIRD_PARTY_PROGRESS_REPORT_URLS, "read"),
   controller.thirdPartyDocumentsReport,
 );
 router.get(
   "/reports/third-party-deposit-funds",
   auth,
-  authorize("/dashboard/legal/laporan/pihak-ketiga/dana-titipan", "read"),
+  authorize(DEPOSIT_FUNDS_REPORT_URLS, "read"),
   controller.thirdPartyDepositFundsReport,
+);
+router.get(
+  "/reports/activity-logs",
+  auth,
+  authorize(LEGAL_REPORT_URLS, "read"),
+  controller.activityLogsReport,
 );
 
 module.exports = router;

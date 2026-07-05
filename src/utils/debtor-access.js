@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const {
   MANAGE_ALL_FEATURE,
+  REPORT_ALL_FEATURE,
   VIEW_DIVISION_FEATURE,
 } = require("./menu-access");
 const { roleHasFeature, roleHasPermission } = require("./rbac");
@@ -16,8 +17,8 @@ const DEBTOR_DATA_SCOPE_URLS = [
   "/dashboard/informasi-debitur/admin/upload-ideb",
   "/dashboard/informasi-debitur/laporan-ideb",
   "/dashboard/informasi-debitur/laporan",
-  "/dashboard/informasi-debitur/laporan/npf",
-  "/dashboard/informasi-debitur/laporan/aktivitas-marketing",
+  "/dashboard/widgets/informasi-debitur/npf",
+  "/dashboard/widgets/informasi-debitur/aktivitas-marketing",
 ];
 
 const LEGAL_DATA_SCOPE_URLS = [
@@ -58,12 +59,13 @@ async function getDebtorAccessScope(userId, urls = DEBTOR_DATA_SCOPE_URLS) {
     VIEW_DIVISION_FEATURE,
   );
   const canManageAll = await roleHasFeature(roleId, urls, MANAGE_ALL_FEATURE);
+  const canViewAll = await roleHasFeature(roleId, urls, REPORT_ALL_FEATURE);
 
   return {
     userId: user?.id || null,
     roleId,
     divisionId: user?.division_id || null,
-    canViewAll: false,
+    canViewAll,
     canViewDivision,
     canManageAll,
   };

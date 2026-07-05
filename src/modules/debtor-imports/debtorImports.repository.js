@@ -1,5 +1,94 @@
 const prisma = require("../../config/prisma");
 
+const IDEB_USER_SELECT = {
+  id: true,
+  name: true,
+  username: true,
+  email: true,
+  division_id: true,
+  division: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+};
+
+const IDEB_COLLATERAL_SELECT = {
+  id: true,
+  collateral_number: true,
+  facility_number: true,
+  collateral_type: true,
+  owner_name: true,
+  proof_number: true,
+  address: true,
+  market_value: true,
+  appraisal_value: true,
+  independent_appraisal_value: true,
+  period_month: true,
+  description: true,
+};
+
+function idebUploadInclude({ includeInternalCollaterals = false } = {}) {
+  return {
+    import_job: {
+      include: {
+        records: {
+          where: {
+            deleted_at: null,
+            source_type: "IDEB",
+          },
+          orderBy: {
+            created_at: "desc",
+          },
+        },
+      },
+    },
+    uploader: {
+      select: IDEB_USER_SELECT,
+    },
+    debtor: {
+      select: {
+        id: true,
+        debtor_number: true,
+        identity_number: true,
+        name: true,
+        ...(includeInternalCollaterals
+          ? {
+              collaterals: {
+                where: { deleted_at: null },
+                select: IDEB_COLLATERAL_SELECT,
+                orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
+              },
+            }
+          : {}),
+      },
+    },
+    contract: {
+      select: {
+        id: true,
+        debtor_id: true,
+        no_kontrak: true,
+        status: true,
+        ...(includeInternalCollaterals
+          ? {
+              collaterals: {
+                where: { deleted_at: null },
+                select: IDEB_COLLATERAL_SELECT,
+                orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
+              },
+            }
+          : {}),
+      },
+    },
+    files: {
+      orderBy: {
+        part_number: "asc",
+      },
+    },
+  };
+}
+
 function findJobs({ where, skip, take, orderBy }) {
   return prisma.debtor_import_jobs.findMany({
     where,
@@ -31,42 +120,7 @@ function findPendingIdebUploads({ where, skip, take, orderBy }) {
     skip,
     take,
     orderBy,
-    include: {
-      import_job: {
-        include: {
-          records: {
-            where: {
-              deleted_at: null,
-              source_type: "IDEB",
-            },
-            orderBy: {
-              created_at: "desc",
-            },
-          },
-        },
-      },
-      debtor: {
-        select: {
-          id: true,
-          debtor_number: true,
-          identity_number: true,
-          name: true,
-        },
-      },
-      contract: {
-        select: {
-          id: true,
-          debtor_id: true,
-          no_kontrak: true,
-          status: true,
-        },
-      },
-      files: {
-        orderBy: {
-          part_number: "asc",
-        },
-      },
-    },
+    include: idebUploadInclude(),
   });
 }
 
@@ -80,42 +134,7 @@ function findIdebReports({ where, skip, take, orderBy }) {
     skip,
     take,
     orderBy,
-    include: {
-      import_job: {
-        include: {
-          records: {
-            where: {
-              deleted_at: null,
-              source_type: "IDEB",
-            },
-            orderBy: {
-              created_at: "desc",
-            },
-          },
-        },
-      },
-      debtor: {
-        select: {
-          id: true,
-          debtor_number: true,
-          identity_number: true,
-          name: true,
-        },
-      },
-      contract: {
-        select: {
-          id: true,
-          debtor_id: true,
-          no_kontrak: true,
-          status: true,
-        },
-      },
-      files: {
-        orderBy: {
-          part_number: "asc",
-        },
-      },
-    },
+    include: idebUploadInclude(),
   });
 }
 
@@ -183,45 +202,19 @@ function findContractById(id) {
   });
 }
 
-function findIdebUploadById(id, db = prisma) {
+function findIdebUploadById(
+  id,
+  db = prisma,
+  visibilityWhere = {},
+  options = {},
+) {
   return db.debtor_ideb_uploads.findFirst({
     where: {
       id,
       deleted_at: null,
+      ...visibilityWhere,
     },
-    include: {
-      import_job: {
-        include: {
-          records: {
-            where: {
-              deleted_at: null,
-              source_type: "IDEB",
-            },
-          },
-        },
-      },
-      debtor: {
-        select: {
-          id: true,
-          debtor_number: true,
-          identity_number: true,
-          name: true,
-        },
-      },
-      contract: {
-        select: {
-          id: true,
-          debtor_id: true,
-          no_kontrak: true,
-          status: true,
-        },
-      },
-      files: {
-        orderBy: {
-          part_number: "asc",
-        },
-      },
-    },
+    include: idebUploadInclude(options),
   });
 }
 

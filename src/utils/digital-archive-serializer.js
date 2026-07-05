@@ -9,12 +9,16 @@ const {
 const {
   appendFileAccessToken,
 } = require("./file-access-token");
+const {
+  isAccessRequestActive,
+} = require("./digital-archive-access");
 const { toSizeBytesNumber } = require("./size-bytes");
 
 const ACCESS_STATUS_LABELS = {
   PENDING: "Menunggu Persetujuan",
   APPROVED: "Disetujui",
   REJECTED: "Ditolak",
+  REVOKED: "Dicabut",
 };
 
 const LOAN_STATUS_LABELS = {
@@ -34,6 +38,7 @@ const ACTIVITY_ACTION_LABELS = {
   ACCESS_REQUESTED: "Pengajuan Akses",
   ACCESS_APPROVED: "Persetujuan Akses",
   ACCESS_REJECTED: "Penolakan Akses",
+  ACCESS_REVOKED: "Pencabutan Akses",
   LOAN_REQUESTED: "Pengajuan Peminjaman",
   LOAN_APPROVED: "Persetujuan Peminjaman",
   LOAN_REJECTED: "Penolakan Peminjaman",
@@ -341,10 +346,7 @@ function serializeDigitalDocumentDetail(req, document) {
 }
 
 function hasActiveAccess(accessRequest) {
-  if (!accessRequest || accessRequest.status !== "APPROVED") return false;
-  if (!accessRequest.expires_at) return true;
-
-  return new Date(accessRequest.expires_at) >= new Date();
+  return isAccessRequestActive(accessRequest);
 }
 
 function serializeDigitalDocumentAccessRequest(req, item) {

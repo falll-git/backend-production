@@ -87,6 +87,26 @@ function count(where) {
   return prisma.digital_debtors.count({ where });
 }
 
+function findActivityLogsByDebtorId(debtorId, { skip, take }) {
+  return prisma.debtor_activity_logs.findMany({
+    where: { debtor_id: debtorId },
+    skip,
+    take,
+    orderBy: { created_at: "desc" },
+    include: {
+      actor: {
+        select: USER_SELECT,
+      },
+    },
+  });
+}
+
+function countActivityLogsByDebtorId(debtorId) {
+  return prisma.debtor_activity_logs.count({
+    where: { debtor_id: debtorId },
+  });
+}
+
 function buildDefaultDebtorAggregate() {
   return {
     contracts_count: 0,
@@ -455,6 +475,16 @@ function findIdebUploadById(id) {
           status: true,
         },
       },
+      uploader: {
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          email: true,
+          division_id: true,
+          division: { select: { id: true, name: true } },
+        },
+      },
     },
   });
 }
@@ -644,6 +674,16 @@ async function findWorkflowData(debtorId, contractIds = []) {
             debtor_id: true,
             no_kontrak: true,
             status: true,
+          },
+        },
+        uploader: {
+          select: {
+            id: true,
+            name: true,
+            username: true,
+            email: true,
+            division_id: true,
+            division: { select: { id: true, name: true } },
           },
         },
         files: true,
@@ -856,6 +896,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
 module.exports = {
   USER_SELECT,
   count,
+  countActivityLogsByDebtorId,
   countCollaterals,
   countDocuments,
   countDocumentsByDebtorId,
@@ -863,6 +904,7 @@ module.exports = {
   createDocument,
   findWorkflowData,
   findActiveDocumentChecklists,
+  findActivityLogsByDebtorId,
   findActiveUserById,
   findBranchById,
   findById,

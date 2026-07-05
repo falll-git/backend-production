@@ -1,6 +1,5 @@
 const repository = require("./outgoingMails.repository");
 const prisma = require("../../config/prisma");
-const notificationService = require("../notifications/notifications.service");
 const {
   deleteReplacedStoredFile,
   deleteStoredFile,
@@ -117,11 +116,6 @@ function normalizeDate(value) {
   return date;
 }
 
-function normalizeOptionalDate(value) {
-  if (!value) return null;
-  return normalizeDate(value);
-}
-
 function appendAndFilter(where, clause) {
   where.AND = [...(where.AND || []), clause];
 }
@@ -144,7 +138,6 @@ function buildWhere({
       { name: { contains: search, mode: "insensitive" } },
       { mail_number: { contains: search, mode: "insensitive" } },
       { address: { contains: search, mode: "insensitive" } },
-      { follow_up_note: { contains: search, mode: "insensitive" } },
       { storage: { is: { name: { contains: search, mode: "insensitive" } } } },
       {
         storage: {
@@ -343,9 +336,6 @@ exports.create = async ({ req, payload, userId }) => {
       delivery_media: deliveryMedia,
       name: normalizeText(payload.name),
       send_date: normalizeDate(payload.send_date),
-      send_due_date: normalizeOptionalDate(payload.send_due_date),
-      response_due_date: normalizeOptionalDate(payload.response_due_date),
-      follow_up_note: normalizeText(payload.follow_up_note),
       address: normalizeText(payload.address),
       mail_number: normalizeText(payload.mail_number),
       file: storedFile.storedPath,
@@ -365,11 +355,6 @@ exports.create = async ({ req, payload, userId }) => {
     await queueOutgoingMailWatermark(created.id);
     created = await repository.findById(created.id);
   }
-
-  await notificationService.notifyOutgoingMailFollowUpCreated({
-    outgoingMail: created,
-    actorId: userId,
-  });
 
   const deliveryMediaNames = await buildDeliveryMediaNameMap([
     created.delivery_media,
@@ -431,15 +416,6 @@ exports.update = async ({ req, id, payload, userId }) => {
   }
   if (payload.send_date !== undefined) {
     updateData.send_date = normalizeDate(payload.send_date);
-  }
-  if (payload.send_due_date !== undefined) {
-    updateData.send_due_date = normalizeOptionalDate(payload.send_due_date);
-  }
-  if (payload.response_due_date !== undefined) {
-    updateData.response_due_date = normalizeOptionalDate(payload.response_due_date);
-  }
-  if (payload.follow_up_note !== undefined) {
-    updateData.follow_up_note = normalizeText(payload.follow_up_note);
   }
   if (payload.address !== undefined) {
     updateData.address = normalizeText(payload.address);

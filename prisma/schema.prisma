@@ -64,10 +64,13 @@ model users {
   handed_over_digital_document_loans  digital_document_loans[]           @relation("DigitalDocumentLoanHandOverActor")
   returned_digital_document_loans     digital_document_loans[]           @relation("DigitalDocumentLoanReturnActor")
   digital_document_activity_logs      digital_document_activity_logs[]   @relation("DigitalDocumentActivityActor")
+  debtor_activity_logs                debtor_activity_logs[]             @relation("DebtorActivityLogActor")
+  legal_activity_logs                 legal_activity_logs[]              @relation("LegalActivityLogActor")
   received_notifications              notifications[]                    @relation("NotificationRecipient")
   created_notifications               notifications[]                    @relation("NotificationCreator")
   marketing_debtors                   digital_debtors[]                  @relation("DebtorMarketingOwner")
   marketing_contracts                 debtor_contracts[]                 @relation("ContractMarketingOwner")
+  uploaded_ideb_reports               debtor_ideb_uploads[]              @relation("DebtorIdebUploader")
 
   created_outgoing_mails outgoing_mails[] @relation("OutgoingMailsCreator")
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
@@ -126,6 +129,7 @@ enum digital_document_access_request_statuses {
   PENDING
   APPROVED
   REJECTED
+  REVOKED
 }
 
 enum digital_document_loan_statuses {
@@ -145,6 +149,7 @@ enum storage_activity_actions {
   ACCESS_REQUESTED
   ACCESS_APPROVED
   ACCESS_REJECTED
+  ACCESS_REVOKED
   LOAN_REQUESTED
   LOAN_APPROVED
   LOAN_REJECTED
@@ -555,44 +560,46 @@ model digital_documents {
 }
 
 model digital_debtors {
-  id                String    @id @default(uuid())
-  debtor_number     String?   @unique
-  name              String
-  identity_number   String?   @unique
-  financing_number  String?
-  address           String?
-  phone             String?
-  branch_id         String?
-  marketing_user_id String?
-  customer_type     String?
-  slik_segment      String?
-  slik_status_code  String?
+  id                  String    @id @default(uuid())
+  debtor_number       String?   @unique
+  name                String
+  identity_number     String?   @unique
+  financing_number    String?
+  address             String?
+  phone               String?
+  branch_id           String?
+  marketing_user_id   String?
+  customer_type       String?
+  slik_segment        String?
+  slik_status_code    String?
   slik_operation_code String?
-  status            String    @default("ACTIVE")
-  description       String?
-  created_by        String?
-  updated_by        String?
-  deleted_by        String?
-  deleted_at        DateTime?
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
+  status              String    @default("ACTIVE")
+  description         String?
+  created_by          String?
+  updated_by          String?
+  deleted_by          String?
+  deleted_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
 
   branch         branches?           @relation(fields: [branch_id], references: [id], onDelete: SetNull)
   marketing_user users?              @relation("DebtorMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
   documents      digital_documents[]
 
-  individual_profile debtor_individual_profiles?
-  legal_entity_profile debtor_legal_entity_profiles?
-  contracts           debtor_contracts[]
-  collaterals         debtor_collaterals[]
+  individual_profile      debtor_individual_profiles?
+  legal_entity_profile    debtor_legal_entity_profiles?
+  contracts               debtor_contracts[]
+  collaterals             debtor_collaterals[]
   contract_slik_snapshots debtor_contract_slik_snapshots[]
-  debtor_documents    debtor_documents[]
-  import_records      debtor_external_records[]
-  slik_records        debtor_slik_records[]
-  marketing_items     debtor_marketing_activities[]
-  marketing_timelines debtor_marketing_timelines[]
-  warning_letters     debtor_warning_letters[]
-  ideb_uploads        debtor_ideb_uploads[]
+  debtor_documents        debtor_documents[]
+  import_records          debtor_external_records[]
+  slik_records            debtor_slik_records[]
+  marketing_items         debtor_marketing_activities[]
+  marketing_timelines     debtor_marketing_timelines[]
+  warning_letters         debtor_warning_letters[]
+  ideb_uploads            debtor_ideb_uploads[]
+  activity_logs           debtor_activity_logs[]
+  legal_activity_logs     legal_activity_logs[] @relation("LegalActivityLogDebtor")
 
   @@index([name])
   @@index([financing_number])
@@ -606,49 +613,49 @@ model digital_debtors {
 }
 
 model debtor_individual_profiles {
-  id String @id @default(uuid())
-  debtor_id String @unique
-  identity_type_code String?
-  name_as_identity String?
-  full_name String?
-  education_degree_code String?
-  gender String?
-  birth_place String?
-  birth_date DateTime?
-  tax_number String?
-  address_detail String?
-  village String?
-  district String?
-  city_code String?
-  postal_code String?
-  phone String?
-  mobile_phone String?
-  email String?
-  domicile_country_code String?
-  occupation_code String?
-  workplace String?
-  workplace_business_field_code String?
-  workplace_address String?
-  annual_gross_income Decimal? @db.Decimal(18, 2)
-  income_source_code String?
-  dependent_count Int?
+  id                              String    @id @default(uuid())
+  debtor_id                       String    @unique
+  identity_type_code              String?
+  name_as_identity                String?
+  full_name                       String?
+  education_degree_code           String?
+  gender                          String?
+  birth_place                     String?
+  birth_date                      DateTime?
+  tax_number                      String?
+  address_detail                  String?
+  village                         String?
+  district                        String?
+  city_code                       String?
+  postal_code                     String?
+  phone                           String?
+  mobile_phone                    String?
+  email                           String?
+  domicile_country_code           String?
+  occupation_code                 String?
+  workplace                       String?
+  workplace_business_field_code   String?
+  workplace_address               String?
+  annual_gross_income             Decimal?  @db.Decimal(18, 2)
+  income_source_code              String?
+  dependent_count                 Int?
   relationship_with_reporter_code String?
-  debtor_group_code String?
-  marital_status_code String?
-  spouse_identity_number String?
-  spouse_name String?
-  spouse_birth_date DateTime?
-  separate_assets_agreement String?
-  violates_bmpk String?
-  exceeds_bmpk String?
-  mother_maiden_name String?
-  branch_code String?
-  operation_code String?
-  status_code String?
-  created_by String?
-  updated_by String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  debtor_group_code               String?
+  marital_status_code             String?
+  spouse_identity_number          String?
+  spouse_name                     String?
+  spouse_birth_date               DateTime?
+  separate_assets_agreement       String?
+  violates_bmpk                   String?
+  exceeds_bmpk                    String?
+  mother_maiden_name              String?
+  branch_code                     String?
+  operation_code                  String?
+  status_code                     String?
+  created_by                      String?
+  updated_by                      String?
+  created_at                      DateTime  @default(now())
+  updated_at                      DateTime  @updatedAt
 
   debtor digital_debtors @relation(fields: [debtor_id], references: [id], onDelete: Cascade)
 
@@ -657,42 +664,42 @@ model debtor_individual_profiles {
 }
 
 model debtor_legal_entity_profiles {
-  id String @id @default(uuid())
-  debtor_id String @unique
-  business_identity_number String?
-  business_name String?
-  legal_form_code String?
-  establishment_place String?
-  establishment_deed_number String?
-  establishment_deed_date DateTime?
-  latest_amendment_deed_number String?
-  latest_amendment_deed_date DateTime?
-  phone String?
-  mobile_phone String?
-  email String?
-  address_detail String?
-  village String?
-  district String?
-  city_code String?
-  postal_code String?
-  domicile_country_code String?
-  business_field_code String?
+  id                              String    @id @default(uuid())
+  debtor_id                       String    @unique
+  business_identity_number        String?
+  business_name                   String?
+  legal_form_code                 String?
+  establishment_place             String?
+  establishment_deed_number       String?
+  establishment_deed_date         DateTime?
+  latest_amendment_deed_number    String?
+  latest_amendment_deed_date      DateTime?
+  phone                           String?
+  mobile_phone                    String?
+  email                           String?
+  address_detail                  String?
+  village                         String?
+  district                        String?
+  city_code                       String?
+  postal_code                     String?
+  domicile_country_code           String?
+  business_field_code             String?
   relationship_with_reporter_code String?
-  violates_bmpk String?
-  exceeds_bmpk String?
-  go_public String?
-  debtor_group_code String?
-  rating String?
-  rating_agency String?
-  rating_date DateTime?
-  debtor_group_name String?
-  branch_code String?
-  operation_code String?
-  status_code String?
-  created_by String?
-  updated_by String?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  violates_bmpk                   String?
+  exceeds_bmpk                    String?
+  go_public                       String?
+  debtor_group_code               String?
+  rating                          String?
+  rating_agency                   String?
+  rating_date                     DateTime?
+  debtor_group_name               String?
+  branch_code                     String?
+  operation_code                  String?
+  status_code                     String?
+  created_by                      String?
+  updated_by                      String?
+  created_at                      DateTime  @default(now())
+  updated_at                      DateTime  @updatedAt
 
   debtor digital_debtors @relation(fields: [debtor_id], references: [id], onDelete: Cascade)
 
@@ -831,15 +838,12 @@ model outgoing_mails {
   delivery_media            String
   name                      String
   send_date                 DateTime
-  send_due_date             DateTime?
-  response_due_date         DateTime?
-  follow_up_note            String?
   address                   String
-  mail_number               String                       @unique
+  mail_number               String                 @unique
   file                      String?
   file_name                 String?
   file_size_bytes           BigInt?
-  watermark_status          watermark_statuses           @default(SKIPPED)
+  watermark_status          watermark_statuses     @default(SKIPPED)
   watermark_file            String?
   watermark_file_size_bytes BigInt?
   watermark_source_path     String?
@@ -847,12 +851,12 @@ model outgoing_mails {
   watermark_error_message   String?
   watermark_requested_at    DateTime?
   watermark_applied_at      DateTime?
-  status                    outgoing_mail_statuses       @default(ACTIVE)
+  status                    outgoing_mail_statuses @default(ACTIVE)
   created_by                String?
   updated_by                String?
   deleted_by                String?
-  created_at                DateTime                     @default(now())
-  updated_at                DateTime                     @updatedAt
+  created_at                DateTime               @default(now())
+  updated_at                DateTime               @updatedAt
   deleted_at                DateTime?
 
   creator          users?            @relation("OutgoingMailsCreator", fields: [created_by], references: [id])
@@ -865,8 +869,6 @@ model outgoing_mails {
   @@index([storage_id])
   @@index([status])
   @@index([watermark_status])
-  @@index([send_due_date])
-  @@index([response_due_date])
 }
 
 model memorandums {
@@ -1062,6 +1064,7 @@ model third_parties {
   insurance_progress legal_insurance_progress[]
   kjpp_progress      legal_kjpp_progress[]
   deposits           legal_deposits[]
+  legal_activity_logs legal_activity_logs[] @relation("LegalActivityLogThirdParty")
 
   @@unique([category, name])
   @@index([category])
@@ -1220,14 +1223,14 @@ model debtor_contracts {
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
 
-  debtor              digital_debtors               @relation(fields: [debtor_id], references: [id])
-  product             financing_products            @relation(fields: [product_id], references: [id])
-  akad_type           contract_types                @relation(fields: [akad_type_id], references: [id])
-  branch              branches?                     @relation(fields: [branch_id], references: [id], onDelete: SetNull)
-  marketing_user      users?                        @relation("ContractMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
+  debtor              digital_debtors                  @relation(fields: [debtor_id], references: [id])
+  product             financing_products               @relation(fields: [product_id], references: [id])
+  akad_type           contract_types                   @relation(fields: [akad_type_id], references: [id])
+  branch              branches?                        @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  marketing_user      users?                           @relation("ContractMarketingOwner", fields: [marketing_user_id], references: [id], onDelete: SetNull)
   collectibilities    debtor_collectibilities[]
-  collaterals          debtor_collaterals[]
-  slik_snapshots       debtor_contract_slik_snapshots[]
+  collaterals         debtor_collaterals[]
+  slik_snapshots      debtor_contract_slik_snapshots[]
   documents           debtor_documents[]
   import_records      debtor_external_records[]
   slik_records        debtor_slik_records[]
@@ -1241,6 +1244,8 @@ model debtor_contracts {
   kjpp_progress       legal_kjpp_progress[]
   claims              legal_claims[]
   deposits            legal_deposits[]
+  activity_logs       debtor_activity_logs[]
+  legal_activity_logs legal_activity_logs[] @relation("LegalActivityLogContract")
 
   @@index([debtor_id])
   @@index([product_id])
@@ -1277,64 +1282,64 @@ model debtor_collectibilities {
 }
 
 model debtor_contract_slik_snapshots {
-  id                              String    @id @default(uuid())
-  debtor_id                       String
-  contract_id                     String
-  period_month                    String
-  facility_number                 String
-  debtor_number                   String?
-  credit_nature_code              String?
-  credit_type_code                String?
-  financing_scheme_code           String?
-  initial_akad_number             String?
-  initial_akad_date               DateTime?
-  final_akad_number               String?
-  final_akad_date                 DateTime?
-  new_or_extension_code           String?
-  credit_start_date               DateTime?
-  start_date                      DateTime?
-  due_date                        DateTime?
-  debtor_category_code            String?
-  usage_type_code                 String?
-  usage_orientation_code          String?
-  economic_sector_code            String?
-  project_location_city_code      String?
-  project_value                   Decimal?  @db.Decimal(18, 2)
-  currency_code                   String?
-  interest_rate                   Decimal?  @db.Decimal(12, 6)
-  interest_type_code              String?
-  government_program_code         String?
-  takeover_from                   String?
-  source_of_funds_code            String?
-  initial_plafond                 Decimal?  @db.Decimal(18, 2)
-  plafond                         Decimal?  @db.Decimal(18, 2)
-  current_month_disbursement      Decimal?  @db.Decimal(18, 2)
-  penalty                         Decimal?  @db.Decimal(18, 2)
-  baki_debet                      Decimal?  @db.Decimal(18, 2)
-  original_currency_amount        Decimal?  @db.Decimal(18, 2)
-  collectibility_code             String?
-  default_date                    DateTime?
-  default_reason_code             String?
-  principal_arrears               Decimal?  @db.Decimal(18, 2)
-  margin_arrears                  Decimal?  @db.Decimal(18, 2)
-  days_past_due                   Int?
-  arrears_frequency               Int?
-  restructuring_frequency         Int?
-  initial_restructuring_date      DateTime?
-  final_restructuring_date        DateTime?
-  restructuring_method_code       String?
-  condition_code                  String?
-  condition_date                  DateTime?
-  description                     String?
-  branch_code                     String?
-  operation_code                  String?
-  raw_data                        Json?
-  created_by                      String?
-  updated_by                      String?
-  deleted_by                      String?
-  deleted_at                      DateTime?
-  created_at                      DateTime  @default(now())
-  updated_at                      DateTime  @updatedAt
+  id                         String    @id @default(uuid())
+  debtor_id                  String
+  contract_id                String
+  period_month               String
+  facility_number            String
+  debtor_number              String?
+  credit_nature_code         String?
+  credit_type_code           String?
+  financing_scheme_code      String?
+  initial_akad_number        String?
+  initial_akad_date          DateTime?
+  final_akad_number          String?
+  final_akad_date            DateTime?
+  new_or_extension_code      String?
+  credit_start_date          DateTime?
+  start_date                 DateTime?
+  due_date                   DateTime?
+  debtor_category_code       String?
+  usage_type_code            String?
+  usage_orientation_code     String?
+  economic_sector_code       String?
+  project_location_city_code String?
+  project_value              Decimal?  @db.Decimal(18, 2)
+  currency_code              String?
+  interest_rate              Decimal?  @db.Decimal(12, 6)
+  interest_type_code         String?
+  government_program_code    String?
+  takeover_from              String?
+  source_of_funds_code       String?
+  initial_plafond            Decimal?  @db.Decimal(18, 2)
+  plafond                    Decimal?  @db.Decimal(18, 2)
+  current_month_disbursement Decimal?  @db.Decimal(18, 2)
+  penalty                    Decimal?  @db.Decimal(18, 2)
+  baki_debet                 Decimal?  @db.Decimal(18, 2)
+  original_currency_amount   Decimal?  @db.Decimal(18, 2)
+  collectibility_code        String?
+  default_date               DateTime?
+  default_reason_code        String?
+  principal_arrears          Decimal?  @db.Decimal(18, 2)
+  margin_arrears             Decimal?  @db.Decimal(18, 2)
+  days_past_due              Int?
+  arrears_frequency          Int?
+  restructuring_frequency    Int?
+  initial_restructuring_date DateTime?
+  final_restructuring_date   DateTime?
+  restructuring_method_code  String?
+  condition_code             String?
+  condition_date             DateTime?
+  description                String?
+  branch_code                String?
+  operation_code             String?
+  raw_data                   Json?
+  created_by                 String?
+  updated_by                 String?
+  deleted_by                 String?
+  deleted_at                 DateTime?
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
 
   debtor   digital_debtors  @relation(fields: [debtor_id], references: [id], onDelete: Cascade)
   contract debtor_contracts @relation(fields: [contract_id], references: [id], onDelete: Cascade)
@@ -1349,51 +1354,52 @@ model debtor_contract_slik_snapshots {
 }
 
 model debtor_collaterals {
-  id                String    @id @default(uuid())
-  debtor_id         String?
-  contract_id       String?
-  collateral_number String
-  facility_number   String?
-  facility_segment_code String?
-  collateral_status_code String?
-  collateral_type   String?
-  rating            String?
-  rating_agency_code String?
-  binding_type_code String?
-  binding_date      DateTime?
-  owner_name        String?
-  proof_number      String?
-  address           String?
-  location_city_code String?
-  market_value      Decimal?  @db.Decimal(18, 2)
-  appraisal_value   Decimal?  @db.Decimal(18, 2)
-  reporter_appraisal_date DateTime?
-  independent_appraisal_value Decimal? @db.Decimal(18, 2)
-  independent_appraiser_name String?
-  independent_appraisal_date DateTime?
-  paripasu_status   String?
-  paripasu_percentage Decimal? @db.Decimal(8, 4)
-  joint_credit_status String?
-  insured_status    String?
-  description       String?
-  branch_code       String?
-  operation_code    String?
-  period_month      String
-  last_import_period_month String?
-  raw_data          Json?
-  created_by        String?
-  updated_by        String?
-  deleted_by        String?
-  deleted_at        DateTime?
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
+  id                          String    @id @default(uuid())
+  debtor_id                   String?
+  contract_id                 String?
+  collateral_number           String
+  facility_number             String?
+  facility_segment_code       String?
+  collateral_status_code      String?
+  collateral_type             String?
+  rating                      String?
+  rating_agency_code          String?
+  binding_type_code           String?
+  binding_date                DateTime?
+  owner_name                  String?
+  proof_number                String?
+  address                     String?
+  location_city_code          String?
+  market_value                Decimal?  @db.Decimal(18, 2)
+  appraisal_value             Decimal?  @db.Decimal(18, 2)
+  reporter_appraisal_date     DateTime?
+  independent_appraisal_value Decimal?  @db.Decimal(18, 2)
+  independent_appraiser_name  String?
+  independent_appraisal_date  DateTime?
+  paripasu_status             String?
+  paripasu_percentage         Decimal?  @db.Decimal(8, 4)
+  joint_credit_status         String?
+  insured_status              String?
+  description                 String?
+  branch_code                 String?
+  operation_code              String?
+  period_month                String
+  last_import_period_month    String?
+  raw_data                    Json?
+  created_by                  String?
+  updated_by                  String?
+  deleted_by                  String?
+  deleted_at                  DateTime?
+  created_at                  DateTime  @default(now())
+  updated_at                  DateTime  @updatedAt
 
-  debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  legal_notary_progress legal_notary_progress[]
+  debtor                   digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract                 debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  legal_notary_progress    legal_notary_progress[]
   legal_insurance_progress legal_insurance_progress[]
-  legal_kjpp_progress legal_kjpp_progress[]
-  legal_claims legal_claims[]
+  legal_kjpp_progress      legal_kjpp_progress[]
+  legal_claims             legal_claims[]
+  legal_activity_logs      legal_activity_logs[] @relation("LegalActivityLogCollateral")
 
   @@index([collateral_number, facility_number])
   @@index([debtor_id])
@@ -1404,36 +1410,37 @@ model debtor_collaterals {
 }
 
 model debtor_import_jobs {
-  id            String    @id @default(uuid())
-  type          String
-  status        String    @default("PENDING")
-  import_segment String?
-  cif_status    String?
-  period_month  String?
-  file_path     String
-  file_name     String?
-  mime_type     String?
-  size_bytes    Int?
-  checksum      String?
-  files         Json?
-  total_rows    Int       @default(0)
-  success_rows  Int       @default(0)
-  failed_rows   Int       @default(0)
-  error_summary Json?
+  id                 String    @id @default(uuid())
+  type               String
+  status             String    @default("PENDING")
+  import_segment     String?
+  cif_status         String?
+  period_month       String?
+  file_path          String
+  file_name          String?
+  mime_type          String?
+  size_bytes         Int?
+  checksum           String?
+  files              Json?
+  total_rows         Int       @default(0)
+  success_rows       Int       @default(0)
+  failed_rows        Int       @default(0)
+  error_summary      Json?
   processing_summary Json?
-  started_at    DateTime?
-  completed_at  DateTime?
-  created_by    String?
-  updated_by    String?
-  deleted_by    String?
-  deleted_at    DateTime?
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  started_at         DateTime?
+  completed_at       DateTime?
+  created_by         String?
+  updated_by         String?
+  deleted_by         String?
+  deleted_at         DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
 
   records      debtor_external_records[]
   segments     debtor_import_segments[]
   slik_records debtor_slik_records[]
   ideb_uploads debtor_ideb_uploads[]
+  activity_logs debtor_activity_logs[]
 
   @@index([type, status])
   @@index([period_month])
@@ -1442,17 +1449,17 @@ model debtor_import_jobs {
 }
 
 model debtor_import_segments {
-  id             String   @id @default(uuid())
-  import_job_id  String
-  segment        String
-  file_name      String
-  sequence       Int?
-  declared_rows  Int     @default(0)
-  actual_rows    Int     @default(0)
-  status         String  @default("PENDING")
-  error_summary  Json?
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  id            String   @id @default(uuid())
+  import_job_id String
+  segment       String
+  file_name     String
+  sequence      Int?
+  declared_rows Int      @default(0)
+  actual_rows   Int      @default(0)
+  status        String   @default("PENDING")
+  error_summary Json?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
   import_job debtor_import_jobs @relation(fields: [import_job_id], references: [id], onDelete: Cascade)
 
@@ -1463,23 +1470,23 @@ model debtor_import_segments {
 }
 
 model debtor_slik_records {
-  id             String    @id @default(uuid())
-  import_job_id  String
-  segment        String
-  period_month   String
-  row_number     Int
-  raw_key        String?
-  raw_data       Json
-  debtor_id      String?
-  contract_id    String?
-  status         String    @default("IMPORTED")
-  error_message  String?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
+  id            String   @id @default(uuid())
+  import_job_id String
+  segment       String
+  period_month  String
+  row_number    Int
+  raw_key       String?
+  raw_data      Json
+  debtor_id     String?
+  contract_id   String?
+  status        String   @default("IMPORTED")
+  error_message String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
   import_job debtor_import_jobs @relation(fields: [import_job_id], references: [id], onDelete: Cascade)
-  debtor     digital_debtors?    @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract   debtor_contracts?   @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  debtor     digital_debtors?   @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract   debtor_contracts?  @relation(fields: [contract_id], references: [id], onDelete: SetNull)
 
   @@index([import_job_id])
   @@index([segment])
@@ -1543,10 +1550,11 @@ model debtor_documents {
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
 
-  debtor             digital_debtors      @relation(fields: [debtor_id], references: [id])
-  contract           debtor_contracts?    @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  document_checklist document_checklists? @relation(fields: [document_checklist_id], references: [id], onDelete: SetNull)
+  debtor             digital_debtors         @relation(fields: [debtor_id], references: [id])
+  contract           debtor_contracts?       @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  document_checklist document_checklists?    @relation(fields: [document_checklist_id], references: [id], onDelete: SetNull)
   files              debtor_document_files[]
+  activity_logs      debtor_activity_logs[]
 
   @@index([debtor_id])
   @@index([contract_id])
@@ -1601,41 +1609,42 @@ model debtor_marketing_timelines {
 }
 
 model debtor_marketing_activities {
-  id                         String    @id @default(uuid())
-  activity_kind              String
-  debtor_id                  String
-  contract_id                String?
-  timeline_id                String?
-  timeline_group_id          String?
-  related_activity_id        String?
-  activity_date              DateTime?
-  target_date                DateTime?
-  status                     String    @default("PENDING")
-  action_plan                String?
-  visit_address              String?
-  visit_result               String?
-  conclusion                 String?
-  handling_step              String?
-  handling_result            String?
-  notes                      String?
-  file_path                  String?
-  file_name                  String?
-  mime_type                  String?
-  size_bytes                 Int?
-  checksum                   String?
-  created_by                 String?
-  updated_by                 String?
-  deleted_by                 String?
-  deleted_at                 DateTime?
-  created_at                 DateTime  @default(now())
-  updated_at                 DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  activity_kind       String
+  debtor_id           String
+  contract_id         String?
+  timeline_id         String?
+  timeline_group_id   String?
+  related_activity_id String?
+  activity_date       DateTime?
+  target_date         DateTime?
+  status              String    @default("PENDING")
+  action_plan         String?
+  visit_address       String?
+  visit_result        String?
+  conclusion          String?
+  handling_step       String?
+  handling_result     String?
+  notes               String?
+  file_path           String?
+  file_name           String?
+  mime_type           String?
+  size_bytes          Int?
+  checksum            String?
+  created_by          String?
+  updated_by          String?
+  deleted_by          String?
+  deleted_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
 
-  debtor             digital_debtors               @relation(fields: [debtor_id], references: [id])
-  contract           debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  timeline           debtor_marketing_timelines?   @relation(fields: [timeline_id], references: [id], onDelete: SetNull)
-  related_activity   debtor_marketing_activities?  @relation("DebtorMarketingActivityRelated", fields: [related_activity_id], references: [id], onDelete: SetNull)
-  related_activities debtor_marketing_activities[] @relation("DebtorMarketingActivityRelated")
+  debtor             digital_debtors                   @relation(fields: [debtor_id], references: [id])
+  contract           debtor_contracts?                 @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  timeline           debtor_marketing_timelines?       @relation(fields: [timeline_id], references: [id], onDelete: SetNull)
+  related_activity   debtor_marketing_activities?      @relation("DebtorMarketingActivityRelated", fields: [related_activity_id], references: [id], onDelete: SetNull)
+  related_activities debtor_marketing_activities[]     @relation("DebtorMarketingActivityRelated")
   files              debtor_marketing_activity_files[]
+  activity_logs      debtor_activity_logs[]
 
   @@index([activity_kind, status])
   @@index([debtor_id])
@@ -1685,9 +1694,10 @@ model debtor_warning_letters {
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
 
-  debtor   digital_debtors   @relation(fields: [debtor_id], references: [id])
-  contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  debtor   digital_debtors               @relation(fields: [debtor_id], references: [id])
+  contract debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
   files    debtor_warning_letter_files[]
+  activity_logs debtor_activity_logs[]
 
   @@index([debtor_id])
   @@index([contract_id])
@@ -1698,14 +1708,14 @@ model debtor_warning_letters {
 
 model debtor_warning_letter_files {
   id         String   @id @default(uuid())
-  letter_id   String
-  file_path   String
-  file_name   String?
-  mime_type   String?
-  size_bytes  Int?
-  checksum    String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  letter_id  String
+  file_path  String
+  file_name  String?
+  mime_type  String?
+  size_bytes Int?
+  checksum   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   letter debtor_warning_letters @relation(fields: [letter_id], references: [id], onDelete: Cascade)
 
@@ -1779,9 +1789,9 @@ model legal_print_histories {
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
 
-  template           legal_document_templates? @relation(fields: [template_id], references: [id], onDelete: SetNull)
-  numbering_template numbering_templates?      @relation(fields: [numbering_template_id], references: [id], onDelete: SetNull)
-  contract           debtor_contracts          @relation(fields: [contract_id], references: [id])
+  template           legal_document_templates?   @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  numbering_template numbering_templates?        @relation(fields: [numbering_template_id], references: [id], onDelete: SetNull)
+  contract           debtor_contracts            @relation(fields: [contract_id], references: [id])
   files              legal_print_history_files[]
 
   @@index([contract_id])
@@ -1791,15 +1801,15 @@ model legal_print_histories {
 }
 
 model legal_print_history_files {
-  id           String   @id @default(uuid())
-  print_id      String
-  file_path    String
-  file_name    String?
-  mime_type    String?
-  size_bytes   Int?
-  checksum     String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  print_id   String
+  file_path  String
+  file_name  String?
+  mime_type  String?
+  size_bytes Int?
+  checksum   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   print legal_print_histories @relation(fields: [print_id], references: [id], onDelete: Cascade)
 
@@ -1808,58 +1818,148 @@ model legal_print_history_files {
 }
 
 model debtor_ideb_uploads {
-  id             String    @id @default(uuid())
-  import_job_id  String?
-  debtor_id      String?
-  contract_id    String?
-  month          Int
-  year           Int
-  status         String    @default("PENDING")
-  result_summary Json?
-  file_path      String
-  file_name      String?
-  mime_type      String?
-  size_bytes     Int?
-  checksum       String?
-  uploaded_by    String?
-  created_by     String?
-  updated_by     String?
-  deleted_by     String?
-  deleted_at     DateTime?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  import_job_id      String?
+  debtor_id          String?
+  contract_id        String?
+  source_fingerprint String?   @unique
+  month              Int
+  year               Int
+  status             String    @default("PENDING")
+  result_summary     Json?
+  file_path          String
+  file_name          String?
+  mime_type          String?
+  size_bytes         Int?
+  checksum           String?
+  uploaded_by        String?
+  created_by         String?
+  updated_by         String?
+  deleted_by         String?
+  deleted_at         DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
 
-  import_job debtor_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
-  debtor   digital_debtors?  @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract debtor_contracts? @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  files    debtor_ideb_upload_files[]
+  import_job debtor_import_jobs?        @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
+  debtor     digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract   debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  uploader   users?                     @relation("DebtorIdebUploader", fields: [uploaded_by], references: [id], onDelete: SetNull)
+  files      debtor_ideb_upload_files[]
+  activity_logs debtor_activity_logs[]
 
   @@index([import_job_id])
   @@index([debtor_id])
   @@index([contract_id])
+  @@index([uploaded_by])
+  @@index([debtor_id, year, month, created_at])
   @@index([year, month])
   @@index([status])
   @@index([deleted_at])
 }
 
 model debtor_ideb_upload_files {
-  id           String   @id @default(uuid())
-  upload_id    String
-  part_number  Int      @default(1)
-  total_parts  Int      @default(1)
-  file_path    String
-  file_name    String?
-  mime_type    String?
-  size_bytes   Int?
-  checksum     String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id          String   @id @default(uuid())
+  upload_id   String
+  part_number Int      @default(1)
+  total_parts Int      @default(1)
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?  @unique
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   upload debtor_ideb_uploads @relation(fields: [upload_id], references: [id], onDelete: Cascade)
 
   @@unique([upload_id, part_number])
   @@index([upload_id])
   @@index([part_number])
+}
+
+model debtor_activity_logs {
+  id                    String   @id @default(uuid())
+  actor_id              String?
+  action                String
+  source                String   @default("MANUAL")
+  entity_type           String
+  entity_id             String?
+  debtor_id             String?
+  contract_id           String?
+  import_job_id         String?
+  ideb_upload_id        String?
+  document_id           String?
+  marketing_activity_id String?
+  warning_letter_id     String?
+  title                 String?
+  before_data           Json?
+  after_data            Json?
+  metadata              Json?
+  request_ip            String?
+  user_agent            String?
+  created_at            DateTime @default(now())
+
+  actor              users?                       @relation("DebtorActivityLogActor", fields: [actor_id], references: [id], onDelete: SetNull)
+  debtor             digital_debtors?             @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract           debtor_contracts?            @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  import_job         debtor_import_jobs?          @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
+  ideb_upload        debtor_ideb_uploads?         @relation(fields: [ideb_upload_id], references: [id], onDelete: SetNull)
+  document           debtor_documents?            @relation(fields: [document_id], references: [id], onDelete: SetNull)
+  marketing_activity debtor_marketing_activities? @relation(fields: [marketing_activity_id], references: [id], onDelete: SetNull)
+  warning_letter     debtor_warning_letters?      @relation(fields: [warning_letter_id], references: [id], onDelete: SetNull)
+
+  @@index([actor_id, created_at])
+  @@index([action, created_at])
+  @@index([source, created_at])
+  @@index([entity_type, entity_id])
+  @@index([debtor_id, created_at])
+  @@index([contract_id, created_at])
+  @@index([import_job_id, created_at])
+  @@index([ideb_upload_id, created_at])
+  @@index([document_id, created_at])
+  @@index([marketing_activity_id, created_at])
+  @@index([warning_letter_id, created_at])
+}
+
+model legal_activity_logs {
+  id                     String   @id @default(uuid())
+  actor_id               String?
+  action                 String
+  source                 String   @default("MANUAL")
+  entity_type            String
+  entity_id              String?
+  debtor_id              String?
+  contract_id            String?
+  collateral_id          String?
+  third_party_id         String?
+  deposit_id             String?
+  deposit_transaction_id String?
+  title                  String?
+  before_data            Json?
+  after_data             Json?
+  metadata               Json?
+  request_ip             String?
+  user_agent             String?
+  created_at             DateTime @default(now())
+
+  actor               users?                     @relation("LegalActivityLogActor", fields: [actor_id], references: [id], onDelete: SetNull)
+  debtor              digital_debtors?           @relation("LegalActivityLogDebtor", fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract            debtor_contracts?          @relation("LegalActivityLogContract", fields: [contract_id], references: [id], onDelete: SetNull)
+  collateral          debtor_collaterals?        @relation("LegalActivityLogCollateral", fields: [collateral_id], references: [id], onDelete: SetNull)
+  third_party         third_parties?              @relation("LegalActivityLogThirdParty", fields: [third_party_id], references: [id], onDelete: SetNull)
+  deposit             legal_deposits?            @relation("LegalActivityLogDeposit", fields: [deposit_id], references: [id], onDelete: SetNull)
+  deposit_transaction legal_deposit_transactions? @relation("LegalActivityLogDepositTransaction", fields: [deposit_transaction_id], references: [id], onDelete: SetNull)
+
+  @@index([actor_id, created_at])
+  @@index([action, created_at])
+  @@index([source, created_at])
+  @@index([entity_type, entity_id])
+  @@index([debtor_id, created_at])
+  @@index([contract_id, created_at])
+  @@index([collateral_id, created_at])
+  @@index([third_party_id, created_at])
+  @@index([deposit_id, created_at])
+  @@index([deposit_transaction_id, created_at])
 }
 
 model legal_notary_progress {
@@ -1886,9 +1986,9 @@ model legal_notary_progress {
   created_at             DateTime  @default(now())
   updated_at             DateTime  @updatedAt
 
-  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
-  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
-  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  contract    debtor_contracts              @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals?           @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
+  third_party third_parties                 @relation(fields: [third_party_id], references: [id])
   files       legal_notary_progress_files[]
 
   @@index([contract_id])
@@ -1899,15 +1999,15 @@ model legal_notary_progress {
 }
 
 model legal_notary_progress_files {
-  id           String   @id @default(uuid())
-  progress_id  String
-  file_path    String
-  file_name    String?
-  mime_type    String?
-  size_bytes   Int?
-  checksum     String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id          String   @id @default(uuid())
+  progress_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   progress legal_notary_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -1940,9 +2040,9 @@ model legal_insurance_progress {
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
 
-  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
-  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
-  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  contract    debtor_contracts                 @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals?              @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
+  third_party third_parties                    @relation(fields: [third_party_id], references: [id])
   claims      legal_claims[]
   files       legal_insurance_progress_files[]
 
@@ -1955,15 +2055,15 @@ model legal_insurance_progress {
 }
 
 model legal_insurance_progress_files {
-  id           String   @id @default(uuid())
-  progress_id  String
-  file_path    String
-  file_name    String?
-  mime_type    String?
-  size_bytes   Int?
-  checksum     String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id          String   @id @default(uuid())
+  progress_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   progress legal_insurance_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -1997,9 +2097,9 @@ model legal_kjpp_progress {
   created_at             DateTime  @default(now())
   updated_at             DateTime  @updatedAt
 
-  contract    debtor_contracts @relation(fields: [contract_id], references: [id])
-  collateral  debtor_collaterals? @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
-  third_party third_parties    @relation(fields: [third_party_id], references: [id])
+  contract    debtor_contracts            @relation(fields: [contract_id], references: [id])
+  collateral  debtor_collaterals?         @relation(fields: [collateral_id], references: [id], onDelete: SetNull)
+  third_party third_parties               @relation(fields: [third_party_id], references: [id])
   files       legal_kjpp_progress_files[]
 
   @@index([contract_id])
@@ -2010,15 +2110,15 @@ model legal_kjpp_progress {
 }
 
 model legal_kjpp_progress_files {
-  id           String   @id @default(uuid())
-  progress_id  String
-  file_path    String
-  file_name    String?
-  mime_type    String?
-  size_bytes   Int?
-  checksum     String?
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  id          String   @id @default(uuid())
+  progress_id String
+  file_path   String
+  file_name   String?
+  mime_type   String?
+  size_bytes  Int?
+  checksum    String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   progress legal_kjpp_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -2068,14 +2168,14 @@ model legal_claims {
 
 model legal_claim_files {
   id         String   @id @default(uuid())
-  claim_id    String
-  file_path   String
-  file_name   String?
-  mime_type   String?
-  size_bytes  Int?
-  checksum    String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  claim_id   String
+  file_path  String
+  file_name  String?
+  mime_type  String?
+  size_bytes Int?
+  checksum   String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   claim legal_claims @relation(fields: [claim_id], references: [id], onDelete: Cascade)
 
@@ -2106,6 +2206,7 @@ model legal_deposits {
   contract     debtor_contracts             @relation(fields: [contract_id], references: [id])
   third_party  third_parties?               @relation(fields: [third_party_id], references: [id], onDelete: SetNull)
   transactions legal_deposit_transactions[]
+  activity_logs legal_activity_logs[]       @relation("LegalActivityLogDeposit")
 
   @@index([deposit_type_id])
   @@index([type])
@@ -2129,8 +2230,9 @@ model legal_deposit_transactions {
   created_by       String?
   created_at       DateTime @default(now())
 
-  deposit legal_deposits @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+  deposit legal_deposits                    @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
   files   legal_deposit_transaction_files[]
+  activity_logs legal_activity_logs[]       @relation("LegalActivityLogDepositTransaction")
 
   @@index([deposit_id])
   @@index([transaction_date])

@@ -1,5 +1,19 @@
 const prisma = require("../../config/prisma");
 
+const USER_SELECT = {
+  id: true,
+  name: true,
+  username: true,
+  email: true,
+  division_id: true,
+  division: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+};
+
 const CONTRACT_SELECT = {
   id: true,
   no_kontrak: true,
@@ -65,34 +79,6 @@ exports.findContractById = (id, tx, extraWhere = {}) =>
     },
   });
 
-exports.findContractDocumentContextById = (id, tx, extraWhere = {}) =>
-  client(tx).debtor_contracts.findFirst({
-    where: {
-      id,
-      deleted_at: null,
-      ...extraWhere,
-    },
-    include: {
-      debtor: {
-        include: {
-          branch: true,
-          marketing_user: true,
-          individual_profile: true,
-          legal_entity_profile: true,
-        },
-      },
-      product: true,
-      akad_type: true,
-      branch: true,
-      marketing_user: true,
-      collaterals: {
-        where: { deleted_at: null },
-        orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
-        select: COLLATERAL_SELECT,
-      },
-    },
-  });
-
 exports.findCollateralById = (id, tx) =>
   client(tx).debtor_collaterals.findFirst({
     where: {
@@ -151,56 +137,8 @@ exports.findThirdPartiesByIds = (ids, tx) =>
     select: THIRD_PARTY_SELECT,
   });
 
-exports.findTemplateById = (id, tx) =>
-  client(tx).legal_document_templates.findFirst({
-    where: {
-      id,
-      deleted_at: null,
-    },
-  });
-
-exports.findNumberingTemplateById = (id, tx) =>
-  client(tx).numbering_templates.findFirst({
-    where: {
-      id,
-      deleted_at: null,
-    },
-  });
-
-exports.findActiveNumberingTemplate = (documentType, tx) =>
-  client(tx).numbering_templates.findFirst({
-    where: {
-      module: "LEGAL",
-      document_type: documentType,
-      is_active: true,
-      deleted_at: null,
-    },
-    orderBy: {
-      created_at: "desc",
-    },
-  });
-
-exports.updateNumberingTemplate = (id, data, tx) =>
-  client(tx).numbering_templates.update({
-    where: { id },
-    data,
-  });
-
 function includeFor(modelName) {
   switch (modelName) {
-    case "legal_document_templates":
-      return {
-        files: true,
-      };
-    case "legal_print_histories":
-      return {
-        files: true,
-        template: true,
-        numbering_template: true,
-        contract: {
-          select: CONTRACT_SELECT,
-        },
-      };
     case "legal_notary_progress":
     case "legal_insurance_progress":
     case "legal_kjpp_progress":
@@ -332,3 +270,25 @@ exports.findDepositTransactionsByDepositId = (depositId, tx) =>
   });
 
 exports.countWhere = (modelName, where) => prisma[modelName].count({ where });
+
+exports.findActivityLogs = ({ where, skip, take, orderBy }) =>
+  prisma.legal_activity_logs.findMany({
+    where,
+    skip,
+    take,
+    orderBy,
+    include: {
+      actor: {
+        select: USER_SELECT,
+      },
+      contract: {
+        select: CONTRACT_SELECT,
+      },
+      third_party: {
+        select: THIRD_PARTY_SELECT,
+      },
+    },
+  });
+
+exports.countActivityLogs = (where) =>
+  prisma.legal_activity_logs.count({ where });

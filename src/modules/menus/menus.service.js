@@ -15,7 +15,6 @@ const TEMPORARILY_DISABLED_MENU_URLS = new Set([
   "/dashboard/legal/cetak/keterangan-lunas",
   "/dashboard/legal/cetak/surat-samsat",
   "/dashboard/legal/cetak/dokumen-lainnya",
-  "/dashboard/legal/laporan",
 ]);
 const TEMPORARILY_DISABLED_COMPONENT_KEYS = new Set([
   "dashboard.module_report.legal",

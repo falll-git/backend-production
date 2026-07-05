@@ -68,14 +68,26 @@ function getSlikImportQueue() {
   return queue;
 }
 
-async function enqueueSlikImportJob({ jobId, userId = null }) {
+async function enqueueSlikImportJob({ jobId, userId = null, force = false }) {
   const importQueue = getSlikImportQueue();
   await importQueue.waitUntilReady();
+  const queueJobId = `slik-import-${jobId}`;
+  const existingJob = await importQueue.getJob(queueJobId);
+
+  if (existingJob) {
+    const state = await existingJob.getState();
+    if (force && ["completed", "failed"].includes(state)) {
+      await existingJob.remove();
+    } else {
+      return existingJob;
+    }
+  }
+
   return importQueue.add(
     SLIK_IMPORT_JOB_NAME,
     { jobId, userId },
     {
-      jobId: `slik-import-${jobId}`,
+      jobId: queueJobId,
     },
   );
 }

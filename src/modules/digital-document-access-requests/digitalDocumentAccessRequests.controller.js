@@ -101,3 +101,22 @@ exports.reject = async (req, res) => {
     });
   }
 };
+
+exports.revoke = async (req, res) => {
+  try {
+    const result = await service.revoke({
+      req,
+      id: req.params.id,
+      payload: req.body,
+      userId: req.user?.id,
+    });
+
+    return successResponse(res, result, "Akses dokumen berhasil dicabut");
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};

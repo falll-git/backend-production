@@ -54,6 +54,10 @@ function normalizeDivisionIds(divisionIds) {
   ];
 }
 
+function isSameUser(left, right) {
+  return Boolean(left && right && String(left) === String(right));
+}
+
 async function resolveActiveDivisionManagerGroups(
   divisionIds,
   menuUrls = DISPOSITION_MANAGER_MENU_URLS,
@@ -83,13 +87,24 @@ async function resolveActiveDivisionManagers(divisionIds, options = {}) {
     options.menuUrls ?? DISPOSITION_MANAGER_MENU_URLS,
   );
   const assignments = [];
+  const excludeUserId = options.excludeUserId ?? null;
 
   for (const { division, managers } of groups) {
-    for (const manager of managers) {
+    const eligibleManagers = excludeUserId
+      ? managers.filter((manager) => !isSameUser(manager.id, excludeUserId))
+      : managers;
+
+    if (eligibleManagers.length === 0) {
+      throw new Error(
+        `Penerima disposisi divisi yang aktif untuk divisi ${division.name} tidak ditemukan selain pembuat.`,
+      );
+    }
+
+    for (const manager of eligibleManagers) {
       assignments.push({
         division,
         manager,
-        managers,
+        managers: eligibleManagers,
       });
     }
   }

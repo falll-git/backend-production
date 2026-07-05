@@ -25,6 +25,14 @@ const {
   resolveSlikReference,
   withSlikReferenceFields,
 } = require("../../utils/slik-reference-dictionary");
+const {
+  buildIdebReportMetrics,
+  buildIdebReportSummary,
+} = require("../../utils/ideb-report");
+const {
+  auditSnapshot,
+  safeRecordDebtorActivity,
+} = require("../../utils/debtor-audit-log");
 
 const SORTABLE_FIELDS = new Set([
   "debtor_number",
@@ -34,6 +42,41 @@ const SORTABLE_FIELDS = new Set([
   "created_at",
   "updated_at",
 ]);
+const DEBTOR_AUDIT_FIELDS = [
+  "id",
+  "debtor_number",
+  "identity_number",
+  "name",
+  "customer_type",
+  "slik_segment",
+  "slik_status_code",
+  "branch_id",
+  "marketing_user_id",
+  "phone",
+  "address",
+  "status",
+  "description",
+  "created_by",
+  "updated_by",
+  "deleted_by",
+  "deleted_at",
+  "individual_profile",
+  "legal_entity_profile",
+];
+const DEBTOR_DOCUMENT_AUDIT_FIELDS = [
+  "id",
+  "debtor_id",
+  "contract_id",
+  "document_checklist_id",
+  "document_type",
+  "category",
+  "description",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "uploaded_by",
+  "created_by",
+];
 const CUSTOMER_TYPE_LABELS = {
   INDIVIDUAL: "Perorangan",
   LEGAL_ENTITY: "Badan Hukum/Yayasan",
@@ -791,11 +834,54 @@ function buildIdebSummaryDetail(item, debtor, contracts) {
   };
 }
 
-function serializeIdeb(req, item, debtor, contracts) {
+function serializeIdeb(req, item, debtor, contracts, collaterals = []) {
+  const summaryDetail = buildIdebSummaryDetail(item, debtor, contracts);
+  const metrics = buildIdebReportMetrics(item.result_summary || {});
+  const fallbackCollaterals = collaterals.map((collateral) => ({
+    ...collateral,
+    source: "A01",
+    type: collateral.collateral_type,
+    location: collateral.address,
+    value:
+      collateral.independent_appraisal_value ??
+      collateral.appraisal_value ??
+      collateral.market_value ??
+      null,
+  }));
+
   return {
     ...item,
-    summary_detail: buildIdebSummaryDetail(item, debtor, contracts),
+    summary_detail: summaryDetail,
+    uploader: item.uploader || null,
+    report_summary: buildIdebReportSummary(metrics, { fallbackCollaterals }),
     file: serializeDebtorFile(req, item, "ideb"),
+  };
+}
+
+function serializeActivityLog(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    actor_id: item.actor_id,
+    actor: serializeUser(item.actor),
+    action: item.action,
+    source: item.source,
+    entity_type: item.entity_type,
+    entity_id: item.entity_id,
+    debtor_id: item.debtor_id,
+    contract_id: item.contract_id,
+    import_job_id: item.import_job_id,
+    ideb_upload_id: item.ideb_upload_id,
+    document_id: item.document_id,
+    marketing_activity_id: item.marketing_activity_id,
+    warning_letter_id: item.warning_letter_id,
+    title: item.title,
+    before_data: item.before_data,
+    after_data: item.after_data,
+    metadata: item.metadata,
+    request_ip: item.request_ip,
+    user_agent: item.user_agent,
+    created_at: item.created_at,
   };
 }
 
@@ -1501,6 +1587,23 @@ exports.getById = async ({ id, userId }) => {
   return serializeDebtor(debtor, aggregates.get(debtor.id));
 };
 
+exports.getActivityLogs = async ({ debtorId, query, userId }) => {
+  await exports.getById({ id: debtorId, userId });
+  const pagination = resolvePagination(query, PAGINATION_PROFILES.HISTORY);
+  const [data, total] = await Promise.all([
+    repository.findActivityLogsByDebtorId(debtorId, {
+      skip: pagination.skip,
+      take: pagination.take,
+    }),
+    repository.countActivityLogsByDebtorId(debtorId),
+  ]);
+
+  return {
+    data: data.map(serializeActivityLog).filter(Boolean),
+    meta: buildPaginationMeta(total, pagination),
+  };
+};
+
 exports.getWorkflow = async ({ req, id, userId }) => {
   const scope = await getDebtorAccessScope(userId);
   const debtor = await repository.findById(id, {
@@ -1512,11 +1615,15 @@ exports.getWorkflow = async ({ req, id, userId }) => {
   const aggregates = await repository.findListAggregates([debtor.id]);
   const serializedDebtor = serializeDebtor(debtor, aggregates.get(debtor.id));
   const contractIds = serializedDebtor.contracts.map((contract) => contract.id);
-  const [workflow, documentChecklists] = await Promise.all([
+  const [workflow, documentChecklists, activityLogs] = await Promise.all([
     repository.findWorkflowData(id, contractIds),
     repository.findActiveDocumentChecklists(),
+    repository.findActivityLogsByDebtorId(id, { skip: 0, take: 25 }),
   ]);
   const marketing = workflow.marketing.map((item) => serializeMarketingActivity(req, item));
+  const collaterals = Array.isArray(workflow.collaterals)
+    ? workflow.collaterals.map(serializeCollateral).filter(Boolean)
+    : [];
   const documents = Array.isArray(debtor.debtor_documents)
     ? debtor.debtor_documents.map((item) => serializeDocument(req, item))
     : [];
@@ -1567,9 +1674,7 @@ exports.getWorkflow = async ({ req, id, userId }) => {
       })),
     ),
     documents,
-    collaterals: Array.isArray(workflow.collaterals)
-      ? workflow.collaterals.map(serializeCollateral).filter(Boolean)
-      : [],
+    collaterals,
     document_checklist_status: buildDocumentChecklistStatus(
       documentChecklists,
       documents,
@@ -1577,10 +1682,17 @@ exports.getWorkflow = async ({ req, id, userId }) => {
     marketing: groupMarketingByKind(marketing, workflow.timelines || []),
     ideb_uploads: canViewIdebWorkflow
       ? workflow.ideb.map((item) =>
-          serializeIdeb(req, item, serializedDebtor, serializedDebtor.contracts),
+          serializeIdeb(
+            req,
+            item,
+            serializedDebtor,
+            serializedDebtor.contracts,
+            collaterals,
+          ),
         )
       : [],
     legal: legalWorkflow,
+    activity_logs: activityLogs.map(serializeActivityLog).filter(Boolean),
   };
 };
 
@@ -1643,7 +1755,18 @@ exports.create = async ({ payload, userId }) => {
         created_by: userId || null,
       }, tx);
       await syncDebtorProfiles(tx, debtor.id, payload, normalized, userId);
-      return repository.findById(debtor.id, {}, tx);
+      const fullDebtor = await repository.findById(debtor.id, {}, tx);
+      await safeRecordDebtorActivity(tx, {
+        actor_id: userId || null,
+        action: "CREATE",
+        source: "MANUAL",
+        entity_type: "digital_debtors",
+        entity_id: fullDebtor.id,
+        debtor_id: fullDebtor.id,
+        title: `Input debitur ${fullDebtor.name || fullDebtor.debtor_number || fullDebtor.id}`,
+        after_data: auditSnapshot(fullDebtor, DEBTOR_AUDIT_FIELDS),
+      });
+      return fullDebtor;
     });
     return serializeDebtor(created);
   } catch (error) {
@@ -1675,7 +1798,7 @@ async function getManageableDebtor(id, userId) {
 }
 
 exports.update = async ({ id, payload, userId }) => {
-  await getManageableDebtor(id, userId);
+  const current = await getManageableDebtor(id, userId);
   const normalized = compactUndefined(normalizeDebtorPayload(payload));
   await ensureDebtorReferences(normalized);
 
@@ -1686,7 +1809,19 @@ exports.update = async ({ id, payload, userId }) => {
         updated_by: userId || null,
       }, tx);
       await syncDebtorProfiles(tx, id, payload, normalized, userId);
-      return repository.findById(id, {}, tx);
+      const fullDebtor = await repository.findById(id, {}, tx);
+      await safeRecordDebtorActivity(tx, {
+        actor_id: userId || null,
+        action: "UPDATE",
+        source: "MANUAL",
+        entity_type: "digital_debtors",
+        entity_id: fullDebtor.id,
+        debtor_id: fullDebtor.id,
+        title: `Ubah debitur ${fullDebtor.name || fullDebtor.debtor_number || fullDebtor.id}`,
+        before_data: auditSnapshot(current, DEBTOR_AUDIT_FIELDS),
+        after_data: auditSnapshot(fullDebtor, DEBTOR_AUDIT_FIELDS),
+      });
+      return fullDebtor;
     });
     return serializeDebtor(updated);
   } catch (error) {
@@ -1698,11 +1833,22 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  await getManageableDebtor(id, userId);
-  await repository.update(id, {
+  const current = await getManageableDebtor(id, userId);
+  const deleted = await repository.update(id, {
     status: "INACTIVE",
     deleted_at: new Date(),
     deleted_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "DELETE",
+    source: "MANUAL",
+    entity_type: "digital_debtors",
+    entity_id: deleted.id,
+    debtor_id: deleted.id,
+    title: `Nonaktifkan debitur ${deleted.name || deleted.debtor_number || deleted.id}`,
+    before_data: auditSnapshot(current, DEBTOR_AUDIT_FIELDS),
+    after_data: auditSnapshot(deleted, DEBTOR_AUDIT_FIELDS),
   });
 };
 
@@ -1799,6 +1945,22 @@ exports.createDocument = async ({ req, debtorId, payload, userId }) => {
     },
     uploaded_by: userId || null,
     created_by: userId || null,
+  });
+  await safeRecordDebtorActivity(undefined, {
+    actor_id: userId || null,
+    action: "UPLOAD_DOCUMENT",
+    source: "MANUAL",
+    entity_type: "debtor_documents",
+    entity_id: document.id,
+    debtor_id: document.debtor_id,
+    contract_id: document.contract_id || null,
+    document_id: document.id,
+    title: `Upload dokumen debitur ${document.document_type}`,
+    after_data: auditSnapshot(document, DEBTOR_DOCUMENT_AUDIT_FIELDS),
+    metadata: {
+      file_count: fileMetas.length,
+      file_names: fileMetas.map((file) => file.file_name).filter(Boolean),
+    },
   });
 
   return serializeDocument(req, document);

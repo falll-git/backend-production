@@ -1,4 +1,7 @@
 const prisma = require("../../config/prisma");
+const {
+  buildActiveApprovedAccessWhere,
+} = require("../../utils/digital-archive-access");
 
 const USER_SUMMARY_SELECT = {
   id: true,
@@ -61,12 +64,7 @@ function getDocumentInclude() {
       },
     },
     access_requests: {
-      where: {
-        status: "APPROVED",
-        expires_at: {
-          gte: new Date(),
-        },
-      },
+      where: buildActiveApprovedAccessWhere(),
       select: {
         id: true,
         requester_id: true,
