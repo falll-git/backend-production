@@ -29,7 +29,6 @@ const financingProductRoutes = require("./modules/financing-products/financingPr
 const contractTypeRoutes = require("./modules/contract-types/contractTypes.route");
 const thirdPartyRoutes = require("./modules/third-parties/thirdParties.route");
 const documentChecklistRoutes = require("./modules/document-checklists/documentChecklists.route");
-const numberingTemplateRoutes = require("./modules/numbering-templates/numberingTemplates.route");
 const depositTypeRoutes = require("./modules/deposit-types/depositTypes.route");
 const mailDeliveryMediaRoutes = require("./modules/mail-delivery-media/mailDeliveryMedia.route");
 const collateralTypeRoutes = require("./modules/collateral-types/collateralTypes.route");
@@ -126,10 +125,22 @@ const staticStorageMounts = [
   },
 ];
 
+function setWatermarkAssetHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+}
+
 for (const mount of staticStorageMounts) {
+  const staticMiddleware = express.static(mount.storageRoot, {
+    dotfiles: "deny",
+    index: false,
+    ...(mount.publicPrefix === WATERMARK_PUBLIC_PREFIX
+      ? { setHeaders: setWatermarkAssetHeaders }
+      : {}),
+  });
   const middlewares = mount.secure
-    ? [secureFileAccess(mount.publicPrefix), express.static(mount.storageRoot)]
-    : [express.static(mount.storageRoot)];
+    ? [secureFileAccess(mount.publicPrefix), staticMiddleware]
+    : [staticMiddleware];
 
   app.use(mount.publicPrefix, ...middlewares);
 }
@@ -181,7 +192,6 @@ app.use("/api/financing-products", financingProductRoutes);
 app.use("/api/contract-types", contractTypeRoutes);
 app.use("/api/third-parties", thirdPartyRoutes);
 app.use("/api/document-checklists", documentChecklistRoutes);
-app.use("/api/numbering-templates", numberingTemplateRoutes);
 app.use("/api/deposit-types", depositTypeRoutes);
 app.use("/api/mail-delivery-media", mailDeliveryMediaRoutes);
 app.use("/api/collateral-types", collateralTypeRoutes);

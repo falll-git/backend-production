@@ -36,6 +36,12 @@ const REJECT_FEATURE = "reject";
 const REVOKE_FEATURE = "revoke";
 const HANDOVER_FEATURE = "handover";
 const RETURN_FEATURE = "return";
+const LEGAL_DEPOSIT_MENU_URL_BY_TYPE = {
+  NOTARIS: "/dashboard/legal/titipan/notaris",
+  ASURANSI: "/dashboard/legal/titipan/asuransi",
+  ANGSURAN: "/dashboard/legal/titipan/angsuran",
+  LAINNYA: "/dashboard/legal/titipan/lainnya",
+};
 
 const FEATURE_LABELS = {
   [REPORT_ALL_FEATURE]: "Semua Data",
@@ -91,6 +97,7 @@ const MENU_CAPABILITIES = {
   "/dashboard/legal/titipan/asuransi": CRUD,
   "/dashboard/legal/titipan/notaris": CRUD,
   "/dashboard/legal/titipan/angsuran": CRUD,
+  "/dashboard/legal/titipan/lainnya": CRUD,
   "/dashboard/legal/progress/notaris": CRUD,
   "/dashboard/legal/progress/asuransi": CRUD,
   "/dashboard/legal/progress/kjpp": CRUD,
@@ -110,7 +117,6 @@ const MENU_CAPABILITIES = {
   "/dashboard/parameter/pihak-ketiga/notaris": CRUD,
   "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi": CRUD,
   "/dashboard/parameter/pihak-ketiga/kjpp": CRUD,
-  "/dashboard/parameter/template-penomoran": CRUD,
   "/dashboard/parameter/checklist-dokumen": CRUD,
   "/dashboard/parameter/produk-pembiayaan": CRUD,
   "/dashboard/parameter/jenis-akad": CRUD,
@@ -254,6 +260,10 @@ const MENU_FEATURES = {
     MANAGE_ALL_FEATURE,
   ],
   "/dashboard/legal/titipan/angsuran": [
+    VIEW_DIVISION_FEATURE,
+    MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/legal/titipan/lainnya": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
   ],
@@ -429,6 +439,7 @@ module.exports = {
   DIVISION_MANAGER_FEATURE,
   FEATURE_LABELS,
   HANDOVER_FEATURE,
+  LEGAL_DEPOSIT_MENU_URL_BY_TYPE,
   LEGAL_MENU_URLS,
   MANAGE_ALL_FEATURE,
   MENU_CAPABILITIES,

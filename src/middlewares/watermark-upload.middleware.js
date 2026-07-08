@@ -1,40 +1,32 @@
 const multer = require("multer");
+const {
+  isUploadContentAllowed,
+  isUploadMetadataAllowed,
+} = require("../utils/upload-file-policy");
 
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/svg+xml",
-]);
-const ALLOWED_EXTENSIONS = new Set(["png", "jpg", "jpeg", "svg"]);
-
-function getFileExtension(fileName) {
-  if (typeof fileName !== "string") return "";
-
-  const trimmed = fileName.trim().toLowerCase();
-  if (!trimmed.includes(".")) return "";
-
-  return trimmed.split(".").pop() || "";
-}
+const ALLOWED_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: MAX_FILE_SIZE_BYTES,
+    files: 1,
+    fields: 20,
+    parts: 21,
+    fieldNameSize: 100,
+    fieldSize: 256 * 1024,
   },
   fileFilter(req, file, callback) {
-    const extension = getFileExtension(file.originalname);
-    const mimeType = String(file.mimetype || "").toLowerCase();
-
     if (
-      !ALLOWED_MIME_TYPES.has(mimeType) ||
-      !ALLOWED_EXTENSIONS.has(extension)
+      !isUploadMetadataAllowed(file, {
+        allowedExtensions: ALLOWED_EXTENSIONS,
+      })
     ) {
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
-          "Format gambar watermark harus PNG, JPG, JPEG, atau SVG.",
+          "Format gambar watermark harus PNG, JPG, atau JPEG.",
         ),
       );
     }
@@ -67,6 +59,14 @@ function uploadWatermarkImage(fieldName = "image") {
         return res.status(400).json({
           status: false,
           message: error.message || "Gagal memproses gambar watermark.",
+        });
+      }
+
+      if (req.file && !isUploadContentAllowed(req.file)) {
+        return res.status(400).json({
+          status: false,
+          message:
+            "Isi gambar watermark tidak sesuai dengan format atau ekstensi yang dipilih.",
         });
       }
 

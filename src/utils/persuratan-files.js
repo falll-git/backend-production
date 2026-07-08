@@ -6,6 +6,7 @@ const {
   isUploadTempPath,
 } = require("./upload-temp-files");
 const { buildPublicUrl } = require("./public-url");
+const { normalizeDownloadFileName } = require("./file-names");
 
 const UPLOAD_ROOT = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -94,14 +95,7 @@ function normalizeStoredPath(value) {
   if (trimmed.startsWith(PUBLIC_PREFIX)) return trimmed;
 
   if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.pathname.startsWith(PUBLIC_PREFIX)) {
-        return parsed.pathname;
-      }
-    } catch {}
-
-    return trimmed;
+    return null;
   }
 
   return null;
@@ -198,23 +192,11 @@ function moveUploadedFile(sourcePath, absolutePath) {
 }
 
 function deriveDocumentFileName(storedPath, fallbackBaseName = "dokumen") {
-  const safeFallback = sanitizeFileNameBase(fallbackBaseName) || "dokumen";
-
-  if (typeof storedPath === "string" && storedPath.trim()) {
-    const trimmed = storedPath.trim();
-
-    if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) {
-      const normalized = trimmed.split("#")[0].split("?")[0];
-      const fileName = normalized.split("/").filter(Boolean).pop();
-      if (fileName) return decodeURIComponent(fileName);
-    }
-
-    if (!trimmed.includes("/") && !trimmed.includes("\\")) {
-      return trimmed;
-    }
-  }
-
-  return `${safeFallback}.bin`;
+  return normalizeDownloadFileName({
+    fileName: storedPath,
+    storedPath,
+    fallbackBaseName,
+  });
 }
 
 function buildFileUrl(req, storedPath) {

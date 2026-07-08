@@ -2,28 +2,20 @@ const multer = require("multer");
 const {
   DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
   DOCUMENT_UPLOAD_MAX_SIZE_LABEL,
+  getDocumentUploadMaxTotalSizeBytes,
+  getDocumentUploadMaxTotalSizeMb,
 } = require("../utils/upload-limits");
+const {
+  attachUploadTempCleanup,
+  buildDiskUploadStorage,
+  cleanupUploadTempFileSync,
+} = require("../utils/upload-temp-files");
+const {
+  isUploadContentAllowed,
+  isUploadMetadataAllowed,
+} = require("../utils/upload-file-policy");
 
-const ALLOWED_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/zip",
-  "application/x-zip-compressed",
-  "text/plain",
-  "text/csv",
-  "application/csv",
-  "application/json",
-  "text/json",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-]);
-const ALLOWED_EXTENSIONS = new Set([
+const DEFAULT_ALLOWED_EXTENSIONS = new Set([
   "pdf",
   "doc",
   "docx",
@@ -40,40 +32,42 @@ const ALLOWED_EXTENSIONS = new Set([
   "png",
 ]);
 
-function getFileExtension(fileName) {
-  if (typeof fileName !== "string") return "";
+function createUpload(allowedExtensions, maxFiles) {
+  return multer({
+    storage: buildDiskUploadStorage(multer),
+    limits: {
+      fileSize: DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+      files: maxFiles,
+      fields: 100,
+      parts: maxFiles + 100,
+      fieldNameSize: 100,
+      fieldSize: 1024 * 1024,
+    },
+    fileFilter(req, file, callback) {
+      if (
+        !isUploadMetadataAllowed(file, {
+          allowedExtensions,
+        })
+      ) {
+        return callback(
+          new multer.MulterError(
+            "LIMIT_UNEXPECTED_FILE",
+            "Format atau ekstensi file tidak didukung.",
+          ),
+        );
+      }
 
-  const trimmed = fileName.trim().toLowerCase();
-  if (!trimmed.includes(".")) return "";
-
-  return trimmed.split(".").pop() || "";
+      return callback(null, true);
+    },
+  });
 }
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
-  },
-  fileFilter(req, file, callback) {
-    const extension = getFileExtension(file.originalname);
-    const mimeType = (file.mimetype || "").toLowerCase();
-    const isMimeAllowed = ALLOWED_MIME_TYPES.has(mimeType);
-    const isExtensionAllowed = ALLOWED_EXTENSIONS.has(extension);
+function uploadDomainFile(fieldName = "file", options = {}) {
+  const allowedExtensions = new Set(
+    options.allowedExtensions || DEFAULT_ALLOWED_EXTENSIONS,
+  );
+  const upload = createUpload(allowedExtensions, 1);
 
-    if (!isMimeAllowed && !isExtensionAllowed) {
-      return callback(
-        new multer.MulterError(
-          "LIMIT_UNEXPECTED_FILE",
-          "Format file harus PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, TXT, CSV, JSON, JPG, JPEG, atau PNG.",
-        ),
-      );
-    }
-
-    return callback(null, true);
-  },
-});
-
-function uploadDomainFile(fieldName = "file") {
   return (req, res, next) => {
     upload.single(fieldName)(req, res, (error) => {
       if (error) {
@@ -98,8 +92,18 @@ function uploadDomainFile(fieldName = "file") {
       }
 
       if (req.file) {
+        if (!isUploadContentAllowed(req.file)) {
+          cleanupUploadTempFileSync(req.file.path);
+          return res.status(400).json({
+            status: false,
+            message:
+              "Isi file tidak sesuai dengan format atau ekstensi yang dipilih.",
+          });
+        }
+
+        attachUploadTempCleanup(res, req.file.path);
         req.body.file = {
-          buffer: req.file.buffer,
+          temp_path: req.file.path,
           name: req.file.originalname,
           mime_type: req.file.mimetype,
           size_bytes: req.file.size,
@@ -111,7 +115,12 @@ function uploadDomainFile(fieldName = "file") {
   };
 }
 
-function uploadDomainFiles(fieldName = "files", maxCount = 20) {
+function uploadDomainFiles(fieldName = "files", maxCount = 20, options = {}) {
+  const allowedExtensions = new Set(
+    options.allowedExtensions || DEFAULT_ALLOWED_EXTENSIONS,
+  );
+  const upload = createUpload(allowedExtensions, maxCount + 1);
+
   return (req, res, next) => {
     const fields =
       fieldName === "file"
@@ -144,9 +153,38 @@ function uploadDomainFiles(fieldName = "files", maxCount = 20) {
       }
 
       const uploadedFiles = Object.values(req.files || {}).flat();
+      if (uploadedFiles.some((file) => !isUploadContentAllowed(file))) {
+        for (const file of uploadedFiles) {
+          cleanupUploadTempFileSync(file.path);
+        }
+        return res.status(400).json({
+          status: false,
+          message:
+            "Salah satu isi file tidak sesuai dengan format atau ekstensi yang dipilih.",
+        });
+      }
+
+      const totalSize = uploadedFiles.reduce(
+        (sum, file) => sum + Number(file.size || 0),
+        0,
+      );
+      if (totalSize > getDocumentUploadMaxTotalSizeBytes()) {
+        for (const file of uploadedFiles) {
+          cleanupUploadTempFileSync(file.path);
+        }
+        return res.status(413).json({
+          status: false,
+          message: `Total ukuran file maksimal ${getDocumentUploadMaxTotalSizeMb()} MB.`,
+        });
+      }
+
       if (uploadedFiles.length > 0) {
+        attachUploadTempCleanup(
+          res,
+          uploadedFiles.map((file) => file.path),
+        );
         req.body.files = uploadedFiles.map((file) => ({
-          buffer: file.buffer,
+          temp_path: file.path,
           name: file.originalname,
           mime_type: file.mimetype,
           size_bytes: file.size,

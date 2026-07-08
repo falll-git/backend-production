@@ -3,7 +3,6 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
-  uploadDomainFile,
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
@@ -15,7 +14,6 @@ const {
 const controller = require("./debtorImports.controller");
 const {
   idebImportJobSchema,
-  importJobSchema,
   resolveIdebSchema,
   slikImportJobSchema,
 } = require("./debtorImports.validation");
@@ -28,20 +26,11 @@ const READ_URLS = [
   "/dashboard/informasi-debitur/laporan-ideb",
 ];
 
-function uploadAndValidate(schema = importJobSchema) {
-  return [
-    uploadDomainFile("file"),
-    normalizePersuratanMultipartBody({
-      jsonFields: ["summary"],
-      numberFields: ["total_rows"],
-    }),
-    validate(schema),
-  ];
-}
-
 function uploadIdebAndValidate() {
   return [
-    uploadDomainFiles("files", 20),
+    uploadDomainFiles("files", 20, {
+      allowedExtensions: ["txt", "json"],
+    }),
     normalizePersuratanMultipartBody({
       jsonFields: ["summary"],
       numberFields: ["total_rows"],

@@ -250,12 +250,15 @@ function validateEnv() {
   }
 
   validateOptionalPositiveInt("AUTH_RATE_LIMIT_WINDOW_MS", errors);
+  validateOptionalPositiveInt("DOCUMENT_UPLOAD_MAX_TOTAL_SIZE_MB", errors);
+  validateOptionalPositiveInt("AUTH_IP_RATE_LIMIT_MAX", errors);
   validateOptionalPositiveInt("AUTH_RATE_LIMIT_MAX", errors);
   validateOptionalPositiveInt("AUTH_REFRESH_RATE_LIMIT_MAX", errors);
   validateOptionalRedisUrl("REDIS_URL", errors);
   validateOptionalBoolean("SLIK_IMPORT_QUEUE_ENABLED", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_WORKER_CONCURRENCY", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_MAX_FILE_SIZE_MB", errors);
+  validateOptionalPositiveInt("SLIK_IMPORT_MAX_TOTAL_SIZE_MB", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_BATCH_SIZE", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_MAX_ERROR_SAMPLES", errors);
   validateOptionalNonNegativeInt("SLIK_IMPORT_MAX_ROWS", errors);

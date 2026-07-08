@@ -44,7 +44,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const result = await service.createUser(req.body);
+    const result = await service.createUser(req.body, req.user.id);
     return res.status(201).json({
       status: true,
       data: result,
@@ -60,7 +60,11 @@ exports.create = async (req, res) => {
 
 exports.update = async (req, res) => {
   try {
-    const result = await service.updateUser(req.params.id, req.body);
+    const result = await service.updateUser(
+      req.params.id,
+      req.body,
+      req.user.id,
+    );
     return res.status(200).json({
       status: true,
       message: "Pengguna berhasil diperbarui.",

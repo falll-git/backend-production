@@ -1,5 +1,8 @@
 const service = require("./debtorImports.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const {
+  buildContentDisposition,
+} = require("../../utils/file-names");
 
 function status(error, fallback = 400) {
   return error.statusCode || fallback;
@@ -49,7 +52,7 @@ exports.getIdebResumePdf = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${result.fileName}"`,
+      buildContentDisposition(result.fileName, "attachment"),
     );
     res.setHeader("Content-Length", String(result.buffer.length));
     return res.send(result.buffer);

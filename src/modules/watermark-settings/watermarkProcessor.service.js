@@ -26,6 +26,9 @@ const {
 } = require("../../utils/file-access-token");
 const { buildPublicUrl } = require("../../utils/public-url");
 const {
+  normalizeDownloadFileName,
+} = require("../../utils/file-names");
+const {
   PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
   STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
 } = require("../../utils/watermarked-files");
@@ -942,6 +945,31 @@ function buildWatermarkMeta(req, record, module) {
           entityId: record.id,
         })
       : null;
+  const config = MODULE_CONFIG[module] || {};
+  const documentFiles = Array.isArray(record?.document_files)
+    ? record.document_files
+    : [];
+  const primaryFile =
+    documentFiles.find((item) => item.file_path === record?.file) ||
+    documentFiles.find((item) => item.is_primary) ||
+    documentFiles[0] ||
+    null;
+  const fallbackBaseName =
+    record?.[config.nameField] ||
+    record?.[config.numberField] ||
+    config.label ||
+    "dokumen";
+  const watermarkStoredPath = record?.watermark_file || record?.file || null;
+  const downloadName = watermarkStoredPath
+    ? normalizeDownloadFileName({
+        fileName:
+          primaryFile?.file_name ||
+          record?.file_name ||
+          record?.generated_file_name,
+        storedPath: watermarkStoredPath,
+        fallbackBaseName,
+      })
+    : null;
 
   return {
     status_key: statusKey,
@@ -950,6 +978,8 @@ function buildWatermarkMeta(req, record, module) {
     source_path: record?.watermark_source_path || null,
     file_path: record?.watermark_file || null,
     file_url: watermarkedUrl,
+    file_name: downloadName,
+    download_name: downloadName,
     settings_hash: record?.watermark_settings_hash || null,
     error_message: record?.watermark_error_message || null,
     requested_at: record?.watermark_requested_at || null,

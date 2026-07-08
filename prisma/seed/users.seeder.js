@@ -11,6 +11,16 @@ function readBooleanEnv(key) {
   return readEnv(key).toLowerCase() === "true";
 }
 
+function isPlaceholder(value) {
+  return /^(GANTI|ISI|CHANGE|YOUR)_/i.test(String(value || ""));
+}
+
+function isUnsafeProductionPassword(value) {
+  return /^(test123456|password123|admin123|changeme|please_change|dummy|example)$/i.test(
+    String(value || ""),
+  );
+}
+
 function normalizeSeedUser(seedUser) {
   return {
     name: seedUser.name || seedUser.username,
@@ -94,6 +104,21 @@ function assertValidSeedPassword(seedUser) {
   if (!/^(?=.*[A-Za-z])(?=.*\d).+$/.test(seedUser.password)) {
     throw new Error(
       `Password seed user ${seedUser.username} wajib mengandung huruf dan angka.`,
+    );
+  }
+
+  if (isPlaceholder(seedUser.password)) {
+    throw new Error(
+      `Password seed user ${seedUser.username} masih memakai placeholder.`,
+    );
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    isUnsafeProductionPassword(seedUser.password)
+  ) {
+    throw new Error(
+      `Password seed user ${seedUser.username} tidak boleh memakai password default/dummy di production.`,
     );
   }
 }

@@ -5,11 +5,14 @@ const optionalUuid = uuid.allow("", null);
 const amount = Joi.number().min(0).precision(2);
 const positiveAmount = Joi.number().greater(0).precision(2);
 const fileSchema = Joi.object({
-  buffer: Joi.any().required(),
+  buffer: Joi.any().optional(),
+  temp_path: Joi.string().trim().optional(),
   name: Joi.string().trim().required(),
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
-}).unknown(true);
+})
+  .or("buffer", "temp_path")
+  .unknown(true);
 const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 const depositType = Joi.string().valid("NOTARIS", "ASURANSI", "ANGSURAN", "LAINNYA");
 const depositTransactionAction = Joi.string().valid("TITIPAN", "PEMBAYARAN", "REFUND");

@@ -1,5 +1,10 @@
 const jwt = require("jsonwebtoken");
 
+const JWT_ALGORITHM = "HS256";
+const JWT_ISSUER = "ruwang-arsip-api";
+const ACCESS_TOKEN_AUDIENCE = "ruwang-arsip-access";
+const REFRESH_TOKEN_AUDIENCE = "ruwang-arsip-refresh";
+
 function requireSecret(key) {
   const value = process.env[key];
   if (!value) {
@@ -16,6 +21,9 @@ exports.generateAccessToken = (payload) => {
   }
 
   return jwt.sign(payload, requireSecret("JWT_SECRET"), {
+    algorithm: JWT_ALGORITHM,
+    issuer: JWT_ISSUER,
+    audience: ACCESS_TOKEN_AUDIENCE,
     expiresIn,
   });
 };
@@ -27,6 +35,25 @@ exports.generateRefreshToken = (payload) => {
   }
 
   return jwt.sign(payload, requireSecret("JWT_REFRESH_SECRET"), {
+    algorithm: JWT_ALGORITHM,
+    issuer: JWT_ISSUER,
+    audience: REFRESH_TOKEN_AUDIENCE,
     expiresIn,
+  });
+};
+
+exports.verifyAccessToken = (token) => {
+  return jwt.verify(token, requireSecret("JWT_SECRET"), {
+    algorithms: [JWT_ALGORITHM],
+    issuer: JWT_ISSUER,
+    audience: ACCESS_TOKEN_AUDIENCE,
+  });
+};
+
+exports.verifyRefreshToken = (token) => {
+  return jwt.verify(token, requireSecret("JWT_REFRESH_SECRET"), {
+    algorithms: [JWT_ALGORITHM],
+    issuer: JWT_ISSUER,
+    audience: REFRESH_TOKEN_AUDIENCE,
   });
 };

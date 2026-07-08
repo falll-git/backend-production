@@ -1,6 +1,5 @@
 const {
   buildFileUrl,
-  deriveDocumentFileName,
   normalizeStoredPath,
 } = require("./persuratan-files");
 const {
@@ -10,6 +9,7 @@ const {
 const {
   appendFileAccessToken,
 } = require("./file-access-token");
+const { normalizeDownloadFileName } = require("./file-names");
 const { toSizeBytesNumber } = require("./size-bytes");
 const {
   getDeliveryMediaLabel,
@@ -77,14 +77,26 @@ function resolvePrintablePreviewMeta({ fileUrl, fileName }) {
 
 function buildPrintableDocumentItem(item) {
   const fileUrl = item.file_url || item.file || null;
+  const fileName = fileUrl
+    ? normalizeDownloadFileName({
+        fileName: item.file_name,
+        storedPath: fileUrl,
+        fallbackBaseName:
+          item.document_number ||
+          item.subject ||
+          item.primary_text ||
+          "dokumen",
+      })
+    : item.file_name || null;
 
   return {
     ...item,
     file: fileUrl,
     file_url: fileUrl,
+    file_name: fileName,
     ...resolvePrintablePreviewMeta({
       fileUrl,
-      fileName: item.file_name || fileUrl,
+      fileName: fileName || fileUrl,
     }),
   };
 }
@@ -510,15 +522,13 @@ async function serializePersuratanFile({
     originalFileUrl,
     module,
   );
-  const fileName =
-    typeof record?.file_name === "string" && record.file_name.trim()
-      ? record.file_name.trim()
-      : currentValue
-        ? deriveDocumentFileName(
-            normalizedStoredPath || currentValue,
-            fallbackBaseName,
-          )
-        : null;
+  const fileName = currentValue
+    ? normalizeDownloadFileName({
+        fileName: record?.file_name,
+        storedPath: normalizedStoredPath || currentValue,
+        fallbackBaseName,
+      })
+    : null;
 
   return {
     file: fileUrl,

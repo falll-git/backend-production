@@ -15,10 +15,15 @@ const {
 const { isMailerConfigured, sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
 const { serializeRole } = require("../../utils/role-types");
-const { resolveRequestUser, roleHasPermission } = require("../../utils/rbac");
+const {
+  resolveRequestUser,
+  roleCanGrantRole,
+  roleHasPermission,
+} = require("../../utils/rbac");
 const { buildPaginationMeta } = require("../../utils/pagination");
 
 const USER_MENU_URL = "/dashboard/users";
+const ROLE_ACCESS_MENU_URL = "/dashboard/parameter/role-menu";
 
 function normalizeText(value) {
   return value.trim().replace(/\s+/g, " ");
@@ -260,6 +265,45 @@ async function assertRoleAndDivisionExist(roleId, divisionId) {
   }
 }
 
+async function assertUserPrivilegeGrant({
+  actorId,
+  targetRoleId,
+  grantRestrictedAccess = false,
+}) {
+  const actor = await resolveRequestUser({ id: actorId });
+  if (!actor) {
+    throw new AppError("Sesi pengguna tidak valid.", 401);
+  }
+
+  if (targetRoleId) {
+    const canManageRoleAccess = await roleHasPermission(
+      actor.role_id,
+      ROLE_ACCESS_MENU_URL,
+      "update",
+    );
+    const canGrantTargetRole =
+      canManageRoleAccess ||
+      (await roleCanGrantRole(actor.role_id, targetRoleId));
+
+    if (!canGrantTargetRole) {
+      throw new AppError(
+        "Anda tidak dapat memberikan role dengan hak akses yang melebihi role Anda.",
+        403,
+      );
+    }
+  }
+
+  if (
+    grantRestrictedAccess &&
+    !actor.can_access_restricted_documents
+  ) {
+    throw new AppError(
+      "Anda tidak dapat memberikan akses dokumen restricted yang tidak Anda miliki.",
+      403,
+    );
+  }
+}
+
 async function issueInviteForUser(userId) {
   const token = generatePlainToken();
   const tokenHash = hashToken(token);
@@ -386,7 +430,7 @@ exports.getUserById = async (id) => {
   return serializeUser(user);
 };
 
-exports.createUser = async (payload) => {
+exports.createUser = async (payload, actorId) => {
   const normalizedPayload = {
     name: normalizeText(payload.name),
     username: normalizeUsername(payload.username),
@@ -404,6 +448,12 @@ exports.createUser = async (payload) => {
     normalizedPayload.role_id,
     normalizedPayload.division_id,
   );
+  await assertUserPrivilegeGrant({
+    actorId,
+    targetRoleId: normalizedPayload.role_id,
+    grantRestrictedAccess:
+      normalizedPayload.can_access_restricted_documents === true,
+  });
 
   const existingByEmail = await repository.findByEmail(normalizedPayload.email);
   if (existingByEmail) {
@@ -450,11 +500,39 @@ exports.createUser = async (payload) => {
   };
 };
 
-exports.updateUser = async (id, payload) => {
+exports.updateUser = async (id, payload, actorId) => {
   const user = await repository.findById(id);
 
   if (!user) {
     throw new AppError("Pengguna tidak ditemukan.", 404);
+  }
+
+  const requestedRestrictedAccess =
+    typeof payload.can_access_restricted_documents === "boolean"
+      ? payload.can_access_restricted_documents
+      : typeof payload.is_restrict === "boolean"
+        ? payload.is_restrict
+        : undefined;
+  const changesRole = Boolean(
+    payload.role_id && payload.role_id !== user.role_id,
+  );
+
+  if (changesRole && id === actorId) {
+    throw new AppError("Anda tidak dapat mengubah role akun sendiri.", 422);
+  }
+
+  if (
+    changesRole ||
+    (requestedRestrictedAccess === true &&
+      !user.can_access_restricted_documents)
+  ) {
+    await assertUserPrivilegeGrant({
+      actorId,
+      targetRoleId: changesRole ? payload.role_id : null,
+      grantRestrictedAccess:
+        requestedRestrictedAccess === true &&
+        !user.can_access_restricted_documents,
+    });
   }
 
   const nextData = {};

@@ -10,14 +10,12 @@ const {
 } = require("../../middlewares/persuratan-upload.middleware");
 const controller = require("./legal.controller");
 const validation = require("./legal.validation");
+const {
+  LEGAL_DEPOSIT_MENU_URL_BY_TYPE,
+} = require("../../utils/menu-access");
 
 const router = express.Router();
-const DEPOSIT_URLS = [
-  "/dashboard/legal/titipan/asuransi",
-  "/dashboard/legal/titipan/notaris",
-  "/dashboard/legal/titipan/angsuran",
-  "/dashboard/legal/titipan/lainnya",
-];
+const DEPOSIT_URLS = Object.values(LEGAL_DEPOSIT_MENU_URL_BY_TYPE);
 const LEGAL_REPORT_URLS = [
   "/dashboard/legal",
   "/dashboard/legal/laporan",

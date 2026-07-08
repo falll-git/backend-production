@@ -1,10 +1,12 @@
 const crypto = require("crypto");
+const fs = require("fs");
 const {
   buildFileUrl,
   deriveDocumentFileName,
   persistDigitalArchiveFile,
 } = require("./digital-archive-files");
 const { appendFileAccessToken } = require("./file-access-token");
+const { normalizeDownloadFileName } = require("./file-names");
 
 function getInputSize(input) {
   if (input && typeof input === "object") {
@@ -16,16 +18,43 @@ function getInputSize(input) {
 }
 
 function getInputChecksum(input) {
-  if (!input || typeof input !== "object" || !Buffer.isBuffer(input.buffer)) {
+  if (!input || typeof input !== "object") {
     return null;
   }
 
-  return crypto.createHash("sha256").update(input.buffer).digest("hex");
+  const hash = crypto.createHash("sha256");
+  if (Buffer.isBuffer(input.buffer)) {
+    return hash.update(input.buffer).digest("hex");
+  }
+
+  const tempPath = input.temp_path || input.tempPath;
+  if (typeof tempPath !== "string" || !tempPath.trim()) return null;
+
+  let descriptor;
+  try {
+    descriptor = fs.openSync(tempPath, "r");
+    const chunk = Buffer.alloc(64 * 1024);
+    let bytesRead;
+    do {
+      bytesRead = fs.readSync(descriptor, chunk, 0, chunk.length, null);
+      if (bytesRead > 0) hash.update(chunk.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+    return hash.digest("hex");
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {}
+    }
+  }
 }
 
 function persistDomainFile({ entity, input, previousPath, fallbackBaseName }) {
   if (input === undefined) return null;
 
+  const checksum = getInputChecksum(input);
   const stored = persistDigitalArchiveFile({
     entity,
     input,
@@ -42,7 +71,7 @@ function persistDomainFile({ entity, input, previousPath, fallbackBaseName }) {
       deriveDocumentFileName(stored.storedPath, fallbackBaseName),
     mime_type: stored.mimeType || input?.mime_type || input?.mimeType || null,
     size_bytes: getInputSize(input),
-    checksum: getInputChecksum(input),
+    checksum,
   };
 }
 
@@ -108,9 +137,11 @@ function serializeFile(req, record, options = {}) {
 
   return {
     path,
-    name:
-      record[`${prefix}file_name`] ||
-      deriveDocumentFileName(path, fallbackBaseName),
+    name: normalizeDownloadFileName({
+      fileName: record[`${prefix}file_name`],
+      storedPath: path,
+      fallbackBaseName,
+    }),
     mime_type: record[`${prefix}mime_type`] || null,
     size_bytes: record[`${prefix}size_bytes`] || null,
     checksum: prefix ? null : record.checksum || null,
@@ -141,9 +172,11 @@ function serializeStoredFile(req, record, options = {}) {
 
   return {
     path,
-    name:
-      record[nameKey] ||
-      deriveDocumentFileName(path, fallbackBaseName),
+    name: normalizeDownloadFileName({
+      fileName: record[nameKey],
+      storedPath: path,
+      fallbackBaseName,
+    }),
     mime_type: record[mimeKey] || null,
     size_bytes: record[sizeKey] || null,
     checksum: record[checksumKey] || null,
