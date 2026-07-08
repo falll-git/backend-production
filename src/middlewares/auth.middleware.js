@@ -1,5 +1,5 @@
-const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
+const { verifyAccessToken } = require("../utils/jwt");
 
 module.exports = async (req, res, next) => {
   const header = req.headers.authorization;
@@ -14,7 +14,7 @@ module.exports = async (req, res, next) => {
   const token = header.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAccessToken(token);
     if (!decoded.session_id) {
       return res.status(401).json({
         status: false,

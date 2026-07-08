@@ -6,20 +6,12 @@ const {
 const {
   attachUploadTempCleanup,
   buildDiskUploadStorage,
+  cleanupUploadTempFileSync,
 } = require("../utils/upload-temp-files");
-
-const ALLOWED_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-]);
+const {
+  isUploadContentAllowed,
+  isUploadMetadataAllowed,
+} = require("../utils/upload-file-policy");
 
 const ALLOWED_EXTENSIONS = new Set([
   "pdf",
@@ -34,28 +26,22 @@ const ALLOWED_EXTENSIONS = new Set([
   "png",
 ]);
 
-function getFileExtension(fileName) {
-  if (typeof fileName !== "string") return "";
-
-  const trimmed = fileName.trim().toLowerCase();
-  if (!trimmed.includes(".")) return "";
-
-  return trimmed.split(".").pop() || "";
-}
-
 const upload = multer({
   storage: buildDiskUploadStorage(multer),
   limits: {
     fileSize: DOCUMENT_UPLOAD_MAX_SIZE_BYTES,
+    files: 1,
+    fields: 100,
+    parts: 101,
+    fieldNameSize: 100,
+    fieldSize: 1024 * 1024,
   },
   fileFilter(req, file, callback) {
-    const extension = getFileExtension(file.originalname);
-    const isMimeAllowed = ALLOWED_MIME_TYPES.has(
-      (file.mimetype || "").toLowerCase(),
-    );
-    const isExtensionAllowed = ALLOWED_EXTENSIONS.has(extension);
-
-    if (!isMimeAllowed && !isExtensionAllowed) {
+    if (
+      !isUploadMetadataAllowed(file, {
+        allowedExtensions: ALLOWED_EXTENSIONS,
+      })
+    ) {
       return callback(
         new multer.MulterError(
           "LIMIT_UNEXPECTED_FILE",
@@ -96,6 +82,15 @@ function uploadPersuratanFile(fieldName = "file") {
       }
 
       if (req.file) {
+        if (!isUploadContentAllowed(req.file)) {
+          cleanupUploadTempFileSync(req.file.path);
+          return res.status(400).json({
+            status: false,
+            message:
+              "Isi dokumen tidak sesuai dengan format atau ekstensi yang dipilih.",
+          });
+        }
+
         attachUploadTempCleanup(res, req.file.path);
         req.body.file = {
           temp_path: req.file.path,

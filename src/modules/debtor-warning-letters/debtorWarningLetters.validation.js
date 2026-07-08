@@ -3,11 +3,14 @@ const Joi = require("joi");
 const uuid = Joi.string().uuid();
 const optionalUuid = uuid.allow("", null);
 const fileSchema = Joi.object({
-  buffer: Joi.any().required(),
+  buffer: Joi.any().optional(),
+  temp_path: Joi.string().trim().optional(),
   name: Joi.string().trim().required(),
   mime_type: Joi.string().trim().required(),
   size_bytes: Joi.number().integer().optional(),
-}).unknown(true);
+})
+  .or("buffer", "temp_path")
+  .unknown(true);
 const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
 
 const payload = {

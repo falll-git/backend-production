@@ -9,6 +9,7 @@ const UPLOAD_ROOT = process.env.UPLOAD_DIR
 const UPLOAD_TEMP_DIR = process.env.UPLOAD_TEMP_DIR
   ? path.resolve(process.env.UPLOAD_TEMP_DIR)
   : path.join(UPLOAD_ROOT, "tmp", "uploads");
+const RESPONSE_TEMP_PATHS = Symbol("responseUploadTempPaths");
 
 function ensureUploadTempDir() {
   fs.mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
@@ -57,12 +58,30 @@ function cleanupUploadTempFileSync(filePath) {
   } catch {}
 }
 
-function attachUploadTempCleanup(res, filePath) {
-  if (!res || !isUploadTempPath(filePath)) return;
+function attachUploadTempCleanup(res, filePaths) {
+  if (!res) return;
 
-  const cleanup = () => cleanupUploadTempFile(filePath);
-  res.once("finish", cleanup);
-  res.once("close", cleanup);
+  const paths = (Array.isArray(filePaths) ? filePaths : [filePaths]).filter(
+    isUploadTempPath,
+  );
+  if (paths.length === 0) return;
+
+  if (!res[RESPONSE_TEMP_PATHS]) {
+    res[RESPONSE_TEMP_PATHS] = new Set();
+    const cleanup = () => {
+      const pendingPaths = [...res[RESPONSE_TEMP_PATHS]];
+      res[RESPONSE_TEMP_PATHS].clear();
+      for (const filePath of pendingPaths) {
+        cleanupUploadTempFile(filePath);
+      }
+    };
+    res.once("finish", cleanup);
+    res.once("close", cleanup);
+  }
+
+  for (const filePath of paths) {
+    res[RESPONSE_TEMP_PATHS].add(filePath);
+  }
 }
 
 function buildDiskUploadStorage(multer) {

@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 
 const FILE_TOKEN_QUERY_PARAM = "file_token";
 const FILE_ACCESS_TOKEN_TYPE = "document_file_access";
+const FILE_ACCESS_TOKEN_ISSUER = "ruwang-arsip-api";
+const FILE_ACCESS_TOKEN_AUDIENCE = "ruwang-arsip-file";
 
 function getFileAccessSecret() {
   return process.env.FILE_ACCESS_SECRET;
@@ -27,6 +29,9 @@ function createFileAccessToken({ req, storedPath, module, entityId }) {
     },
     secret,
     {
+      algorithm: "HS256",
+      issuer: FILE_ACCESS_TOKEN_ISSUER,
+      audience: FILE_ACCESS_TOKEN_AUDIENCE,
       expiresIn: getFileAccessExpiresIn(),
     },
   );
@@ -62,7 +67,11 @@ function verifyFileAccessToken(token) {
   if (!secret || !token) return null;
 
   try {
-    const payload = jwt.verify(token, secret);
+    const payload = jwt.verify(token, secret, {
+      algorithms: ["HS256"],
+      issuer: FILE_ACCESS_TOKEN_ISSUER,
+      audience: FILE_ACCESS_TOKEN_AUDIENCE,
+    });
     if (!payload || payload.type !== FILE_ACCESS_TOKEN_TYPE) return null;
     return payload;
   } catch {

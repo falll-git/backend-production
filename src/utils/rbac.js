@@ -18,6 +18,36 @@ function capabilityField(capability) {
   }
 }
 
+const ROLE_PERMISSION_FIELDS = [
+  "can_create",
+  "can_read",
+  "can_update",
+  "can_delete",
+];
+
+function rolePermissionsCover(actorPermissions, targetPermissions) {
+  const actorByMenu = new Map(
+    (actorPermissions || []).map((permission) => [
+      permission.menu_id,
+      permission,
+    ]),
+  );
+
+  return (targetPermissions || []).every((targetPermission) => {
+    const actorPermission = actorByMenu.get(targetPermission.menu_id);
+
+    const capabilitiesCovered = ROLE_PERMISSION_FIELDS.every(
+      (field) => !targetPermission[field] || actorPermission?.[field] === true,
+    );
+    if (!capabilitiesCovered) return false;
+
+    const actorFeatures = new Set(actorPermission?.features || []);
+    return (targetPermission.features || []).every((feature) =>
+      actorFeatures.has(feature),
+    );
+  });
+}
+
 async function resolveRequestUser(tokenUser) {
   if (!tokenUser?.id && !tokenUser?.role_id) return null;
 
@@ -29,6 +59,7 @@ async function resolveRequestUser(tokenUser) {
     select: {
       id: true,
       role_id: true,
+      can_access_restricted_documents: true,
       role: {
         select: {
           id: true,
@@ -37,6 +68,32 @@ async function resolveRequestUser(tokenUser) {
       },
     },
   });
+}
+
+async function roleCanGrantRole(actorRoleId, targetRoleId) {
+  if (!actorRoleId || !targetRoleId) return false;
+  if (actorRoleId === targetRoleId) return true;
+
+  const select = {
+    menu_id: true,
+    can_create: true,
+    can_read: true,
+    can_update: true,
+    can_delete: true,
+    features: true,
+  };
+  const [actorPermissions, targetPermissions] = await Promise.all([
+    prisma.role_menus.findMany({
+      where: { role_id: actorRoleId },
+      select,
+    }),
+    prisma.role_menus.findMany({
+      where: { role_id: targetRoleId },
+      select,
+    }),
+  ]);
+
+  return rolePermissionsCover(actorPermissions, targetPermissions);
 }
 
 async function roleHasPermission(roleId, menuUrls, capability = "read") {
@@ -85,6 +142,8 @@ module.exports = {
   asArray,
   capabilityField,
   resolveRequestUser,
+  roleCanGrantRole,
   roleHasFeature,
   roleHasPermission,
+  rolePermissionsCover,
 };

@@ -43,6 +43,10 @@ const {
   requestMetadata,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
+const {
+  compactDateForFile,
+  sanitizeFileNameBase,
+} = require("../../utils/file-names");
 
 const IMPORT_TYPES = new Set(["SLIK", "IDEB"]);
 const SLIK_IMPORT_SEGMENTS = new Set(["D01", "D02", "F01", "A01"]);
@@ -1509,20 +1513,19 @@ function wrapPdfText(text, font, fontSize, maxWidth) {
   return lines.length > 0 ? lines : [""];
 }
 
-function compactIdebDateForFile(value) {
-  const text = normalizeText(value);
-  if (!text) return "tanggal-ideb";
-  const compact = text.replace(/[^\d]/g, "");
-  if (compact.length >= 8) return compact.slice(0, 8);
-  return text.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "tanggal-ideb";
+function shortIdebUploadReference(upload) {
+  const id = normalizeText(upload?.id);
+  if (!id) return "ideb";
+  return sanitizeFileNameBase(id, "ideb").slice(0, 12) || "ideb";
 }
 
-function safeIdebPdfFileName(summary) {
-  const identity = normalizeText(summary?.identity_number) || "tanpa-identitas";
-  const date = compactIdebDateForFile(summary?.result_date || summary?.processed_at);
-  return `resume-ideb-${identity}-${date}.pdf`
-    .replace(/[<>:"/\\|?*\s]+/g, "-")
-    .replace(/-+/g, "-");
+function safeIdebPdfFileName(upload, summary) {
+  const reference = shortIdebUploadReference(upload);
+  const date = compactDateForFile(
+    summary?.result_date || summary?.processed_at || upload?.processed_at,
+    "tanggal-ideb",
+  );
+  return `resume-ideb-${reference}-${date}.pdf`;
 }
 
 function idebContactText(identity) {
@@ -2733,7 +2736,7 @@ async function renderIdebResumePdf(upload) {
   const bytes = await pdfDoc.save();
   return {
     buffer: Buffer.from(bytes),
-    fileName: safeIdebPdfFileName(summary),
+    fileName: safeIdebPdfFileName(upload, summary),
   };
 }
 

@@ -4,6 +4,7 @@ const controller = require("./auth.controller");
 const validate = require("../../middlewares/validate.middleware");
 const auth = require("../../middlewares/auth.middleware");
 const {
+  authIpRateLimit,
   authRateLimit,
   authRefreshRateLimit,
 } = require("../../middlewares/rate-limit.middleware");
@@ -18,7 +19,14 @@ const {
   verifySetPasswordSchema,
 } = require("./auth.validation");
 
-router.post("/login", authRateLimit, validate(authSchema), controller.login);
+const publicAuthRateLimits = [authIpRateLimit, authRateLimit];
+
+router.post(
+  "/login",
+  ...publicAuthRateLimits,
+  validate(authSchema),
+  controller.login,
+);
 router.post(
   "/refresh",
   authRefreshRateLimit,
@@ -27,7 +35,7 @@ router.post(
 );
 router.post(
   "/forgot-password",
-  authRateLimit,
+  ...publicAuthRateLimits,
   validate(forgotPasswordSchema),
   controller.forgotPassword,
 );
@@ -35,30 +43,31 @@ router.post("/logout", controller.logout);
 router.post(
   "/change-password",
   auth,
+  authRateLimit,
   validate(changePasswordSchema),
   controller.changePassword,
 );
 router.post(
   "/set-password/verify",
-  authRateLimit,
+  ...publicAuthRateLimits,
   validate(verifySetPasswordSchema),
   controller.verifySetPasswordToken,
 );
 router.post(
   "/set-password",
-  authRateLimit,
+  ...publicAuthRateLimits,
   validate(setPasswordSchema),
   controller.setPassword,
 );
 router.post(
   "/reset-password/verify",
-  authRateLimit,
+  ...publicAuthRateLimits,
   validate(verifyResetPasswordSchema),
   controller.verifyResetPasswordToken,
 );
 router.post(
   "/reset-password",
-  authRateLimit,
+  ...publicAuthRateLimits,
   validate(resetPasswordSchema),
   controller.resetPassword,
 );

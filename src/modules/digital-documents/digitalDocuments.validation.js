@@ -12,10 +12,7 @@ const uploadedFileSchema = Joi.object({
   .or("buffer", "temp_path")
   .unknown(true);
 
-const fileInputSchema = Joi.alternatives().try(
-  Joi.string().trim().min(1),
-  uploadedFileSchema,
-);
+const fileInputSchema = uploadedFileSchema;
 
 const relatedUserIdsSchema = Joi.alternatives()
   .try(

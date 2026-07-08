@@ -1,3 +1,21 @@
+const MAX_TRACKED_KEYS = 5000;
+
+function pruneHits(hits, now) {
+  if (hits.size <= MAX_TRACKED_KEYS) return;
+
+  for (const [entryKey, entry] of hits.entries()) {
+    if (entry.resetAt <= now) {
+      hits.delete(entryKey);
+    }
+  }
+
+  while (hits.size > MAX_TRACKED_KEYS) {
+    const oldestKey = hits.keys().next().value;
+    if (oldestKey === undefined) break;
+    hits.delete(oldestKey);
+  }
+}
+
 function createRateLimiter({
   windowMs = 15 * 60 * 1000,
   max = 60,
@@ -19,6 +37,7 @@ function createRateLimiter({
         count: 1,
         resetAt: now + windowMs,
       });
+      pruneHits(hits, now);
       return next();
     }
 
@@ -34,13 +53,7 @@ function createRateLimiter({
       });
     }
 
-    if (hits.size > 5000) {
-      for (const [entryKey, entry] of hits.entries()) {
-        if (entry.resetAt <= now) {
-          hits.delete(entryKey);
-        }
-      }
-    }
+    pruneHits(hits, now);
 
     return next();
   };
@@ -63,6 +76,14 @@ const authRateLimit = createRateLimiter({
   keyGenerator: authKeyGenerator,
 });
 
+const authIpRateLimit = createRateLimiter({
+  windowMs: readPositiveIntEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  max: readPositiveIntEnv("AUTH_IP_RATE_LIMIT_MAX", 100),
+  keyGenerator(req) {
+    return `${req.ip || "unknown"}:${req.path}:ip`;
+  },
+});
+
 const authRefreshRateLimit = createRateLimiter({
   windowMs: readPositiveIntEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
   max: readPositiveIntEnv("AUTH_REFRESH_RATE_LIMIT_MAX", 1000),
@@ -73,6 +94,7 @@ const authRefreshRateLimit = createRateLimiter({
 });
 
 module.exports = {
+  authIpRateLimit,
   authRefreshRateLimit,
   authRateLimit,
   createRateLimiter,

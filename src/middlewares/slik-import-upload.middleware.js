@@ -1,11 +1,15 @@
 const multer = require("multer");
-const { buildDiskUploadStorage } = require("../utils/upload-temp-files");
+const {
+  buildDiskUploadStorage,
+  cleanupUploadTempFileSync,
+} = require("../utils/upload-temp-files");
+const {
+  isUploadContentAllowed,
+  isUploadMetadataAllowed,
+} = require("../utils/upload-file-policy");
 
 const DEFAULT_MAX_FILE_SIZE_MB = 500;
-const ALLOWED_MIME_TYPES = new Set([
-  "application/octet-stream",
-  "text/plain",
-]);
+const DEFAULT_MAX_TOTAL_SIZE_MB = 1000;
 const ALLOWED_EXTENSIONS = new Set(["txt"]);
 
 function readPositiveIntEnv(key, fallback) {
@@ -21,26 +25,23 @@ function getMaxFileSizeBytes() {
   );
 }
 
-function getFileExtension(fileName) {
-  if (typeof fileName !== "string") return "";
-  const trimmed = fileName.trim().toLowerCase();
-  if (!trimmed.includes(".")) return "";
-  return trimmed.split(".").pop() || "";
-}
-
 function createUpload() {
   return multer({
     storage: buildDiskUploadStorage(multer),
     limits: {
       fileSize: getMaxFileSizeBytes(),
+      files: 21,
+      fields: 50,
+      parts: 71,
+      fieldNameSize: 100,
+      fieldSize: 1024 * 1024,
     },
     fileFilter(req, file, callback) {
-      const extension = getFileExtension(file.originalname);
-      const mimeType = (file.mimetype || "").toLowerCase();
-      const isMimeAllowed = !mimeType || ALLOWED_MIME_TYPES.has(mimeType);
-      const isExtensionAllowed = ALLOWED_EXTENSIONS.has(extension);
-
-      if (!isMimeAllowed || !isExtensionAllowed) {
+      if (
+        !isUploadMetadataAllowed(file, {
+          allowedExtensions: ALLOWED_EXTENSIONS,
+        })
+      ) {
         return callback(
           new multer.MulterError(
             "LIMIT_UNEXPECTED_FILE",
@@ -90,6 +91,34 @@ function uploadSlikImportFiles(fieldName = "files", maxCount = 20) {
       }
 
       const uploadedFiles = Object.values(req.files || {}).flat();
+      if (uploadedFiles.some((file) => !isUploadContentAllowed(file))) {
+        for (const file of uploadedFiles) {
+          cleanupUploadTempFileSync(file.path);
+        }
+        return res.status(400).json({
+          status: false,
+          message: "Isi file Import SLIK tidak sesuai dengan format TXT.",
+        });
+      }
+
+      const totalSize = uploadedFiles.reduce(
+        (sum, file) => sum + Number(file.size || 0),
+        0,
+      );
+      const maxTotalSizeMb = readPositiveIntEnv(
+        "SLIK_IMPORT_MAX_TOTAL_SIZE_MB",
+        DEFAULT_MAX_TOTAL_SIZE_MB,
+      );
+      if (totalSize > maxTotalSizeMb * 1024 * 1024) {
+        for (const file of uploadedFiles) {
+          cleanupUploadTempFileSync(file.path);
+        }
+        return res.status(413).json({
+          status: false,
+          message: `Total ukuran file Import SLIK maksimal ${maxTotalSizeMb} MB.`,
+        });
+      }
+
       if (uploadedFiles.length > 0) {
         req.body.files = uploadedFiles.map((file) => ({
           temp_path: file.path,

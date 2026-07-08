@@ -20,6 +20,10 @@ const {
 } = require("../utils/debtor-access");
 const { REPORT_ALL_FEATURE } = require("../utils/menu-access");
 const { roleHasFeature } = require("../utils/rbac");
+const {
+  buildContentDisposition: buildContentDispositionHeader,
+  normalizeDownloadFileName,
+} = require("../utils/file-names");
 
 const WATERMARK_SUPPORTED_EXTENSIONS = new Set(["pdf", "jpg", "jpeg", "png"]);
 const PERSURATAN_PRINT_MENU_URL = "/dashboard/manajemen-surat/cetak-dokumen";
@@ -63,50 +67,8 @@ function getStoredPathExtension(storedPath) {
   return parts.length > 1 ? parts.pop() || "" : "";
 }
 
-function getFileNameFromPath(storedPath) {
-  if (typeof storedPath !== "string" || !storedPath.trim()) return null;
-
-  const normalized = storedPath.trim().split("?")[0].split("#")[0];
-  const fileName = normalized.split(/[\\/]/).filter(Boolean).pop();
-  if (!fileName) return null;
-
-  try {
-    return decodeURIComponent(fileName);
-  } catch {
-    return fileName;
-  }
-}
-
-function hasFileExtension(fileName) {
-  return typeof fileName === "string" && /\.[A-Za-z0-9]{1,8}$/.test(fileName);
-}
-
-function normalizeFileNameForHeader(fileName, storedPath) {
-  const fallback = getFileNameFromPath(storedPath) || "dokumen";
-  const rawName =
-    typeof fileName === "string" && fileName.trim() ? fileName.trim() : fallback;
-  const withoutUnsafeChars = rawName
-    .replace(/[\r\n]+/g, " ")
-    .replace(/[\\/]+/g, "-")
-    .trim();
-  const extension = getStoredPathExtension(storedPath);
-  const finalName =
-    withoutUnsafeChars && hasFileExtension(withoutUnsafeChars)
-      ? withoutUnsafeChars
-      : extension
-        ? `${withoutUnsafeChars || "dokumen"}.${extension}`
-        : withoutUnsafeChars || fallback;
-
-  return finalName;
-}
-
-function buildContentDisposition(fileName) {
-  const fallbackName = fileName
-    .replace(/["\\]/g, "_")
-    .replace(/[^\x20-\x7E]/g, "_");
-  return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(
-    fileName,
-  )}`;
+function buildContentDisposition(fileName, disposition = "inline") {
+  return buildContentDispositionHeader(fileName, disposition);
 }
 
 function inferMimeType(fileName, storedPath) {
@@ -120,7 +82,11 @@ function inferMimeType(fileName, storedPath) {
 }
 
 function normalizeFileMeta(meta, payload) {
-  const fileName = normalizeFileNameForHeader(meta?.fileName, payload.path);
+  const fileName = normalizeDownloadFileName({
+    fileName: meta?.fileName,
+    storedPath: payload.path,
+    fallbackBaseName: meta?.fallbackBaseName || "dokumen",
+  });
   return {
     fileName,
     mimeType: meta?.mimeType || inferMimeType(fileName, payload.path),
@@ -129,24 +95,28 @@ function normalizeFileMeta(meta, payload) {
 
 function selectDomainFileMeta(record, fallbackName) {
   if (!record) return null;
+  const fallbackBaseName =
+    record.document_name ||
+    record.title ||
+    record.type ||
+    record.source_type ||
+    record.activity_kind ||
+    record.letter_type ||
+    record.template_type ||
+    record.document_type ||
+    record.deed_type ||
+    record.insurance_type ||
+    record.appraisal_type ||
+    record.claim_type ||
+    fallbackName ||
+    "dokumen";
+
   return {
     fileName:
       record.file_name ||
       record.generated_file_name ||
-      record.document_name ||
-      record.title ||
-      record.type ||
-      record.source_type ||
-      record.activity_kind ||
-      record.letter_type ||
-      record.template_type ||
-      record.document_type ||
-      record.deed_type ||
-      record.insurance_type ||
-      record.appraisal_type ||
-      record.claim_type ||
-      fallbackName ||
-      null,
+      fallbackBaseName,
+    fallbackBaseName,
     mimeType: record.mime_type || record.generated_mime_type || null,
   };
 }
@@ -216,6 +186,7 @@ async function getDigitalArchiveFileMeta(payload) {
 
   return {
     fileName: sourceFile?.file_name || record.document_name || null,
+    fallbackBaseName: record.document_name || "dokumen",
     mimeType: sourceFile?.mime_type || null,
   };
 }
@@ -546,9 +517,22 @@ async function getFileResponseMeta(payload) {
 
 function applySecureFileHeaders(res, payload, meta) {
   const normalized = normalizeFileMeta(meta, payload);
+  const inlineMimeTypes = new Set([
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+  ]);
+  const disposition = inlineMimeTypes.has(normalized.mimeType)
+    ? "inline"
+    : "attachment";
 
   res.removeHeader("X-Frame-Options");
-  res.setHeader("Content-Disposition", buildContentDisposition(normalized.fileName));
+  res.setHeader(
+    "Content-Disposition",
+    buildContentDisposition(normalized.fileName, disposition),
+  );
+  res.setHeader("Cache-Control", "private, no-store, max-age=0");
+  res.setHeader("Pragma", "no-cache");
   res.setHeader("X-Content-Type-Options", "nosniff");
 
   if (normalized.mimeType) {

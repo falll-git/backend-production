@@ -23,13 +23,8 @@ const uploadedFileSchema = Joi.object({
     "object.missing": FILE_REQUIRED_MESSAGE,
   });
 
-const fileInputSchema = Joi.alternatives()
-  .try(Joi.string().trim().allow("", null), uploadedFileSchema)
-  .optional();
-
-const requiredFileInputSchema = Joi.alternatives()
-  .try(Joi.string().trim().min(1), uploadedFileSchema)
-  .required();
+const fileInputSchema = uploadedFileSchema.optional();
+const requiredFileInputSchema = uploadedFileSchema.required();
 
 exports.createOutgoingMailSchema = Joi.object({
   letter_prioritie_id: Joi.string().required().messages({

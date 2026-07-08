@@ -13,7 +13,6 @@ const MIME_TO_EXTENSION = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
-  "image/svg+xml": "svg",
 };
 
 function ensureDirectory(target) {
@@ -35,7 +34,7 @@ function inferExtension(file) {
 
   const fileName = String(file?.originalname || "").toLowerCase();
   const extension = fileName.includes(".") ? fileName.split(".").pop() : "";
-  return ["png", "jpg", "jpeg", "svg"].includes(extension)
+  return ["png", "jpg", "jpeg"].includes(extension)
     ? extension.replace("jpeg", "jpg")
     : "png";
 }

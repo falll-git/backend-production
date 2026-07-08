@@ -1,6 +1,5 @@
 const {
   buildFileUrl,
-  deriveDocumentFileName,
 } = require("./digital-archive-files");
 const {
   buildWatermarkMeta,
@@ -9,6 +8,7 @@ const {
 const {
   appendFileAccessToken,
 } = require("./file-access-token");
+const { normalizeDownloadFileName } = require("./file-names");
 const {
   isAccessRequestActive,
 } = require("./digital-archive-access");
@@ -220,9 +220,11 @@ function serializeDocumentFile(req, file, fallbackBaseName, documentId) {
   return {
     id: file.id,
     path: file.file_path,
-    name:
-      file.file_name ||
-      deriveDocumentFileName(file.file_path, fallbackBaseName),
+    name: normalizeDownloadFileName({
+      fileName: file.file_name,
+      storedPath: file.file_path,
+      fallbackBaseName,
+    }),
     mime_type: file.mime_type,
     size_bytes: toSizeBytesNumber(file.size_bytes),
     is_primary: file.is_primary,
@@ -277,9 +279,11 @@ function serializeDocumentBase(req, document) {
     file: filePath
       ? {
           path: filePath,
-          name:
-            primaryFile?.file_name ||
-            deriveDocumentFileName(filePath, document.document_name),
+          name: normalizeDownloadFileName({
+            fileName: primaryFile?.file_name,
+            storedPath: filePath,
+            fallbackBaseName: document.document_name,
+          }),
           url: effectiveFileUrl,
           original_url: originalFileUrl,
           mime_type: primaryFile?.mime_type || null,

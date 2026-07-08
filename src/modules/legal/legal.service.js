@@ -18,8 +18,15 @@ const {
   buildDebtorManageWhere,
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
-const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
-const { roleHasFeature } = require("../../utils/rbac");
+const {
+  LEGAL_DEPOSIT_MENU_URL_BY_TYPE,
+  REPORT_ALL_FEATURE,
+} = require("../../utils/menu-access");
+const {
+  resolveRequestUser,
+  roleHasFeature,
+  roleHasPermission,
+} = require("../../utils/rbac");
 const {
   auditSnapshot,
   requestMetadata,
@@ -524,6 +531,38 @@ function assertDepositType(value) {
     throw new AppError("Tipe dana titipan tidak valid.", 422);
   }
   return type;
+}
+
+async function getAllowedDepositTypes(userId, capability) {
+  const user = await resolveRequestUser({ id: userId });
+  if (!user) {
+    throw new AppError("Sesi pengguna tidak valid.", 401);
+  }
+
+  const entries = Object.entries(LEGAL_DEPOSIT_MENU_URL_BY_TYPE);
+  const permissions = await Promise.all(
+    entries.map(([, menuUrl]) =>
+      roleHasPermission(user.role_id, menuUrl, capability),
+    ),
+  );
+
+  return entries
+    .filter(([,], index) => permissions[index])
+    .map(([type]) => type);
+}
+
+async function assertDepositPermission(userId, type, capability) {
+  const normalizedType = assertDepositType(type);
+  const allowedTypes = await getAllowedDepositTypes(userId, capability);
+
+  if (!allowedTypes.includes(normalizedType)) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk jenis dana titipan ini.",
+      403,
+    );
+  }
+
+  return normalizedType;
 }
 
 function assertDepositTransactionAction(value) {
@@ -1189,6 +1228,9 @@ exports.updateKjppProgress = (args) =>
 exports.deleteRecord = async ({ req, modelName, id, userId }) => {
   const current = await repository.findById(modelName, id, { deleted_at: null });
   if (!current) throw new AppError("Data tidak ditemukan.", 404);
+  if (modelName === "legal_deposits") {
+    await assertDepositPermission(userId, current.type, "delete");
+  }
   if (current.contract_id) {
     await ensureContract(current.contract_id, userId);
   }
@@ -1376,16 +1418,37 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   return serializeClaim(req, saved);
 };
 
-exports.listDeposits = async ({ req, query, userId }) =>
-  listModel({
+exports.listDeposits = async ({ req, query, userId }) => {
+  const allowedTypes = await getAllowedDepositTypes(userId, "read");
+  if (allowedTypes.length === 0) {
+    throw new AppError("Anda tidak memiliki izin untuk melihat dana titipan.", 403);
+  }
+
+  if (
+    query.type &&
+    !allowedTypes.includes(assertDepositType(query.type))
+  ) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk jenis dana titipan ini.",
+      403,
+    );
+  }
+
+  return listModel({
     req,
     modelName: "legal_deposits",
     query,
     searchFields: ["type", "status", "notes"],
-    extraWhere: await buildContractAccessWhere(userId),
+    extraWhere: {
+      AND: [
+        await buildContractAccessWhere(userId),
+        { type: { in: allowedTypes } },
+      ],
+    },
     relationSearch: depositSearchClauses,
     serializer: serializeDeposit,
   });
+};
 
 exports.createDeposit = async ({ req, payload, userId }) => {
   const type = assertDepositType(payload.type);
@@ -1394,6 +1457,7 @@ exports.createDeposit = async ({ req, payload, userId }) => {
   const openingTransaction = payload.opening_transaction || null;
   const openingInputs = normalizeUploadFiles(payload);
 
+  await assertDepositPermission(userId, type, "create");
   await ensureContract(payload.contract_id, userId);
   await ensureDepositType(depositTypeId, type);
   await ensureDepositThirdParty(thirdPartyId, type);
@@ -1500,6 +1564,7 @@ exports.createDeposit = async ({ req, payload, userId }) => {
 exports.updateDeposit = async ({ req, id, payload, userId }) => {
   const current = await repository.findById("legal_deposits", id, { deleted_at: null });
   if (!current) throw new AppError("Dana titipan tidak ditemukan.", 404);
+  await assertDepositPermission(userId, current.type, "update");
   await ensureContract(current.contract_id, userId);
   const nextType =
     payload.type !== undefined ? assertDepositType(payload.type) : current.type;
@@ -1513,6 +1578,7 @@ exports.updateDeposit = async ({ req, id, payload, userId }) => {
       ? normalizeText(payload.third_party_id)
       : current.third_party_id;
 
+  await assertDepositPermission(userId, nextType, "update");
   await ensureContract(nextContractId, userId);
   await ensureDepositType(nextDepositTypeId, nextType);
   await ensureDepositThirdParty(nextThirdPartyId, nextType);
@@ -1549,9 +1615,23 @@ exports.listDepositTransactions = async ({ req, query, userId }) => {
     third_party_id: thirdPartyId,
     ...transactionQuery
   } = query;
+  const allowedTypes = await getAllowedDepositTypes(userId, "read");
+  if (allowedTypes.length === 0) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk melihat transaksi dana titipan.",
+      403,
+    );
+  }
+  const requestedType = type ? assertDepositType(type) : null;
+  if (requestedType && !allowedTypes.includes(requestedType)) {
+    throw new AppError(
+      "Anda tidak memiliki izin untuk jenis dana titipan ini.",
+      403,
+    );
+  }
   const accessWhere = await buildDepositTransactionAccessWhere(userId);
   const depositWhere = {
-    ...(type ? { type: normalizeUpper(type) } : {}),
+    type: requestedType || { in: allowedTypes },
     ...(contractId ? { contract_id: contractId } : {}),
     ...(thirdPartyId ? { third_party_id: thirdPartyId } : {}),
     ...(accessWhere.deposit?.is || {}),
@@ -1577,6 +1657,7 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
     deleted_at: null,
   });
   if (!deposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
+  await assertDepositPermission(userId, deposit.type, "create");
   await ensureContract(deposit.contract_id, userId);
   const action = assertDepositTransactionAction(payload.action);
   const amountValue = number(payload.amount);

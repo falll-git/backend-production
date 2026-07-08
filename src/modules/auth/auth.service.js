@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const {
   generateAccessToken,
   generateRefreshToken,
+  verifyRefreshToken,
 } = require("../../utils/jwt");
 const { hashPassword, comparePassword } = require("../../utils/bcrypt");
 const {
@@ -223,7 +224,7 @@ exports.refreshToken = async (token) => {
 
   let decoded;
   try {
-    decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+    decoded = verifyRefreshToken(token);
   } catch (error) {
     throw new AppError("Sesi login tidak valid.", 401);
   }
