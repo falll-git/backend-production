@@ -368,6 +368,8 @@ const menuTree = [
         name: "Laporan Legal",
         url: "/dashboard/legal/laporan",
         icon: "lucide lucide-clipboard-list",
+        component_key: "dashboard.module_report.legal",
+        ...MAIN_REPORT_DASHBOARD_WIDGET_MENU,
         order: 3,
       },
       {

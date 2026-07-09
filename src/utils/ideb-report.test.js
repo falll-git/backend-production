@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  aggregateMonthlyCollectibilityHistory,
   buildIdebReportMetrics,
   buildIdebReportSummary,
   parseIdebNumber,
@@ -107,7 +108,9 @@ test("priorityReporters limits the resume to ten institutions, not ten facilitie
   const metrics = buildIdebReportMetrics({ facilities });
   assert.equal(metrics.reporterGroups.length, 12);
   assert.equal(metrics.priorityReporters.length, 10);
-  const firstReporter = metrics.reporterGroups.find((item) => item.reporterCode === "001");
+  const firstReporter = metrics.reporterGroups.find(
+    (item) => item.reporterCode === "001",
+  );
   assert.equal(firstReporter.facilityCount, 2);
 });
 
@@ -129,4 +132,85 @@ test("buildIdebReportSummary keeps facility context on IDEB collateral", () => {
   assert.equal(summary.collaterals[0].reporter_code, "001");
   assert.equal(summary.collaterals[0].reporter_name, "Bank A");
   assert.equal(summary.collaterals[0].account_number, "A-1");
+});
+
+test("monthly IDEB history keeps the worst KOL and highest DPD independently", () => {
+  const result = aggregateMonthlyCollectibilityHistory([
+    {
+      period_month: "2026-05",
+      collectibility: "1",
+      days_past_due: 90,
+      reporter_name: "Pelapor A",
+      account_number: "A-1",
+    },
+    {
+      period_month: "2026-05",
+      collectibility: "3",
+      days_past_due: 5,
+      reporter_name: "Pelapor B",
+      account_number: "B-1",
+    },
+    {
+      period_month: "2026-05",
+      collectibility: "2",
+      days_past_due: 120,
+      reporter_name: "Pelapor C",
+      account_number: "C-1",
+    },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].collectibility, "3");
+  assert.equal(result[0].days_past_due, 120);
+  assert.equal(result[0].source_count, 3);
+  assert.equal(result[0].reporter_count, 3);
+  assert.equal(result[0].facility_count, 3);
+});
+
+test("monthly IDEB history preserves counts when an aggregated row is processed again", () => {
+  const firstPass = aggregateMonthlyCollectibilityHistory([
+    {
+      period_month: "2026-06",
+      collectibility: "5",
+      days_past_due: 12,
+      source_count: 4,
+      reporter_count: 3,
+      facility_count: 4,
+    },
+  ]);
+  const secondPass = aggregateMonthlyCollectibilityHistory(firstPass);
+
+  assert.deepEqual(secondPass, firstPass);
+});
+
+test("monthly IDEB history ignores rows without KOL or DPD values", () => {
+  const result = aggregateMonthlyCollectibilityHistory([
+    { period_month: "2026-05", reporter_name: "Pelapor A" },
+    { period_month: "2026-06", collectibility: "2" },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].period_month, "2026-06");
+  assert.equal(result[0].collectibility, "2");
+});
+
+test("monthly IDEB history preserves a descriptive KOL without a numeric code", () => {
+  const result = aggregateMonthlyCollectibilityHistory([
+    { period_month: "2026-07", collectibility: "Lancar" },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].collectibility, "Lancar");
+});
+
+test("monthly IDEB history groups legacy rows by month index when period is absent", () => {
+  const result = aggregateMonthlyCollectibilityHistory([
+    { month_index: 1, collectibility: "1", reporter_name: "Pelapor A" },
+    { month_index: 1, collectibility: "4", reporter_name: "Pelapor B" },
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].month_index, 1);
+  assert.equal(result[0].collectibility, "4");
+  assert.equal(result[0].source_count, 2);
 });

@@ -7,6 +7,7 @@
     "worker:slik-import": "node src/workers/slik-import.worker.js",
     "dev": "nodemon src/server.js",
     "build": "node scripts/check-js-syntax.js",
+    "test:ideb-report": "node --test src/utils/ideb-report.test.js",
     "test:slik-reference": "node --test src/utils/slik-reference-dictionary.test.js",
     "check:slik-reference-coverage": "node scripts/check-slik-reference-coverage.js",
     "prisma:generate": "prisma generate",

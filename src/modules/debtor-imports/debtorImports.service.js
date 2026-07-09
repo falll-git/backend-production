@@ -21,6 +21,7 @@ const {
   getDebtorAccessScope,
 } = require("../../utils/debtor-access");
 const {
+  aggregateMonthlyCollectibilityHistory,
   buildIdebReportMetrics,
   buildIdebReportSummary,
   parseIdebNumber,
@@ -1136,12 +1137,14 @@ function normalizeOjkiDebIndividualSummary(raw) {
       outstanding_credit: normalizeNumber(facilitySummary.bakiDebetKreditPembiayaan),
     },
     facilities,
-    monthly_collectibility_history: facilities.flatMap((facility) =>
-      facility.monthly_collectibility_history.map((history) => ({
-        account_number: facility.account_number,
-        reporter_name: facility.reporter_name,
-        ...history,
-      })),
+    monthly_collectibility_history: aggregateMonthlyCollectibilityHistory(
+      facilities.flatMap((facility) =>
+        facility.monthly_collectibility_history.map((history) => ({
+          account_number: facility.account_number,
+          reporter_name: facility.reporter_name,
+          ...history,
+        })),
+      ),
     ),
     other_bprs: facilities.map((facility) => ({
       name: facility.reporter_name || facility.reporter_code || "-",
@@ -1349,9 +1352,17 @@ function normalizeLegacyIdebSummary(raw) {
       ),
     },
     facilities,
-    monthly_collectibility_history: monthlyCollectibilityHistory.length > 0
-      ? monthlyCollectibilityHistory
-      : facilities.flatMap((facility) => facility.monthly_collectibility_history),
+    monthly_collectibility_history: aggregateMonthlyCollectibilityHistory(
+      monthlyCollectibilityHistory.length > 0
+        ? monthlyCollectibilityHistory
+        : facilities.flatMap((facility) =>
+            facility.monthly_collectibility_history.map((history) => ({
+              account_number: facility.account_number,
+              reporter_name: facility.reporter_name,
+              ...history,
+            })),
+          ),
+    ),
     other_bprs: facilities.map((facility) => ({
       name: facility.reporter_name || facility.reporter_code || "-",
       collectibility: facility.collectibility,
@@ -1444,11 +1455,12 @@ function formatIdebNumber(value) {
 }
 
 function idebMonthlyHistoryArray(summary) {
-  return Array.isArray(summary?.monthly_collectibility_history)
+  const rows = Array.isArray(summary?.monthly_collectibility_history)
     ? summary.monthly_collectibility_history.filter(
         (item) => item && typeof item === "object" && !Array.isArray(item),
       )
     : [];
+  return aggregateMonthlyCollectibilityHistory(rows);
 }
 
 function getIdebResumeMetrics(summary) {
@@ -2374,137 +2386,103 @@ async function renderIdebResumePdf(upload) {
   }
 
   function drawHistoryMatrix(history) {
-    if (history.length === 0) {
+    const monthlySummary = aggregateMonthlyCollectibilityHistory(history);
+
+    if (monthlySummary.length === 0) {
       drawNoteBox("Histori KOL", "Belum ada histori KOL bulanan di hasil IDEB ini.", {
         color: colors.softGray,
       });
       return;
     }
 
-    const groups = new Map();
-    history.forEach((entry) => {
-      const key = [
-        valueOrDash(recordValue(entry, ["reporter_name", "reporter_code"])),
-        valueOrDash(recordValue(entry, ["account_number", "no_rekening"])),
-      ].join(" | ");
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(entry);
-    });
-
-    const meaningfulGroups = Array.from(groups.entries()).filter(([, entries]) =>
-      entries.some(
-        (entry) =>
-          normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
-          normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
-      ),
-    );
-
-    if (meaningfulGroups.length === 0) {
-      drawNoteBox(
-        "Histori KOL",
-        `Histori periode tersedia ${formatIdebNumber(history.length)} bulan, tetapi nilai KOL/DPD tidak tercatat pada file IDEB ini.`,
-        { color: colors.softGray },
-      );
-      return;
-    }
-
-    for (const [label, entries] of meaningfulGroups) {
-      const meaningfulEntries = entries
-        .filter(
-          (entry) =>
-            normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
-            normalizeText(recordValue(entry, ["days_past_due", "dpd"])),
-        )
-        .sort((left, right) => {
-        const leftIndex = parseCurrencyNumber(recordValue(left, ["month_index"])) || 0;
-        const rightIndex = parseCurrencyNumber(recordValue(right, ["month_index"])) || 0;
-        return leftIndex - rightIndex;
+    for (let start = 0; start < monthlySummary.length; start += 12) {
+      const chunk = monthlySummary.slice(start, start + 12);
+      const labelWidth = 126;
+      const cellWidth = (contentWidth - labelWidth) / Math.max(chunk.length, 1);
+      const headerHeight = 18;
+      const rowHeight = 40;
+      ensureSpace(headerHeight + rowHeight + 14);
+      page.drawRectangle({
+        x: margin,
+        y: y - headerHeight,
+        width: contentWidth,
+        height: headerHeight,
+        color: rgb(0.94, 0.96, 0.98),
+        borderColor: colors.border,
+        borderWidth: 0.6,
       });
-
-      for (let start = 0; start < meaningfulEntries.length; start += 12) {
-        const chunk = meaningfulEntries.slice(start, start + 12);
-        const labelWidth = 150;
-        const cellWidth = (contentWidth - labelWidth) / 12;
-        const headerHeight = 18;
-        const rowHeight = 34;
-        ensureSpace(headerHeight + rowHeight + 14);
-        page.drawRectangle({
-          x: margin,
-          y: y - headerHeight,
-          width: contentWidth,
-          height: headerHeight,
-          color: rgb(0.94, 0.96, 0.98),
-          borderColor: colors.border,
-          borderWidth: 0.6,
-        });
-        page.drawText("FASILITAS", {
-          x: margin + 5,
-          y: y - 12,
-          size: 6.4,
-          font: boldFont,
-          color: colors.slate,
-        });
-        chunk.forEach((entry, index) => {
-          drawWrappedTextAt(
-            shortPeriod(recordValue(entry, ["period_month"])),
-            margin + labelWidth + index * cellWidth,
-            y - 12,
-            cellWidth,
-            {
-              size: 6.2,
-              bold: true,
-              color: colors.slate,
-              align: "center",
-              maxLines: 1,
-            },
-          );
-        });
-        y -= headerHeight;
-        page.drawRectangle({
-          x: margin,
-          y: y - rowHeight,
-          width: contentWidth,
-          height: rowHeight,
-          color: colors.white,
-          borderColor: colors.border,
-          borderWidth: 0.5,
-        });
-        drawWrappedTextAt(label, margin + 5, y - 11, labelWidth - 10, {
-          size: 6.6,
+      page.drawText("REKAP BULANAN", {
+        x: margin + 5,
+        y: y - 12,
+        size: 6.4,
+        font: boldFont,
+        color: colors.slate,
+      });
+      chunk.forEach((entry, index) => {
+        const monthIndex = recordValue(entry, ["month_index"]);
+        const periodLabel =
+          recordValue(entry, ["period_month"]) ||
+          (monthIndex ? `Bulan ${formatIdebNumber(monthIndex)}` : null);
+        drawWrappedTextAt(shortPeriod(periodLabel), margin + labelWidth + index * cellWidth, y - 12, cellWidth, {
+          size: 6.2,
           bold: true,
-          maxLines: 2,
-          lineHeight: 8.4,
+          color: colors.slate,
+          align: "center",
+          maxLines: 1,
         });
-        chunk.forEach((entry, index) => {
-          const x = margin + labelWidth + index * cellWidth;
-          const kol = recordValue(entry, ["collectibility_code", "collectibility", "kol"]);
-          const dpd = recordValue(entry, ["days_past_due", "dpd"]);
-          const style = collectibilityColors(kol);
-          page.drawRectangle({
-            x,
-            y: y - rowHeight,
-            width: cellWidth,
-            height: rowHeight,
-            color: collectibilityLevel(kol) ? style.bg : colors.softGray,
-            borderColor: colors.border,
-            borderWidth: 0.35,
-          });
-          drawWrappedTextAt(`KOL ${valueOrDash(kol)}`, x, y - 13, cellWidth, {
-            size: 6.2,
-            bold: true,
-            color: collectibilityLevel(kol) ? style.fg : colors.slate,
-            align: "center",
-            maxLines: 1,
-          });
-          drawWrappedTextAt(`DPD ${valueOrDash(dpd)}`, x, y - 25, cellWidth, {
-            size: 5.8,
-            color: collectibilityLevel(kol) ? style.fg : colors.slate,
-            align: "center",
-            maxLines: 1,
-          });
+      });
+      y -= headerHeight;
+      page.drawRectangle({
+        x: margin,
+        y: y - rowHeight,
+        width: contentWidth,
+        height: rowHeight,
+        color: colors.white,
+        borderColor: colors.border,
+        borderWidth: 0.5,
+      });
+      drawWrappedTextAt("KOL Tertinggi", margin + 5, y - 13, labelWidth - 10, {
+        size: 6.6,
+        bold: true,
+        maxLines: 2,
+        lineHeight: 8.4,
+      });
+      chunk.forEach((entry, index) => {
+        const x = margin + labelWidth + index * cellWidth;
+        const kol = recordValue(entry, ["collectibility_code", "collectibility", "kol"]);
+        const dpd = recordValue(entry, ["days_past_due", "dpd"]);
+        const sourceCount = recordValue(entry, ["source_count", "facility_count"]);
+        const style = collectibilityColors(kol);
+        page.drawRectangle({
+          x,
+          y: y - rowHeight,
+          width: cellWidth,
+          height: rowHeight,
+          color: collectibilityLevel(kol) ? style.bg : colors.softGray,
+          borderColor: colors.border,
+          borderWidth: 0.35,
         });
-        y -= rowHeight + 10;
-      }
+        drawWrappedTextAt(`KOL ${valueOrDash(kol)}`, x, y - 12, cellWidth, {
+          size: 6.2,
+          bold: true,
+          color: collectibilityLevel(kol) ? style.fg : colors.slate,
+          align: "center",
+          maxLines: 1,
+        });
+        drawWrappedTextAt(`DPD ${formatIdebNumber(dpd)} hari`, x, y - 23, cellWidth, {
+          size: 5.6,
+          color: collectibilityLevel(kol) ? style.fg : colors.slate,
+          align: "center",
+          maxLines: 1,
+        });
+        drawWrappedTextAt(`${formatIdebNumber(sourceCount)} sumber`, x, y - 33, cellWidth, {
+          size: 5.2,
+          color: collectibilityLevel(kol) ? style.fg : colors.muted,
+          align: "center",
+          maxLines: 1,
+        });
+      });
+      y -= rowHeight + 10;
     }
   }
 
@@ -2671,14 +2649,14 @@ async function renderIdebResumePdf(upload) {
     `No Laporan: ${valueOrDash(summary.report_number)}`,
   ]);
 
+  drawSectionTitle("HISTORI KOL");
+  drawHistoryMatrix(monthlyHistory);
+
   drawSectionTitle("PERBANDINGAN DENGAN F01 INTERNAL");
   drawNoteBox(upload.debtor_id || upload.contract_id ? "Status: Terhubung" : "Status: Belum terhubung", comparisonText, {
     color: upload.debtor_id || upload.contract_id ? rgb(0.94, 0.99, 0.96) : rgb(0.98, 0.98, 0.98),
     borderColor: upload.debtor_id || upload.contract_id ? rgb(0.65, 0.88, 0.72) : colors.border,
   });
-
-  drawSectionTitle("HISTORI KOL");
-  drawHistoryMatrix(monthlyHistory);
 
   drawSectionTitle("AGUNAN");
   drawTable(
