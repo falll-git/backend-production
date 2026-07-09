@@ -162,6 +162,124 @@ function sortFacilitiesByRisk(facilities) {
   });
 }
 
+function historyPeriodKey(entry, fallbackIndex) {
+  const period = normalizeText(
+    recordValue(entry, ["period_month", "period", "month_label", "label"]),
+  );
+  if (period) return { key: `PERIOD:${period}`, period, order: period };
+
+  const monthIndex = parseIdebNumber(recordValue(entry, ["month_index", "monthIndex"]));
+  if (monthIndex !== null) {
+    const padded = String(monthIndex).padStart(2, "0");
+    return { key: `INDEX:${padded}`, period: null, order: padded };
+  }
+
+  const indexKey = String(fallbackIndex + 1).padStart(2, "0");
+  return { key: `ROW:${indexKey}`, period: null, order: indexKey };
+}
+
+function isMeaningfulHistoryEntry(entry) {
+  return Boolean(
+    normalizeText(recordValue(entry, ["collectibility_code", "collectibility", "kol"])) ||
+      normalizeText(recordValue(entry, ["days_past_due", "dpd", "jumlah_hari_tunggakan"])),
+  );
+}
+
+function aggregateMonthlyCollectibilityHistory(history = []) {
+  const groups = new Map();
+
+  history
+    .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+    .forEach((entry, index) => {
+      if (!isMeaningfulHistoryEntry(entry)) return;
+
+      const periodInfo = historyPeriodKey(entry, index);
+      const collectibility =
+        recordValue(entry, ["collectibility_code", "collectibility", "kol"]) || null;
+      const collectibilityRank = collectibilityLevel(collectibility) || 0;
+      const dpd =
+        parseIdebNumber(recordValue(entry, ["days_past_due", "dpd", "jumlah_hari_tunggakan"])) ||
+        0;
+      const sourceCount = Math.max(
+        1,
+        parseIdebNumber(recordValue(entry, ["source_count"])) || 0,
+      );
+      const reporterCount =
+        parseIdebNumber(recordValue(entry, ["reporter_count"])) || 0;
+      const facilityCount =
+        parseIdebNumber(recordValue(entry, ["facility_count"])) || 0;
+      const reporter = normalizeText(recordValue(entry, ["reporter_name", "reporter_code"]));
+      const account = normalizeText(recordValue(entry, ["account_number", "no_rekening"]));
+
+      const current =
+        groups.get(periodInfo.key) ||
+        ({
+          key: periodInfo.key,
+          order: periodInfo.order,
+          period_month: periodInfo.period,
+          month_index: parseIdebNumber(recordValue(entry, ["month_index", "monthIndex"])),
+          collectibility: null,
+          collectibility_code: null,
+          kol: null,
+          days_past_due: 0,
+          dpd: 0,
+          source_count: 0,
+          reporterKeys: new Set(),
+          accountKeys: new Set(),
+          reportedReporterCount: 0,
+          reportedFacilityCount: 0,
+          bestRank: 0,
+        });
+
+      current.source_count += sourceCount;
+      if (reporter) current.reporterKeys.add(reporter.toUpperCase());
+      if (account) current.accountKeys.add(account.toUpperCase());
+      current.reportedReporterCount = Math.max(
+        current.reportedReporterCount,
+        reporterCount,
+      );
+      current.reportedFacilityCount = Math.max(
+        current.reportedFacilityCount,
+        facilityCount,
+      );
+
+      if (
+        current.collectibility === null ||
+        collectibilityRank > current.bestRank
+      ) {
+        current.bestRank = collectibilityRank;
+        current.collectibility = collectibility;
+        current.collectibility_code = collectibility;
+        current.kol = collectibility;
+      }
+      current.days_past_due = Math.max(current.days_past_due, dpd);
+      current.dpd = current.days_past_due;
+
+      groups.set(periodInfo.key, current);
+    });
+
+  return Array.from(groups.values())
+    .sort((left, right) => String(left.order).localeCompare(String(right.order)))
+    .map((entry) => ({
+      period_month: entry.period_month,
+      month_index: entry.month_index,
+      collectibility: entry.collectibility,
+      collectibility_code: entry.collectibility_code,
+      kol: entry.kol,
+      days_past_due: entry.days_past_due,
+      dpd: entry.dpd,
+      source_count: entry.source_count,
+      reporter_count: Math.max(
+        entry.reporterKeys.size,
+        entry.reportedReporterCount,
+      ),
+      facility_count: Math.max(
+        entry.accountKeys.size,
+        entry.reportedFacilityCount,
+      ),
+    }));
+}
+
 function reporterIdentity(facility) {
   const code = normalizeText(recordValue(facility, ["reporter_code", "ljk"]));
   const name = normalizeText(recordValue(facility, ["reporter_name", "bank"]));
@@ -520,6 +638,7 @@ function buildIdebReportSummary(metrics, { fallbackCollaterals = [] } = {}) {
 
 module.exports = {
   aggregateReporters,
+  aggregateMonthlyCollectibilityHistory,
   buildIdebReportMetrics,
   buildIdebReportSummary,
   classifyFacility,

@@ -16,9 +16,7 @@ const TEMPORARILY_DISABLED_MENU_URLS = new Set([
   "/dashboard/legal/cetak/surat-samsat",
   "/dashboard/legal/cetak/dokumen-lainnya",
 ]);
-const TEMPORARILY_DISABLED_COMPONENT_KEYS = new Set([
-  "dashboard.module_report.legal",
-]);
+const TEMPORARILY_DISABLED_COMPONENT_KEYS = new Set();
 const MAIN_REPORT_WIDGET_ORDER = {
   "dashboard.module_report.digital_archive": 10,
   "dashboard.module_report.correspondence": 20,

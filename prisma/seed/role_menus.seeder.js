@@ -154,6 +154,7 @@ const DASHBOARD_REPORT_WIDGET_URLS = [
   URLS.archiveReport,
   URLS.correspondenceReport,
   URLS.debtorReport,
+  URLS.legalReport,
   URLS.legalReportThirdPartyDocuments,
   URLS.legalReportThirdPartyDepositFunds,
   URLS.debtorReportNpf,
