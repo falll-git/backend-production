@@ -5,6 +5,7 @@ const express = require("express");
 const cors = require("cors");
 const requestId = require("./middlewares/request-id.middleware");
 const securityHeaders = require("./middlewares/security-headers.middleware");
+const serverErrorResponse = require("./middlewares/server-error-response.middleware");
 const authRoutes = require("./modules/auth/auth.route");
 const roleRoutes = require("./modules/role/role.route");
 const divisionRoutes = require("./modules/division/division.route");
@@ -71,9 +72,11 @@ function getBodyLimit(key, fallback) {
 }
 
 const app = express();
+app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(securityHeaders);
 app.use(requestId);
+app.use(serverErrorResponse);
 
 const allowedCorsOrigins = parseCorsOrigins();
 app.use(

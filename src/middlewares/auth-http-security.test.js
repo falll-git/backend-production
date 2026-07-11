@@ -61,6 +61,19 @@ test("CORS menerima origin terdaftar dan menolak origin asing", async () => {
   });
 });
 
+test("respons production tidak membocorkan framework dan memakai HSTS", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/health`);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-powered-by"), null);
+    assert.match(
+      response.headers.get("strict-transport-security") || "",
+      /max-age=/,
+    );
+  });
+});
+
 test("refresh token production memakai cookie HttpOnly dan Secure", () => {
   const calls = [];
   const response = {

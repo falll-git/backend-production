@@ -317,7 +317,7 @@ model watermark_settings {
   spacing_y           Int      @default(180)
   updated_by          String?
   created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  updated_at          DateTime @default(now()) @updatedAt
 
   @@index([is_enabled])
 }
@@ -332,7 +332,7 @@ model storage_usage_configs {
   manual_review_threshold_gb Float    @default(1000)
   is_active                  Boolean  @default(true)
   created_at                 DateTime @default(now())
-  updated_at                 DateTime @updatedAt
+  updated_at                 DateTime @default(now()) @updatedAt
 
   @@index([is_active])
 }
@@ -467,13 +467,13 @@ model incoming_mail_target_divisions {
   division_id       String
   manager_id        String?
   created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  updated_at        DateTime @default(now()) @updatedAt
 
   incoming_mail incoming_mails @relation(fields: [incoming_mails_id], references: [id], onDelete: Cascade)
   division      divisions      @relation(fields: [division_id], references: [id])
   manager       users?         @relation("IncomingMailTargetManager", fields: [manager_id], references: [id], onDelete: SetNull)
 
-  @@unique([incoming_mails_id, division_id])
+  @@unique([incoming_mails_id, division_id], map: "incoming_mail_target_divisions_incoming_mails_id_division_id_ke")
   @@index([division_id])
   @@index([manager_id])
 }
@@ -655,7 +655,7 @@ model debtor_individual_profiles {
   created_by                      String?
   updated_by                      String?
   created_at                      DateTime  @default(now())
-  updated_at                      DateTime  @updatedAt
+  updated_at                      DateTime  @default(now()) @updatedAt
 
   debtor digital_debtors @relation(fields: [debtor_id], references: [id], onDelete: Cascade)
 
@@ -699,7 +699,7 @@ model debtor_legal_entity_profiles {
   created_by                      String?
   updated_by                      String?
   created_at                      DateTime  @default(now())
-  updated_at                      DateTime  @updatedAt
+  updated_at                      DateTime  @default(now()) @updatedAt
 
   debtor digital_debtors @relation(fields: [debtor_id], references: [id], onDelete: Cascade)
 
@@ -766,6 +766,7 @@ model digital_document_access_requests {
   actor     users?            @relation("DigitalDocumentAccessActor", fields: [acted_by], references: [id])
 
   @@index([document_id, status])
+  @@index([document_id, requester_id, status, expires_at], map: "digital_document_access_requests_document_requester_status_expi")
   @@index([requester_id, status])
   @@index([owner_id, status])
   @@index([status, expires_at])
@@ -922,7 +923,7 @@ model memorandum_target_divisions {
   division_id    String
   manager_id     String?
   created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  updated_at     DateTime @default(now()) @updatedAt
 
   memorandum memorandums @relation(fields: [memorandums_id], references: [id], onDelete: Cascade)
   division   divisions   @relation(fields: [division_id], references: [id])
@@ -1391,7 +1392,7 @@ model debtor_collaterals {
   deleted_by                  String?
   deleted_at                  DateTime?
   created_at                  DateTime  @default(now())
-  updated_at                  DateTime  @updatedAt
+  updated_at                  DateTime  @default(now()) @updatedAt
 
   debtor                   digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
   contract                 debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
@@ -1573,7 +1574,7 @@ model debtor_document_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   document debtor_documents @relation(fields: [document_id], references: [id], onDelete: Cascade)
 
@@ -1595,7 +1596,7 @@ model debtor_marketing_timelines {
   deleted_by   String?
   deleted_at   DateTime?
   created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  updated_at   DateTime  @default(now()) @updatedAt
 
   debtor     digital_debtors               @relation(fields: [debtor_id], references: [id])
   contract   debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
@@ -1665,7 +1666,7 @@ model debtor_marketing_activity_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   activity debtor_marketing_activities @relation(fields: [activity_id], references: [id], onDelete: Cascade)
 
@@ -1715,7 +1716,7 @@ model debtor_warning_letter_files {
   size_bytes Int?
   checksum   String?
   created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  updated_at DateTime @default(now()) @updatedAt
 
   letter debtor_warning_letters @relation(fields: [letter_id], references: [id], onDelete: Cascade)
 
@@ -1760,7 +1761,7 @@ model legal_document_template_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   template legal_document_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
 
@@ -1809,7 +1810,7 @@ model legal_print_history_files {
   size_bytes Int?
   checksum   String?
   created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  updated_at DateTime @default(now()) @updatedAt
 
   print legal_print_histories @relation(fields: [print_id], references: [id], onDelete: Cascade)
 
@@ -1868,7 +1869,7 @@ model debtor_ideb_upload_files {
   size_bytes  Int?
   checksum    String?  @unique
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   upload debtor_ideb_uploads @relation(fields: [upload_id], references: [id], onDelete: Cascade)
 
@@ -2007,7 +2008,7 @@ model legal_notary_progress_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   progress legal_notary_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -2063,7 +2064,7 @@ model legal_insurance_progress_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   progress legal_insurance_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -2118,7 +2119,7 @@ model legal_kjpp_progress_files {
   size_bytes  Int?
   checksum    String?
   created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  updated_at  DateTime @default(now()) @updatedAt
 
   progress legal_kjpp_progress @relation(fields: [progress_id], references: [id], onDelete: Cascade)
 
@@ -2175,7 +2176,7 @@ model legal_claim_files {
   size_bytes Int?
   checksum   String?
   created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  updated_at DateTime @default(now()) @updatedAt
 
   claim legal_claims @relation(fields: [claim_id], references: [id], onDelete: Cascade)
 
@@ -2248,7 +2249,7 @@ model legal_deposit_transaction_files {
   size_bytes     Int?
   checksum       String?
   created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  updated_at     DateTime @default(now()) @updatedAt
 
   transaction legal_deposit_transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
 
