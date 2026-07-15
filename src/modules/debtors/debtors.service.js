@@ -33,6 +33,9 @@ const {
   auditSnapshot,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
+const {
+  serializeVisitLocation,
+} = require("../../utils/debtor-marketing-location");
 
 const SORTABLE_FIELDS = new Set([
   "debtor_number",
@@ -489,6 +492,7 @@ function serializeMarketingActivity(req, item) {
     status: item.status,
     action_plan: item.action_plan,
     visit_address: item.visit_address,
+    ...serializeVisitLocation(item),
     visit_result: item.visit_result,
     conclusion: item.conclusion,
     handling_step: item.handling_step,
@@ -644,6 +648,7 @@ function buildMarketingTimeline(items, timelines = []) {
         related_activity: item.related_activity || null,
         created_by: item.created_by,
         visit_address: item.visit_address,
+        ...serializeVisitLocation(item),
         file: item.file,
         contract: item.contract || null,
         timeline: serializedTimeline,

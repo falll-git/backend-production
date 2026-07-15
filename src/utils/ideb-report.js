@@ -3,6 +3,31 @@ function normalizeText(value) {
   return String(value).trim();
 }
 
+const IDEB_FACILITY_FILTERS = Object.freeze([
+  "ALL",
+  "ACTIVE",
+  "PAID_OFF",
+  "PROBLEM",
+  "ARREARS",
+]);
+
+const IDEB_FACILITY_FILTER_DETAILS = Object.freeze({
+  ALL: { label: "Semua", fileSuffix: "semua" },
+  ACTIVE: { label: "Aktif", fileSuffix: "aktif" },
+  PAID_OFF: { label: "Lunas", fileSuffix: "lunas" },
+  PROBLEM: { label: "Macet / Hapus Buku", fileSuffix: "macet-hapus-buku" },
+  ARREARS: { label: "Ada Tunggakan", fileSuffix: "ada-tunggakan" },
+});
+
+function normalizeIdebFacilityFilter(value) {
+  const normalized = normalizeText(value).toUpperCase();
+  return IDEB_FACILITY_FILTERS.includes(normalized) ? normalized : "ALL";
+}
+
+function idebFacilityFilterDetails(value) {
+  return IDEB_FACILITY_FILTER_DETAILS[normalizeIdebFacilityFilter(value)];
+}
+
 function recordValue(record, keys) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;
   for (const key of keys) {
@@ -160,6 +185,41 @@ function sortFacilitiesByRisk(facilities) {
       )
     );
   });
+}
+
+function filterIdebFacilities(facilities, filter = "ALL") {
+  const source = Array.isArray(facilities)
+    ? facilities.filter(
+        (facility) => facility && typeof facility === "object" && !Array.isArray(facility),
+      )
+    : [];
+  const normalizedFilter = normalizeIdebFacilityFilter(filter);
+
+  if (normalizedFilter === "ACTIVE") {
+    return sortFacilitiesByRisk(
+      source.filter((facility) => classifyFacility(facility) === "ACTIVE"),
+    );
+  }
+  if (normalizedFilter === "PAID_OFF") {
+    return sortFacilitiesByRisk(
+      source.filter((facility) => classifyFacility(facility) === "PAID_OFF"),
+    );
+  }
+  if (normalizedFilter === "PROBLEM") {
+    return sortFacilitiesByRisk(
+      source.filter(
+        (facility) =>
+          classifyFacility(facility) === "WRITE_OFF" ||
+          collectibilityLevel(facilityCollectibility(facility)) === 5,
+      ),
+    );
+  }
+  if (normalizedFilter === "ARREARS") {
+    return sortFacilitiesByRisk(
+      source.filter((facility) => facilityArrears(facility) > 0),
+    );
+  }
+  return sortFacilitiesByRisk(source);
 }
 
 function historyPeriodKey(entry, fallbackIndex) {
@@ -637,6 +697,7 @@ function buildIdebReportSummary(metrics, { fallbackCollaterals = [] } = {}) {
 }
 
 module.exports = {
+  IDEB_FACILITY_FILTERS,
   aggregateReporters,
   aggregateMonthlyCollectibilityHistory,
   buildIdebReportMetrics,
@@ -650,8 +711,11 @@ module.exports = {
   facilityInitialPlafond,
   facilityOutstanding,
   facilityPlafond,
+  filterIdebFacilities,
+  idebFacilityFilterDetails,
   isPaidOffFacility,
   isWriteOffFacility,
+  normalizeIdebFacilityFilter,
   parseIdebNumber,
   recordValue,
   sortFacilitiesByRisk,

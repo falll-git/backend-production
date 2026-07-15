@@ -22,6 +22,11 @@ const {
   requestMetadata,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
+const {
+  VISIT_LOCATION_AUDIT_FIELDS,
+  resolveVisitLocation,
+  serializeVisitLocation,
+} = require("../../utils/debtor-marketing-location");
 
 const KIND_BY_SLUG = {
   "action-plans": "ACTION_PLAN",
@@ -46,6 +51,7 @@ const MARKETING_ACTIVITY_AUDIT_FIELDS = [
   "status",
   "action_plan",
   "visit_address",
+  ...VISIT_LOCATION_AUDIT_FIELDS,
   "visit_result",
   "conclusion",
   "handling_step",
@@ -92,6 +98,7 @@ function serialize(req, item) {
     status: item.status,
     action_plan: item.action_plan,
     visit_address: item.visit_address,
+    ...serializeVisitLocation(item),
     visit_result: item.visit_result,
     conclusion: item.conclusion,
     handling_step: item.handling_step,
@@ -363,7 +370,14 @@ exports.getById = async ({ req, kindSlug, id, userId }) => {
 
 exports.create = async ({ req, kindSlug, payload, userId }) => {
   const kind = getKind(kindSlug);
-  const data = normalizePayload(payload);
+  const data = {
+    ...normalizePayload(payload),
+    ...resolveVisitLocation({
+      kind,
+      payload,
+      requireLocation: kind === "VISIT_RESULT",
+    }),
+  };
   ensureKindPayload(kind, data);
   await ensureReferences(data);
   await ensureDebtorAccessible(data.debtor_id, userId);
@@ -412,10 +426,11 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
 };
 
 exports.update = async ({ req, kindSlug, id, payload, userId }) => {
+  const kind = getKind(kindSlug);
   const scope = await getDebtorAccessScope(userId);
   const debtorManageWhere = buildDebtorManageWhere(scope);
   const current = await repository.findById(id, {
-    activity_kind: getKind(kindSlug),
+    activity_kind: kind,
     deleted_at: null,
     ...(Object.keys(debtorManageWhere).length > 0
       ? { debtor: debtorManageWhere }
@@ -423,7 +438,14 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
   });
   if (!current) throw new AppError("Aktivitas marketing tidak ditemukan.", 404);
 
-  const data = normalizePayload(payload, current);
+  const data = {
+    ...normalizePayload(payload, current),
+    ...resolveVisitLocation({
+      kind,
+      payload,
+      current,
+    }),
+  };
   ensureKindPayload(current.activity_kind, data);
   await ensureReferences(data);
   await ensureDebtorAccessible(data.debtor_id, userId);

@@ -9,6 +9,9 @@ const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
 const { roleHasFeature } = require("../../utils/rbac");
 const { serializeFile } = require("../../utils/domain-files");
 const {
+  serializeVisitLocation,
+} = require("../../utils/debtor-marketing-location");
+const {
   PAGINATION_PROFILES,
   buildPaginationMeta,
   resolvePagination,
@@ -734,6 +737,7 @@ function serializeMarketingReportActivity(req, item) {
     contract: item.contract,
     action_plan: item.action_plan,
     visit_address: item.visit_address,
+    ...serializeVisitLocation(item),
     visit_result: item.visit_result,
     conclusion: item.conclusion,
     handling_step: item.handling_step,

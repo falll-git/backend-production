@@ -33,7 +33,13 @@ function authorizeKind(capability) {
 
 const uploadBody = [
   uploadDomainFiles("files", 20),
-  normalizePersuratanMultipartBody({}),
+  normalizePersuratanMultipartBody({
+    numberFields: [
+      "visit_latitude",
+      "visit_longitude",
+      "visit_location_accuracy_m",
+    ],
+  }),
 ];
 
 router.get("/:kind", auth, authorizeKind("read"), controller.getAll);

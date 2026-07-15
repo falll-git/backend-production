@@ -14,6 +14,7 @@ const {
 const controller = require("./debtorImports.controller");
 const {
   idebImportJobSchema,
+  idebResumePdfQuerySchema,
   resolveIdebSchema,
   slikImportJobSchema,
 } = require("./debtorImports.validation");
@@ -58,6 +59,7 @@ router.get(
   "/ideb/:uploadId/resume-pdf",
   auth,
   authorize(READ_URLS, "read"),
+  validate(idebResumePdfQuerySchema, { source: "query" }),
   controller.getIdebResumePdf,
 );
 router.patch(
