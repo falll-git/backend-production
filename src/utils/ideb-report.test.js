@@ -4,6 +4,8 @@ const {
   aggregateMonthlyCollectibilityHistory,
   buildIdebReportMetrics,
   buildIdebReportSummary,
+  filterIdebFacilities,
+  normalizeIdebFacilityFilter,
   parseIdebNumber,
 } = require("./ideb-report");
 
@@ -15,6 +17,73 @@ test("parseIdebNumber supports common Indonesian and international formats", () 
   assert.equal(parseIdebNumber("25,000,000.50"), 25000000.5);
   assert.equal(parseIdebNumber("Rp 1.250.000"), 1250000);
   assert.equal(parseIdebNumber("invalid"), null);
+});
+
+test("facility filters use the same lifecycle and risk rules as the IDEB resume", () => {
+  const facilities = [
+    {
+      account_number: "ACTIVE-1",
+      collectibility: "1 - Lancar",
+      outstanding: "5.000.000",
+      condition_code: "00",
+    },
+    {
+      account_number: "PROBLEM-1",
+      collectibility: "5 - Macet",
+      outstanding: "3.000.000",
+      principal_arrears: "500.000",
+      condition_code: "00",
+    },
+    {
+      account_number: "PAID-1",
+      collectibility: "1 - Lancar",
+      outstanding: "0",
+      condition_code: "02",
+      condition: "02 - Lunas",
+    },
+    {
+      account_number: "WRITE-OFF-1",
+      collectibility: "5 - Macet",
+      outstanding: "2.000.000",
+      condition_code: "03",
+      condition: "03 - Hapus Buku",
+    },
+    {
+      account_number: "PAID-CODE-ONLY",
+      collectibility: "1 - Lancar",
+      outstanding: "0",
+      condition_code: "02",
+      condition: "Aktif",
+    },
+    {
+      account_number: "WRITE-OFF-CODE-ONLY",
+      collectibility: "1 - Lancar",
+      outstanding: "1.000.000",
+      condition_code: "03",
+      condition: "Aktif",
+    },
+  ];
+  const accounts = (filter) =>
+    filterIdebFacilities(facilities, filter).map((facility) => facility.account_number);
+
+  assert.deepEqual(new Set(accounts("ALL")), new Set([
+    "ACTIVE-1",
+    "PROBLEM-1",
+    "PAID-1",
+    "WRITE-OFF-1",
+    "PAID-CODE-ONLY",
+    "WRITE-OFF-CODE-ONLY",
+  ]));
+  assert.deepEqual(new Set(accounts("ACTIVE")), new Set(["ACTIVE-1", "PROBLEM-1"]));
+  assert.deepEqual(new Set(accounts("PAID_OFF")), new Set(["PAID-1", "PAID-CODE-ONLY"]));
+  assert.deepEqual(new Set(accounts("PROBLEM")), new Set([
+    "PROBLEM-1",
+    "WRITE-OFF-1",
+    "WRITE-OFF-CODE-ONLY",
+  ]));
+  assert.deepEqual(accounts("ARREARS"), ["PROBLEM-1"]);
+  assert.equal(normalizeIdebFacilityFilter(" active "), "ACTIVE");
+  assert.equal(normalizeIdebFacilityFilter("unknown"), "ALL");
 });
 
 test("buildIdebReportMetrics groups facilities by reporter and separates lifecycle totals", () => {

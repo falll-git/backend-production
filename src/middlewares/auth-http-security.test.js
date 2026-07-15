@@ -71,6 +71,10 @@ test("respons production tidak membocorkan framework dan memakai HSTS", async ()
       response.headers.get("strict-transport-security") || "",
       /max-age=/,
     );
+    assert.equal(
+      response.headers.get("permissions-policy"),
+      "camera=(), microphone=(), geolocation=(self)",
+    );
   });
 });
 

@@ -48,6 +48,7 @@ exports.getIdebResumePdf = async (req, res) => {
     const result = await service.getIdebResumePdf({
       uploadId: req.params.uploadId,
       userId: req.user?.id,
+      facilityFilter: req.query.facility_filter,
     });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(

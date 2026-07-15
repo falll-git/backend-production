@@ -12,6 +12,20 @@ const fileSchema = Joi.object({
   .or("buffer", "temp_path")
   .unknown(true);
 const filesSchema = Joi.array().items(fileSchema).min(1).max(20);
+const latitudeSchema = Joi.number().min(-90).max(90).messages({
+  "number.base": "Latitude kunjungan harus berupa angka yang valid.",
+  "number.min": "Latitude kunjungan harus berada pada rentang -90 sampai 90.",
+  "number.max": "Latitude kunjungan harus berada pada rentang -90 sampai 90.",
+});
+const longitudeSchema = Joi.number().min(-180).max(180).messages({
+  "number.base": "Longitude kunjungan harus berupa angka yang valid.",
+  "number.min": "Longitude kunjungan harus berada pada rentang -180 sampai 180.",
+  "number.max": "Longitude kunjungan harus berada pada rentang -180 sampai 180.",
+});
+const locationAccuracySchema = Joi.number().min(0).messages({
+  "number.base": "Akurasi lokasi harus berupa angka yang valid.",
+  "number.min": "Akurasi lokasi tidak boleh bernilai negatif.",
+});
 
 const payload = {
   debtor_id: uuid.required(),
@@ -24,6 +38,9 @@ const payload = {
   status: Joi.string().trim().max(50).default("PENDING"),
   action_plan: Joi.string().trim().allow("", null).optional(),
   visit_address: Joi.string().trim().allow("", null).optional(),
+  visit_latitude: latitudeSchema.optional(),
+  visit_longitude: longitudeSchema.optional(),
+  visit_location_accuracy_m: locationAccuracySchema.optional(),
   visit_result: Joi.string().trim().allow("", null).optional(),
   conclusion: Joi.string().trim().allow("", null).optional(),
   handling_step: Joi.string().trim().allow("", null).optional(),
@@ -33,13 +50,32 @@ const payload = {
   files: filesSchema.optional(),
 };
 
-exports.createMarketingActivitySchema = Joi.object(payload);
-exports.updateMarketingActivitySchema = Joi.object(
-  Object.fromEntries(
-    Object.entries(payload).map(([field, schema]) => [
-      field,
-      schema.optional(),
-    ]),
+function requireCoordinatePair(schema) {
+  return schema
+    .and("visit_latitude", "visit_longitude")
+    .with("visit_location_accuracy_m", [
+      "visit_latitude",
+      "visit_longitude",
+    ])
+    .messages({
+      "object.and":
+        "Latitude dan longitude kunjungan wajib dikirim berpasangan.",
+      "object.with":
+        "Akurasi lokasi hanya dapat dikirim bersama koordinat kunjungan.",
+    });
+}
+
+exports.createMarketingActivitySchema = requireCoordinatePair(
+  Joi.object(payload),
+);
+exports.updateMarketingActivitySchema = requireCoordinatePair(
+  Joi.object(
+    Object.fromEntries(
+      Object.entries(payload).map(([field, schema]) => [
+        field,
+        schema.optional(),
+      ]),
+    ),
   ),
 )
   .prefs({ noDefaults: true })

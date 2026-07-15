@@ -50,6 +50,14 @@ exports.resolveIdebSchema = Joi.object({
   contract_id: optionalUuid.optional(),
 });
 
+exports.idebResumePdfQuerySchema = Joi.object({
+  facility_filter: Joi.string()
+    .trim()
+    .uppercase()
+    .valid("ALL", "ACTIVE", "PAID_OFF", "PROBLEM", "ARREARS")
+    .default("ALL"),
+});
+
 exports.slikImportJobSchema = Joi.object({
   file: fileSchema.optional(),
   files: Joi.array().items(fileSchema).min(1).max(20).optional(),
