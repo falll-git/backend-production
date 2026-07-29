@@ -2,7 +2,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  CI_CONTRACT_NUMBER,
   CI_DEBTOR_NUMBER,
+  CI_DEPOSIT_ID,
+  CI_MARKETING_ACTIVITY_ID,
+  CI_NOTARY_CODE,
+  CI_NOTARY_PROGRESS_ID,
   assertSafeCiDatabase,
   seedCiTestData,
 } = require("./seed-ci-test-data");
@@ -73,30 +78,70 @@ test("seed CI menolak nama database tanpa penanda CI", () => {
   );
 });
 
-test("seed CI membuat fixture minimal tanpa data geolocation", async () => {
-  let upsertPayload;
+test("seed CI membuat fixture browser deterministik tanpa data geolocation", async () => {
+  const payloads = {};
+  const model = (name, result) => ({
+    upsert: async (payload) => {
+      payloads[name] = payload;
+      return result;
+    },
+  });
   const client = {
+    $transaction: async (callback) => callback(client),
     users: {
       findUnique: async (query) => {
         assert.equal(query.where.username, "ci-admin");
         return { id: "admin-ci" };
       },
     },
-    digital_debtors: {
-      upsert: async (payload) => {
-        upsertPayload = payload;
-      },
-    },
+    financing_products: { findUnique: async () => ({ id: "product-ci" }) },
+    contract_types: { findUnique: async () => ({ id: "contract-type-ci" }) },
+    collectibility_levels: { findUnique: async () => ({ id: "kol-ci" }) },
+    deposit_types: { findUnique: async () => ({ id: "deposit-type-ci" }) },
+    digital_debtors: model("debtor", { id: "debtor-ci" }),
+    debtor_contracts: model("contract", { id: "contract-ci" }),
+    debtor_collectibilities: model("collectibility"),
+    debtor_marketing_activities: model("marketing"),
+    third_parties: model("thirdParty", { id: "notary-ci" }),
+    legal_notary_progress: model("notaryProgress"),
+    legal_deposits: model("deposit"),
+    legal_deposit_transactions: model("depositTransaction"),
   };
 
   await seedCiTestData(safeEnv, client);
 
-  assert.equal(upsertPayload.where.debtor_number, CI_DEBTOR_NUMBER);
-  assert.equal(upsertPayload.create.created_by, "admin-ci");
-  assert.equal(upsertPayload.update.updated_by, "admin-ci");
+  assert.equal(payloads.debtor.where.debtor_number, CI_DEBTOR_NUMBER);
+  assert.equal(payloads.debtor.create.created_by, "admin-ci");
+  assert.equal(payloads.debtor.update.updated_by, "admin-ci");
+  assert.equal(payloads.contract.where.no_kontrak, CI_CONTRACT_NUMBER);
+  assert.equal(payloads.marketing.where.id, CI_MARKETING_ACTIVITY_ID);
+  assert.equal(payloads.thirdParty.where.code, CI_NOTARY_CODE);
+  assert.equal(payloads.notaryProgress.where.id, CI_NOTARY_PROGRESS_ID);
+  assert.equal(payloads.deposit.where.id, CI_DEPOSIT_ID);
+  assert.equal(payloads.depositTransaction.create.action, "PEMBAYARAN");
   assert.equal(
-    Object.keys(upsertPayload.create).some((key) => /(?:lat|lon|geo|location)/i.test(key)),
+    Object.keys(payloads.marketing.create).some((key) =>
+      /(?:lat|lon|geo|location)/i.test(key),
+    ),
     false,
+  );
+});
+
+test("seed CI berhenti jika parameter utama belum lengkap", async () => {
+  const transactionClient = {
+    financing_products: { findUnique: async () => null },
+    contract_types: { findUnique: async () => ({ id: "contract-type-ci" }) },
+    collectibility_levels: { findUnique: async () => ({ id: "kol-ci" }) },
+    deposit_types: { findUnique: async () => ({ id: "deposit-type-ci" }) },
+  };
+  const client = {
+    users: { findUnique: async () => ({ id: "admin-ci" }) },
+    $transaction: async (callback) => callback(transactionClient),
+  };
+
+  await assert.rejects(
+    () => seedCiTestData(safeEnv, client),
+    /Parameter CI belum lengkap/,
   );
 });
 
