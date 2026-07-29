@@ -5,26 +5,9 @@ const {
   assertLoopbackUrl,
 } = require("../../scripts/release-quality-gate");
 const {
+  assertSafeIntegrationDatabase,
   createIntegrationFixture,
 } = require("../../src/integration/support/integration-test-helpers");
-
-function assertSafeIntegrationDatabase() {
-  const databaseUrl = new URL(process.env.DATABASE_URL);
-  const databaseName = databaseUrl.pathname.replace(/^\//, "");
-  const loopback =
-    databaseUrl.hostname === "localhost" ||
-    databaseUrl.hostname === "::1" ||
-    databaseUrl.hostname.startsWith("127.");
-  const explicitlyTestDatabase = /(?:^|_)(?:test|local)(?:_|$)/i.test(
-    databaseName,
-  );
-
-  if (!loopback && !explicitlyTestDatabase) {
-    throw new Error(
-      "Full-stack test ditolak: DATABASE_URL harus loopback atau memakai database bernama test/local.",
-    );
-  }
-}
 
 function assertSafeFrontendTarget() {
   assertLoopbackUrl(
@@ -36,7 +19,7 @@ function assertSafeFrontendTarget() {
 test("Admin mengelola divisi dari UI dan perubahan terbukti di PostgreSQL", async ({
   page,
 }) => {
-  assertSafeIntegrationDatabase();
+  assertSafeIntegrationDatabase("Full-stack division UI");
   assertSafeFrontendTarget();
   const fixture = createIntegrationFixture(prisma, "Full-stack division UI", {
     runId: process.env.FULLSTACK_TEST_RUN_ID,

@@ -5,25 +5,13 @@ const {
   assertLoopbackUrl,
 } = require("../../scripts/release-quality-gate");
 const {
+  assertSafeIntegrationDatabase,
   createIntegrationFixture,
   futureUtcDate,
 } = require("../../src/integration/support/integration-test-helpers");
 
 function assertSafeTargets() {
-  const databaseUrl = new URL(process.env.DATABASE_URL);
-  const databaseName = databaseUrl.pathname.replace(/^\//, "");
-  const loopback =
-    databaseUrl.hostname === "localhost" ||
-    databaseUrl.hostname === "::1" ||
-    databaseUrl.hostname.startsWith("127.");
-  const explicitlyTestDatabase = /(?:^|[_-])(?:test|local)(?:[_-]|$)/i.test(
-    databaseName,
-  );
-  if (!loopback && !explicitlyTestDatabase) {
-    throw new Error(
-      "Full-stack agunan ditolak: database harus loopback atau bernama test/local.",
-    );
-  }
+  assertSafeIntegrationDatabase("Full-stack agunan");
   assertLoopbackUrl(
     process.env.FULLSTACK_FRONTEND_URL || "http://localhost:3000",
     "FULLSTACK_FRONTEND_URL",
