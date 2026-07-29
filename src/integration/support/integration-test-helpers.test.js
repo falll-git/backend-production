@@ -88,12 +88,19 @@ test("cleanup fixture menghapus system activity log berdasarkan seluruh ID yang 
     }
   });
   const systemActivityDeletes = [];
+  const thirdPartyDeletes = [];
   const deleteMany = async () => ({ count: 0 });
   const prisma = new Proxy(
     {
       system_activity_logs: {
         async deleteMany(args) {
           systemActivityDeletes.push(args);
+          return { count: 0 };
+        },
+      },
+      third_parties: {
+        async deleteMany(args) {
+          thirdPartyDeletes.push(args);
           return { count: 0 };
         },
       },
@@ -112,6 +119,7 @@ test("cleanup fixture menghapus system activity log berdasarkan seluruh ID yang 
   fixture.track("digitalDocument", "document-fixture-id");
   fixture.track("incomingMail", "incoming-mail-fixture-id");
   fixture.track("division", "division-fixture-id");
+  fixture.track("thirdParty", "third-party-fixture-id");
 
   await fixture.cleanup();
 
@@ -129,11 +137,15 @@ test("cleanup fixture menghapus system activity log berdasarkan seluruh ID yang 
                 "document-fixture-id",
                 "incoming-mail-fixture-id",
                 "division-fixture-id",
+                "third-party-fixture-id",
               ],
             },
           },
         ],
       },
     },
+  ]);
+  assert.deepEqual(thirdPartyDeletes, [
+    { where: { id: { in: ["third-party-fixture-id"] } } },
   ]);
 });
