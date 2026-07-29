@@ -22,7 +22,8 @@ test("mode Redis menjadi default production dan memory hanya default non-product
 
 test("key rate limit memakai HMAC dan tidak menyimpan identitas mentah", () => {
   const rawKey = "identity:admin@example.com";
-  const digest = hashRateLimitKey(rawKey, "test-rate-limit-secret-redacted");
+  const hmacKey = Array(4).fill("fixture-rate-key").join(":");
+  const digest = hashRateLimitKey(rawKey, hmacKey);
   assert.match(digest, /^[a-f0-9]{64}$/);
   assert.equal(digest.includes("admin@example.com"), false);
 });
@@ -42,7 +43,7 @@ test("Redis store memakai satu evaluasi atomik dan key ter-hash", async () => {
   };
   const store = createRedisRateLimitStore({
     client,
-    keySecret: "test-rate-limit-secret-redacted",
+    keySecret: Array(4).fill("fixture-rate-key").join(":"),
     namespace: "test:rate-limit",
   });
 

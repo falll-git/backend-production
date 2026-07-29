@@ -44,8 +44,11 @@ function createCaptureLogger() {
 
 test("structured logger meredaksi secret, credential URL, bearer, dan JWT", () => {
   const capture = createCaptureLogger();
-  const jwt =
-    "test-jwt-fixture-redacted";
+  const jwt = [
+    "eyJhbGciOiJIUzI1NiJ9",
+    "eyJzdWIiOiJhZG1pbiJ9",
+    "signature12345",
+  ].join(".");
   capture.logger.error(
     {
       event: "redaction_test",
