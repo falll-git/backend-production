@@ -1,8 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const request = require("supertest");
+const originalApiDocsEnabled = process.env.API_DOCS_ENABLED;
+process.env.API_DOCS_ENABLED = "true";
 const app = require("../app");
 const { buildOpenApiSpec } = require("../docs/openapi");
+if (originalApiDocsEnabled === undefined) {
+  delete process.env.API_DOCS_ENABLED;
+} else {
+  process.env.API_DOCS_ENABLED = originalApiDocsEnabled;
+}
 
 test("API v1 menjadi kontrak utama tanpa header deprecated", async () => {
   const response = await request(app).get("/api/v1/").expect(200);
