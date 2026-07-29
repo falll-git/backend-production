@@ -277,6 +277,34 @@ function validateOptionalCachePrefix(key, errors) {
   }
 }
 
+function validateOptionalInstanceKey(key, errors) {
+  const value = readEnv(key);
+  if (!value) return;
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(value)) {
+    errors.push(
+      `${key} hanya boleh berisi huruf kecil, angka, garis bawah, atau tanda hubung (2-64 karakter).`,
+    );
+  }
+}
+
+function validateOptionalQueueName(key, errors) {
+  const value = readEnv(key);
+  if (!value) return;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(value)) {
+    errors.push(
+      `${key} hanya boleh berisi huruf, angka, garis bawah, atau tanda hubung (maksimal 80 karakter).`,
+    );
+  }
+}
+
+function validateInstanceScopedValue(key, instanceKey, errors) {
+  const value = readEnv(key).toLowerCase();
+  if (!value || !instanceKey) return;
+  if (!value.includes(instanceKey.toLowerCase())) {
+    errors.push(`${key} wajib memuat APP_INSTANCE_KEY agar terisolasi per domain.`);
+  }
+}
+
 function validateOptionalSecret(key, errors) {
   const value = readEnv(key);
   if (!value) return;
@@ -371,6 +399,9 @@ function validateEnv() {
   const errors = [];
   const warnings = [];
   const isProduction = readEnv("NODE_ENV") === PRODUCTION_ENV;
+  const instanceKey = isProduction
+    ? requireEnv("APP_INSTANCE_KEY", errors)
+    : readEnv("APP_INSTANCE_KEY");
   const jwtSecret = requireSecret("JWT_SECRET", errors);
   const refreshSecret = requireSecret("JWT_REFRESH_SECRET", errors);
   const fileSecret = requireSecret("FILE_ACCESS_SECRET", errors);
@@ -455,6 +486,7 @@ function validateEnv() {
       "GRACEFUL_SHUTDOWN_DRAIN_MS",
       "GRACEFUL_SHUTDOWN_TIMEOUT_MS",
       "RATE_LIMIT_STORE",
+      "RATE_LIMIT_KEY_PREFIX",
       "API_RATE_LIMIT_WINDOW_MS",
       "API_RATE_LIMIT_MAX",
       "UPLOAD_RATE_LIMIT_WINDOW_MS",
@@ -484,6 +516,7 @@ function validateEnv() {
       "APP_CACHE_CONNECT_TIMEOUT_MS",
       "JOB_QUEUE_REDIS_CONNECT_TIMEOUT_MS",
       "SLIK_IMPORT_QUEUE_ENABLED",
+      "SLIK_IMPORT_QUEUE_NAME",
       "SLIK_IMPORT_LOCAL_FALLBACK_ENABLED",
       "SLIK_IMPORT_REQUIRE_WORKER",
       "WORKER_SHUTDOWN_TIMEOUT_MS",
@@ -541,6 +574,7 @@ function validateEnv() {
     requireEnv("RESEND_FROM_EMAIL", errors);
   }
 
+  validateOptionalInstanceKey("APP_INSTANCE_KEY", errors);
   validateOptionalPositiveInt("AUTH_RATE_LIMIT_WINDOW_MS", errors);
   validateOptionalPositiveInt("DOCUMENT_UPLOAD_MAX_TOTAL_SIZE_MB", errors);
   validateOptionalPositiveInt("AUTH_IP_RATE_LIMIT_MAX", errors);
@@ -558,6 +592,7 @@ function validateEnv() {
   validateOptionalPositiveInt("APP_CACHE_CONNECT_TIMEOUT_MS", errors);
   validateOptionalEnum("RATE_LIMIT_STORE", ["memory", "redis"], errors);
   validateOptionalSecret("RATE_LIMIT_KEY_SECRET", errors);
+  validateOptionalCachePrefix("RATE_LIMIT_KEY_PREFIX", errors);
   validateOptionalRedisUrl("RATE_LIMIT_REDIS_URL", errors);
   validateOptionalPositiveInt("RATE_LIMIT_REDIS_CONNECT_TIMEOUT_MS", errors);
   validateOptionalPositiveInt("API_RATE_LIMIT_WINDOW_MS", errors);
@@ -597,6 +632,7 @@ function validateEnv() {
   validateOptionalRedisUrl("REDIS_URL", errors);
   validateOptionalRedisUrl("JOB_QUEUE_REDIS_URL", errors);
   validateOptionalPositiveInt("JOB_QUEUE_REDIS_CONNECT_TIMEOUT_MS", errors);
+  validateOptionalQueueName("SLIK_IMPORT_QUEUE_NAME", errors);
   validateOptionalBoolean("SLIK_IMPORT_QUEUE_ENABLED", errors);
   validateOptionalBoolean("SLIK_IMPORT_LOCAL_FALLBACK_ENABLED", errors);
   validateOptionalBoolean("SLIK_IMPORT_REQUIRE_WORKER", errors);
@@ -694,6 +730,15 @@ function validateEnv() {
     ["api", "slik-import-worker", "watermark-worker"],
     errors,
   );
+
+  if (isProduction && /^[a-z0-9][a-z0-9_-]{1,63}$/.test(instanceKey)) {
+    [
+      "APP_CACHE_KEY_PREFIX",
+      "RATE_LIMIT_KEY_PREFIX",
+      "SLIK_IMPORT_QUEUE_NAME",
+      "WORKER_HEARTBEAT_KEY_PREFIX",
+    ].forEach((key) => validateInstanceScopedValue(key, instanceKey, errors));
+  }
 
   if (
     isEnabledBoolean(readEnv("APP_CACHE_ENABLED")) &&

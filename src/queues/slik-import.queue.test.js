@@ -6,6 +6,7 @@ const {
   disconnectTrackedRedisConnections,
   enqueueSlikImportJob,
   getRedisUrl,
+  getSlikImportQueueName,
   isSlikImportLocalFallbackEnabled,
   isSlikImportWorkerRequired,
   trackRedisConnection,
@@ -48,6 +49,20 @@ test("queue production tidak diam-diam memakai Redis localhost", () => {
       JOB_QUEUE_REDIS_URL: "redis://queue.internal:6379",
     }),
     "redis://queue.internal:6379",
+  );
+});
+
+test("nama queue SLIK dapat dipisahkan per instance dan menolak karakter Redis yang ambigu", () => {
+  assert.equal(
+    getSlikImportQueueName({
+      SLIK_IMPORT_QUEUE_NAME: "ruwang-arsip-arthamadani-slik-import",
+    }),
+    "ruwang-arsip-arthamadani-slik-import",
+  );
+  assert.equal(getSlikImportQueueName({}), "slik-import");
+  assert.throws(
+    () => getSlikImportQueueName({ SLIK_IMPORT_QUEUE_NAME: "tenant:queue" }),
+    /SLIK_IMPORT_QUEUE_NAME/,
   );
 });
 

@@ -16,7 +16,6 @@ const {
 
 const queueLogger = logger.child({ component: "slik_import_queue" });
 
-const SLIK_IMPORT_QUEUE_NAME = "slik-import";
 const SLIK_IMPORT_JOB_NAME = "process-slik-import";
 
 let queue;
@@ -32,6 +31,19 @@ function readPositiveIntEnv(key, fallback) {
   const value = Number(process.env[key]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
+
+function getSlikImportQueueName(env = process.env) {
+  const configured = String(env.SLIK_IMPORT_QUEUE_NAME || "").trim();
+  const queueName = configured || "slik-import";
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(queueName)) {
+    throw new Error(
+      "SLIK_IMPORT_QUEUE_NAME hanya boleh berisi huruf, angka, garis bawah, atau tanda hubung (maksimal 80 karakter).",
+    );
+  }
+  return queueName;
+}
+
+const SLIK_IMPORT_QUEUE_NAME = getSlikImportQueueName();
 
 function isSlikImportQueueEnabled() {
   return readBooleanEnv("SLIK_IMPORT_QUEUE_ENABLED", true);
@@ -305,6 +317,7 @@ module.exports = {
   closeSlikImportQueue,
   disconnectTrackedRedisConnections,
   getRedisUrl,
+  getSlikImportQueueName,
   isSlikImportLocalFallbackEnabled,
   isSlikImportQueueEnabled,
   isSlikImportWorkerRequired,
