@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "mail_delivery_media",
+  cacheNamespace: "parameter:mail-delivery-media",
   repository,
   label: "Media pengiriman surat",
   searchFields: ["code", "name", "description"],

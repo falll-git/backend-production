@@ -1,4 +1,6 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
+const { getRequestContext } = require("../../utils/request-context");
 const {
   buildActiveApprovedAccessWhere,
 } = require("../../utils/digital-archive-access");
@@ -114,7 +116,7 @@ function getDocumentInclude() {
 }
 
 function withTransaction(callback) {
-  return prisma.$transaction(callback);
+  return withDatabaseTransaction(callback);
 }
 
 function findMany({ where, skip, take }) {
@@ -315,10 +317,38 @@ function findPendingAccessConflict(documentId, client = prisma) {
   });
 }
 
-function createActivityLog(data, client = prisma) {
-  return client.digital_document_activity_logs.create({
+async function createActivityLog(data, client = prisma) {
+  const created = await client.digital_document_activity_logs.create({
     data,
   });
+
+  const context = getRequestContext();
+  await client.system_activity_logs.create({
+    data: {
+      actor_id: data.actor_id || null,
+      module: "ARSIP_DIGITAL",
+      action: data.action,
+      source: "MODULE_AUDIT",
+      entity_type: "DOKUMEN_DIGITAL",
+      entity_id: data.document_id,
+      object_label: data.reference_id || data.document_id,
+      title: data.description || `${data.action} dokumen digital`,
+      summary: data.description || null,
+      request_method: context.request_method || null,
+      request_path: context.request_path || null,
+      request_id: context.request_id || null,
+      metadata: {
+        reference_type: data.reference_type || null,
+        reference_id: data.reference_id || null,
+        from_storage_id: data.from_storage_id || null,
+        to_storage_id: data.to_storage_id || null,
+      },
+      user_agent: context.user_agent || null,
+      created_at: created.created_at,
+    },
+  });
+
+  return created;
 }
 
 function createDocumentFile(data, client = prisma) {

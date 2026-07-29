@@ -4,6 +4,9 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadDigitalArchiveFile,
 } = require("../../middlewares/digital-archive-upload.middleware");
 const {
@@ -43,6 +46,7 @@ router.post(
   "/",
   auth,
   authorize(DIGITAL_DOCUMENT_WRITE_URLS, "create"),
+  uploadRateLimit,
   uploadDigitalArchiveFile("file"),
   normalizePersuratanMultipartBody({
     jsonFields: ["related_user_ids", "debtor"],
@@ -62,6 +66,7 @@ router.put(
   "/:id",
   auth,
   authorize(DIGITAL_DOCUMENT_UPDATE_URLS, "update"),
+  uploadRateLimit,
   uploadDigitalArchiveFile("file"),
   normalizePersuratanMultipartBody({
     jsonFields: ["related_user_ids", "debtor"],

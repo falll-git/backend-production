@@ -3,6 +3,9 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
@@ -47,6 +50,7 @@ router.post(
   "/:kind",
   auth,
   authorizeKind("create"),
+  uploadRateLimit,
   ...uploadBody,
   validate(createMarketingActivitySchema),
   controller.create,
@@ -56,6 +60,7 @@ router.put(
   "/:kind/:id",
   auth,
   authorizeKind("update"),
+  uploadRateLimit,
   ...uploadBody,
   validate(updateMarketingActivitySchema),
   controller.update,

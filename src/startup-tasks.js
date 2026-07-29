@@ -1,34 +1,49 @@
-const STARTUP_TASKS = [
-  {
-    name: "watermark-job-recovery",
-    run: async () => {
-      const {
-        recoverPendingWatermarkJobs,
-      } = require("./modules/watermark-settings/watermarkProcessor.service");
+const STARTUP_TASKS_BY_ROLE = Object.freeze({
+  api: [],
+  "slik-import-worker": [
+    {
+      name: "debtor-import-job-recovery",
+      run: async () => {
+        const {
+          recoverPendingDebtorImportJobs,
+        } = require("./modules/debtor-imports/debtorImports.service");
 
-      await recoverPendingWatermarkJobs();
+        await recoverPendingDebtorImportJobs();
+      },
     },
-  },
-  {
-    name: "debtor-import-job-recovery",
-    run: async () => {
-      const {
-        recoverPendingDebtorImportJobs,
-      } = require("./modules/debtor-imports/debtorImports.service");
+  ],
+  "watermark-worker": [
+    {
+      name: "watermark-job-recovery",
+      run: async () => {
+        const {
+          recoverPendingWatermarkJobs,
+        } = require("./modules/watermark-settings/watermarkProcessor.service");
 
-      await recoverPendingDebtorImportJobs();
+        await recoverPendingWatermarkJobs();
+      },
     },
-  },
-];
+  ],
+});
 
-async function runStartupTasks({ logger = console } = {}) {
+function getStartupTasks(role) {
+  const tasks = STARTUP_TASKS_BY_ROLE[role];
+  if (!tasks) {
+    throw new Error(`Runtime role tidak dikenal: ${role || "(kosong)"}.`);
+  }
+  return tasks;
+}
+
+async function runStartupTasks({ role, logger = console } = {}) {
+  const tasks = getStartupTasks(role);
   const result = {
-    total: STARTUP_TASKS.length,
+    role,
+    total: tasks.length,
     completed: [],
     failed: [],
   };
 
-  for (const task of STARTUP_TASKS) {
+  for (const task of tasks) {
     try {
       await task.run();
       result.completed.push(task.name);
@@ -42,5 +57,6 @@ async function runStartupTasks({ logger = console } = {}) {
 }
 
 module.exports = {
+  getStartupTasks,
   runStartupTasks,
 };

@@ -19,13 +19,30 @@ function stripPrivateAuthFields(result) {
   return safeResult;
 }
 
+function readBearerAccessToken(req) {
+  const authorization = req.headers.authorization;
+  if (!authorization || !authorization.startsWith("Bearer ")) return null;
+
+  const token = authorization.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+function buildSessionContext(req) {
+  return {
+    ipAddress: String(req.ip || "").slice(0, 64) || null,
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 512) || null,
+  };
+}
+
 exports.login = async (req, res) => {
   try {
-    const result = await service.login(req.body);
-    setRefreshTokenCookie(res, result.refreshToken, {
-      expiresAt: result.refreshTokenExpiresAt,
-      remember: Boolean(req.body.remember),
-    });
+    const result = await service.login(req.body, buildSessionContext(req));
+    if (result.refreshToken) {
+      setRefreshTokenCookie(res, result.refreshToken, {
+        expiresAt: result.refreshTokenExpiresAt,
+        remember: Boolean(req.body.remember),
+      });
+    }
     successResponse(res, stripPrivateAuthFields(result));
   } catch (error) {
     res.status(resolveStatusCode(error, 400)).json({
@@ -39,7 +56,10 @@ exports.refresh = async (req, res) => {
   try {
     const body = req.body || {};
     const refreshToken = readRefreshTokenCookie(req);
-    const result = await service.refreshToken(refreshToken);
+    const result = await service.refreshToken(
+      refreshToken,
+      buildSessionContext(req),
+    );
     setRefreshTokenCookie(res, result.refreshToken, {
       expiresAt: result.refreshTokenExpiresAt,
       remember: Boolean(body.remember),
@@ -57,8 +77,12 @@ exports.refresh = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const refreshToken = readRefreshTokenCookie(req);
+    const accessToken = readBearerAccessToken(req);
     clearRefreshTokenCookie(res);
-    await service.logout(refreshToken);
+    const result = await service.logout({ refreshToken, accessToken });
+    if (!req.user && result.actor_id) {
+      req.user = { id: result.actor_id };
+    }
 
     res.json({
       status: true,

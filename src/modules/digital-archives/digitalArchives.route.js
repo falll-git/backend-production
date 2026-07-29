@@ -3,6 +3,9 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
+const {
+  reportRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
 const controller = require("./digitalArchives.controller");
 const validation = require("./digitalArchives.validation");
 
@@ -72,6 +75,7 @@ router.get(
   "/reports/summary",
   auth,
   authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getReportSummary,
 );
@@ -79,6 +83,7 @@ router.get(
   "/reports/documents",
   auth,
   authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getDocumentReport,
 );
@@ -86,6 +91,7 @@ router.get(
   "/reports/due-dates",
   auth,
   authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getDueDateReport,
 );
@@ -93,6 +99,7 @@ router.get(
   "/reports/access-requests",
   auth,
   authorize(DIGITAL_ARCHIVE_REPORT_URL, "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getAccessRequestReport,
 );
@@ -100,6 +107,7 @@ router.get(
   "/reports/loans",
   auth,
   authorize([LOAN_REPORT_URL, DIGITAL_ARCHIVE_REPORT_URL], "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getLoanReport,
 );

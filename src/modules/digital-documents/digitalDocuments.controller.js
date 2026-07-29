@@ -1,5 +1,6 @@
 const service = require("./digitalDocuments.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const { logErrorOnce } = require("../../system/error-observability");
 
 function sendError(res, error) {
   if (error?.statusCode || error?.status) {
@@ -10,7 +11,10 @@ function sendError(res, error) {
     });
   }
 
-  console.error("Digital document request failed:", error);
+  logErrorOnce(error, {
+    event: "digital_document_request_failed",
+    message: "Digital document request failed",
+  });
   return res.status(500).json({
     status: false,
     success: false,

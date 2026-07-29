@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 const USER_SELECT = {
   id: true,
@@ -69,6 +70,28 @@ const DEBTOR_INCLUDE = {
     },
     include: {
       document_files: true,
+    },
+  },
+};
+
+const COLLATERAL_INCLUDE = {
+  expiry_updater: {
+    select: USER_SELECT,
+  },
+  debtor: {
+    include: {
+      branch: true,
+      marketing_user: {
+        select: USER_SELECT,
+      },
+    },
+  },
+  contract: {
+    select: {
+      id: true,
+      debtor_id: true,
+      no_kontrak: true,
+      status: true,
     },
   },
 };
@@ -267,29 +290,56 @@ function findCollaterals({ where, skip, take, orderBy }) {
     skip,
     take,
     orderBy,
-    include: {
-      debtor: {
-        include: {
-          branch: true,
-          marketing_user: {
-            select: USER_SELECT,
-          },
+    include: COLLATERAL_INCLUDE,
+  });
+}
+
+function findCollateralsForExpiryImport(
+  collateralNumbers,
+  where = {},
+  db = prisma,
+) {
+  if (!Array.isArray(collateralNumbers) || collateralNumbers.length === 0) {
+    return Promise.resolve([]);
+  }
+
+  return db.debtor_collaterals.findMany({
+    where: {
+      AND: [
+        where,
+        {
+          OR: collateralNumbers.map((collateralNumber) => ({
+            collateral_number: {
+              equals: collateralNumber,
+              mode: "insensitive",
+            },
+          })),
         },
-      },
-      contract: {
-        select: {
-          id: true,
-          debtor_id: true,
-          no_kontrak: true,
-          status: true,
-        },
-      },
+      ],
     },
+    include: COLLATERAL_INCLUDE,
   });
 }
 
 function countCollaterals(where) {
   return prisma.debtor_collaterals.count({ where });
+}
+
+function findCollateralById(id, where = {}, db = prisma) {
+  return db.debtor_collaterals.findFirst({
+    where: {
+      id,
+      ...where,
+    },
+    include: COLLATERAL_INCLUDE,
+  });
+}
+
+function updateCollateral(id, data, db = prisma) {
+  return db.debtor_collaterals.update({
+    where: { id },
+    data,
+  });
 }
 
 function findById(id, where = {}, db = prisma) {
@@ -375,8 +425,8 @@ function update(id, data, db = prisma) {
   });
 }
 
-function transaction(callback) {
-  return prisma.$transaction(callback);
+function transaction(callback, options) {
+  return withDatabaseTransaction(callback, options);
 }
 
 function upsertIndividualProfile(debtorId, data, db = prisma) {
@@ -448,43 +498,6 @@ function findContractById(id) {
     where: {
       id,
       deleted_at: null,
-    },
-  });
-}
-
-function findIdebUploadById(id) {
-  return prisma.debtor_ideb_uploads.findFirst({
-    where: {
-      id,
-      deleted_at: null,
-    },
-    include: {
-      debtor: {
-        select: {
-          id: true,
-          debtor_number: true,
-          identity_number: true,
-          name: true,
-        },
-      },
-      contract: {
-        select: {
-          id: true,
-          debtor_id: true,
-          no_kontrak: true,
-          status: true,
-        },
-      },
-      uploader: {
-        select: {
-          id: true,
-          name: true,
-          username: true,
-          email: true,
-          division_id: true,
-          division: { select: { id: true, name: true } },
-        },
-      },
     },
   });
 }
@@ -866,6 +879,9 @@ async function findWorkflowData(debtorId, contractIds = []) {
       },
       orderBy: [{ period_month: "desc" }, { created_at: "desc" }],
       include: {
+        expiry_updater: {
+          select: USER_SELECT,
+        },
         contract: {
           select: {
             id: true,
@@ -878,6 +894,26 @@ async function findWorkflowData(debtorId, contractIds = []) {
     }),
   ]);
 
+  const marketingCreatorIds = Array.from(
+    new Set(marketing.map((item) => item.created_by).filter(Boolean)),
+  );
+  const marketingCreators =
+    marketingCreatorIds.length > 0
+      ? await prisma.users.findMany({
+          where: { id: { in: marketingCreatorIds } },
+          select: USER_SELECT,
+        })
+      : [];
+  const marketingCreatorById = new Map(
+    marketingCreators.map((user) => [user.id, user]),
+  );
+  const marketingWithCreators = marketing.map((item) => ({
+    ...item,
+    creator: item.created_by
+      ? marketingCreatorById.get(item.created_by) || null
+      : null,
+  }));
+
   return {
     claims,
     collaterals,
@@ -885,7 +921,7 @@ async function findWorkflowData(debtorId, contractIds = []) {
     ideb,
     insuranceProgress,
     kjppProgress,
-    marketing,
+    marketing: marketingWithCreators,
     timelines,
     notaryProgress,
     prints,
@@ -908,16 +944,18 @@ module.exports = {
   findActiveUserById,
   findBranchById,
   findById,
+  findCollateralById,
   findCollaterals,
+  findCollateralsForExpiryImport,
   findContractById,
   findDocumentChecklistById,
   findDocuments,
   findDocumentsByDebtorId,
-  findIdebUploadById,
   findListAggregates,
   findMany,
   transaction,
   update,
+  updateCollateral,
   upsertIndividualProfile,
   upsertLegalEntityProfile,
 };

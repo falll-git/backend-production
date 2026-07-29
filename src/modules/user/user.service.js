@@ -401,25 +401,6 @@ exports.getAssignableUsers = async ({ pagination, search }) => {
   };
 };
 
-exports.getUsersForRequest = async ({ pagination, search, status, requestUser }) => {
-  const user = await resolveRequestUser(requestUser);
-  if (!user) {
-    throw new AppError("Sesi pengguna tidak valid.", 401);
-  }
-
-  const canReadUserManagement = await roleHasPermission(
-    user.role_id,
-    USER_MENU_URL,
-    "read",
-  );
-
-  if (canReadUserManagement) {
-    return exports.getUsers({ pagination, search, status });
-  }
-
-  return exports.getAssignableUsers({ pagination, search });
-};
-
 exports.getUserById = async (id) => {
   const user = await repository.findById(id);
 

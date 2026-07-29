@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 const storageInclude = {
   cabinet: {
@@ -160,5 +161,5 @@ exports.deleteCabinet = (id, client) => {
 };
 
 exports.withTransaction = (callback) => {
-  return prisma.$transaction((tx) => callback(tx));
+  return withDatabaseTransaction((tx) => callback(tx));
 };

@@ -5,6 +5,9 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   normalizePersuratanMultipartBody,
   uploadPersuratanFile,
 } = require("../../middlewares/persuratan-upload.middleware");
@@ -20,6 +23,7 @@ router.post(
   "/",
   auth,
   authorize(OUTGOING_MAIL_MENU_URL, "create"),
+  uploadRateLimit,
   uploadPersuratanFile("file"),
   validate(createOutgoingMailSchema),
   controller.create,
@@ -29,6 +33,7 @@ router.put(
   "/:id",
   auth,
   authorize(OUTGOING_MAIL_MENU_URL, "update"),
+  uploadRateLimit,
   uploadPersuratanFile("file"),
   normalizePersuratanMultipartBody({
     numberFields: ["status"],

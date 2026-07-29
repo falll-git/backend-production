@@ -8,9 +8,9 @@ const {
 } = require("../../utils/pagination");
 const {
   normalizeUploadFiles,
-  persistDomainFiles,
   serializeFile,
   serializeFiles,
+  withDomainFileRollback,
 } = require("../../utils/domain-files");
 const {
   buildDebtorManageWhere,
@@ -118,6 +118,16 @@ function serialize(req, item) {
     timeline: item.timeline || null,
     related_activity: item.related_activity || null,
     created_by: item.created_by,
+    creator: item.creator
+      ? {
+          id: item.creator.id,
+          name: item.creator.name,
+          username: item.creator.username,
+          email: item.creator.email,
+          division_id: item.creator.division_id,
+          division_name: item.creator.division?.name || null,
+        }
+      : null,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -382,27 +392,30 @@ exports.create = async ({ req, kindSlug, payload, userId }) => {
   await ensureReferences(data);
   await ensureDebtorAccessible(data.debtor_id, userId);
   const timeline = await resolveTimeline({ kind, data, userId });
-  const fileMetas = persistDomainFiles({
-    entity: `debtor-marketing/${kind.toLowerCase()}`,
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: kind,
-  });
-  const primaryFile = fileMetas[0] || null;
+  let fileMetas = [];
+  const created = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: `debtor-marketing/${kind.toLowerCase()}`,
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: kind,
+    });
+    const primaryFile = fileMetas[0] || null;
 
-  const created = await repository.create({
-    ...data,
-    timeline_id: timeline.id,
-    timeline_group_id: timeline.group_key || timeline.id,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    activity_kind: kind,
-    created_by: userId || null,
+    return repository.create({
+      ...data,
+      timeline_id: timeline.id,
+      timeline_group_id: timeline.group_key || timeline.id,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      activity_kind: kind,
+      created_by: userId || null,
+    });
   });
   await syncTimelineState(timeline, kind, data, userId);
   await safeRecordDebtorActivity(undefined, {
@@ -455,27 +468,30 @@ exports.update = async ({ req, kindSlug, id, payload, userId }) => {
     userId,
     currentId: current.id,
   });
-  const fileMetas = persistDomainFiles({
-    entity: `debtor-marketing/${current.activity_kind.toLowerCase()}`,
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: current.activity_kind,
-  });
-  const primaryFile =
-    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
+  let fileMetas = [];
+  const updated = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: `debtor-marketing/${current.activity_kind.toLowerCase()}`,
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: current.activity_kind,
+    });
+    const primaryFile =
+      !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
 
-  const updated = await repository.update(id, {
-    ...data,
-    timeline_id: timeline.id,
-    timeline_group_id: timeline.group_key || timeline.id,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    updated_by: userId || null,
+    return repository.update(id, {
+      ...data,
+      timeline_id: timeline.id,
+      timeline_group_id: timeline.group_key || timeline.id,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      updated_by: userId || null,
+    });
   });
   await syncTimelineState(timeline, current.activity_kind, data, userId);
   await safeRecordDebtorActivity(undefined, {

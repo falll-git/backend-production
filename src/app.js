@@ -4,46 +4,29 @@ loadEnv();
 const express = require("express");
 const cors = require("cors");
 const requestId = require("./middlewares/request-id.middleware");
+const { requestContext } = require("./utils/request-context");
+const systemActivity = require("./middlewares/system-activity.middleware");
 const securityHeaders = require("./middlewares/security-headers.middleware");
 const serverErrorResponse = require("./middlewares/server-error-response.middleware");
-const authRoutes = require("./modules/auth/auth.route");
-const roleRoutes = require("./modules/role/role.route");
-const divisionRoutes = require("./modules/division/division.route");
-const letterPriorityRoutes = require("./modules/letter-priority/letterPriority.route");
-const documentTypeRoutes = require("./modules/document-type/documentType.route");
-const storageRoutes = require("./modules/storage/storage.route");
-const userRoutes = require("./modules/user/user.route");
-const incomingMails = require("./modules/incoming-mail/incomingMail.route");
-const menuRoutes = require("./modules/menus/menus.route");
-const roleMenuRoutes = require("./modules/role-menus/roleMenus.route");
-const digitalDocumentRoutes = require("./modules/digital-documents/digitalDocuments.route");
-const digitalDocumentAccessRequestRoutes = require("./modules/digital-document-access-requests/digitalDocumentAccessRequests.route");
-const digitalDocumentLoanRoutes = require("./modules/digital-document-loans/digitalDocumentLoans.route");
-const digitalArchiveRoutes = require("./modules/digital-archives/digitalArchives.route");
-const outgoingMailRoutes = require("./modules/outgoing-mails/outgoingMails.route");
-const memorandumRoutes = require("./modules/memorandum/memorandum.route");
-const correspondenceRoutes = require("./modules/correspondence/correspondence.route");
-const watermarkSettingsRoutes = require("./modules/watermark-settings/watermarkSettings.route");
-const storageUsageRoutes = require("./modules/storage-usage/storageUsage.route");
-const branchRoutes = require("./modules/branches/branches.route");
-const financingProductRoutes = require("./modules/financing-products/financingProducts.route");
-const contractTypeRoutes = require("./modules/contract-types/contractTypes.route");
-const thirdPartyRoutes = require("./modules/third-parties/thirdParties.route");
-const documentChecklistRoutes = require("./modules/document-checklists/documentChecklists.route");
-const depositTypeRoutes = require("./modules/deposit-types/depositTypes.route");
-const mailDeliveryMediaRoutes = require("./modules/mail-delivery-media/mailDeliveryMedia.route");
-const collateralTypeRoutes = require("./modules/collateral-types/collateralTypes.route");
-const legalProcessTypeRoutes = require("./modules/legal-process-types/legalProcessTypes.route");
-const debtorRoutes = require("./modules/debtors/debtors.route");
-const debtorContractRoutes = require("./modules/debtor-contracts/debtorContracts.route");
-const debtorImportRoutes = require("./modules/debtor-imports/debtorImports.route");
-const debtorIdebReportRoutes = require("./modules/debtor-ideb-reports/debtorIdebReports.route");
-const debtorMarketingRoutes = require("./modules/debtor-marketing/debtorMarketing.route");
-const debtorWarningLetterRoutes = require("./modules/debtor-warning-letters/debtorWarningLetters.route");
-const debtorReportRoutes = require("./modules/debtor-reports/debtorReports.route");
-const legalRoutes = require("./modules/legal/legal.route");
-const notificationRoutes = require("./modules/notifications/notifications.route");
+const requestLogging = require("./middlewares/request-logging.middleware");
+const telemetry = require("./middlewares/telemetry.middleware");
+const drainMiddleware = require("./middlewares/drain.middleware");
+const healthController = require("./system/health.controller");
+const { mountOpenApi } = require("./docs/openapi.route");
+const { createApiV1Router } = require("./routes/api-v1.router");
+const {
+  apiVersion,
+  legacyApi,
+} = require("./middlewares/api-version.middleware");
+const {
+  API_VERSION_PATH,
+  LEGACY_API_PATH,
+} = require("./utils/api-version");
 const secureFileAccess = require("./middlewares/secure-file-access.middleware");
+const {
+  downloadRateLimit,
+  fileAccessAttemptRateLimit,
+} = require("./middlewares/rate-limit.middleware");
 const { PUBLIC_PREFIX, STORAGE_ROOT } = require("./utils/persuratan-files");
 const {
   PUBLIC_PREFIX: DIGITAL_ARCHIVE_PUBLIC_PREFIX,
@@ -57,6 +40,7 @@ const {
   PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
   STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
 } = require("./utils/watermarked-files");
+const { logErrorOnce } = require("./system/error-observability");
 
 function parseCorsOrigins() {
   const raw = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || "";
@@ -73,10 +57,20 @@ function getBodyLimit(key, fallback) {
 
 const app = express();
 app.disable("x-powered-by");
-app.set("trust proxy", 1);
+const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS);
+app.set(
+  "trust proxy",
+  Number.isInteger(configuredProxyHops) && configuredProxyHops >= 0
+    ? configuredProxyHops
+    : 1,
+);
 app.use(securityHeaders);
 app.use(requestId);
+app.use(telemetry);
+app.use(requestContext);
+app.use(requestLogging);
 app.use(serverErrorResponse);
+app.use(drainMiddleware);
 
 const allowedCorsOrigins = parseCorsOrigins();
 app.use(
@@ -93,6 +87,7 @@ app.use(
             return callback(error);
           },
           credentials: true,
+          exposedHeaders: ["X-Request-Id"],
         }
       : undefined,
   ),
@@ -104,6 +99,7 @@ app.use(
     limit: getBodyLimit("URLENCODED_BODY_LIMIT", "1mb"),
   }),
 );
+app.use(systemActivity);
 
 const staticStorageMounts = [
   {
@@ -142,76 +138,32 @@ for (const mount of staticStorageMounts) {
       : {}),
   });
   const middlewares = mount.secure
-    ? [secureFileAccess(mount.publicPrefix), staticMiddleware]
+    ? [
+        fileAccessAttemptRateLimit,
+        secureFileAccess(mount.publicPrefix),
+        downloadRateLimit,
+        staticMiddleware,
+      ]
     : [staticMiddleware];
 
   app.use(mount.publicPrefix, ...middlewares);
 }
 
-app.get("/api/", function (req, res) {
-  res.json({
-    status: true,
-    message: "Ruang Arsip API aktif.",
-    data: {
-      service: "Ruang Arsip API",
-      version: 1,
-    },
-  });
-});
-function healthCheck(req, res) {
-  res.json({
-    status: true,
-    message: "OK",
-    uptime: process.uptime(),
-  });
-}
+app.get("/health", healthController.liveness);
+app.get("/ready", healthController.readiness);
 
-app.get("/health", healthCheck);
-app.get("/api/health", healthCheck);
-app.use("/api/auth", authRoutes);
-app.use("/api/roles", roleRoutes);
-app.use("/api/divisions", divisionRoutes);
-app.use("/api/letter-priorities", letterPriorityRoutes);
-app.use("/api/document-types", documentTypeRoutes);
-app.use("/api/storages", storageRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/incoming-mails", incomingMails);
-app.use("/api/menus", menuRoutes);
-app.use("/api/role-menus", roleMenuRoutes);
-app.use("/api/digital-documents", digitalDocumentRoutes);
-app.use(
-  "/api/digital-document-access-requests",
-  digitalDocumentAccessRequestRoutes,
-);
-app.use("/api/digital-document-loans", digitalDocumentLoanRoutes);
-app.use("/api/digital-archives", digitalArchiveRoutes);
-app.use("/api/outgoing-mails", outgoingMailRoutes);
-app.use("/api/memorandums", memorandumRoutes);
-app.use("/api/correspondence", correspondenceRoutes);
-app.use("/api/watermark-settings", watermarkSettingsRoutes);
-app.use("/api/storage-usage", storageUsageRoutes);
-app.use("/api/branches", branchRoutes);
-app.use("/api/financing-products", financingProductRoutes);
-app.use("/api/contract-types", contractTypeRoutes);
-app.use("/api/third-parties", thirdPartyRoutes);
-app.use("/api/document-checklists", documentChecklistRoutes);
-app.use("/api/deposit-types", depositTypeRoutes);
-app.use("/api/mail-delivery-media", mailDeliveryMediaRoutes);
-app.use("/api/collateral-types", collateralTypeRoutes);
-app.use("/api/legal-process-types", legalProcessTypeRoutes);
-app.use("/api/debtors", debtorRoutes);
-app.use("/api/debtor-contracts", debtorContractRoutes);
-app.use("/api/debtor-imports", debtorImportRoutes);
-app.use("/api/debtor-ideb-reports", debtorIdebReportRoutes);
-app.use("/api/debtor-marketing", debtorMarketingRoutes);
-app.use("/api/debtor-warning-letters", debtorWarningLetterRoutes);
-app.use("/api/debtor-reports", debtorReportRoutes);
-app.use("/api/legal", legalRoutes);
-app.use("/api/notifications", notificationRoutes);
+app.use(API_VERSION_PATH, apiVersion);
+mountOpenApi(app);
+
+const apiV1Router = createApiV1Router();
+app.use(API_VERSION_PATH, apiV1Router);
+app.use(LEGACY_API_PATH, legacyApi, apiVersion, apiV1Router);
 
 app.use((req, res) => {
   res.status(404).json({
     status: false,
+    success: false,
+    request_id: req.requestId || null,
     message: "Route not found",
   });
 });
@@ -219,22 +171,31 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || err.status || 500;
   const requestId = req.requestId || null;
+  const isMalformedJson =
+    statusCode === 400 && err && err.type === "entity.parse.failed";
 
   if (statusCode >= 500) {
-    console.error("Unhandled request error:", {
-      requestId,
-      method: req.method,
-      path: req.originalUrl,
-      error: err,
+    logErrorOnce(err, {
+      event: "http_request_error",
+      message: "Unhandled HTTP request error",
+      fields: {
+        request_id: requestId,
+        request_method: req.method,
+        request_path: String(req.originalUrl || req.url || "").split("?")[0],
+        response_status: statusCode,
+      },
     });
   }
 
   res.status(statusCode).json({
     status: false,
+    success: false,
     request_id: requestId,
-    message: statusCode >= 500
-      ? "Internal server error"
-      : err.message || "Internal server error",
+    message: isMalformedJson
+      ? "Payload JSON tidak valid."
+      : statusCode >= 500
+        ? "Internal server error"
+        : err.message || "Internal server error",
   });
 });
 

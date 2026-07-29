@@ -47,7 +47,7 @@ function getCookieOptions({ expiresAt, remember } = {}) {
     httpOnly: true,
     secure,
     sameSite,
-    path: "/api/auth",
+    path: "/api",
   };
   const domain = (process.env.AUTH_COOKIE_DOMAIN || "").trim();
 
@@ -67,11 +67,21 @@ function getCookieOptions({ expiresAt, remember } = {}) {
 
 function setRefreshTokenCookie(res, token, options = {}) {
   if (!token) return;
+  if (typeof res.clearCookie === "function") {
+    res.clearCookie(getRefreshTokenCookieName(), {
+      ...getCookieOptions(),
+      path: "/api/auth",
+    });
+  }
   res.cookie(getRefreshTokenCookieName(), token, getCookieOptions(options));
 }
 
 function clearRefreshTokenCookie(res) {
   res.clearCookie(getRefreshTokenCookieName(), getCookieOptions());
+  res.clearCookie(getRefreshTokenCookieName(), {
+    ...getCookieOptions(),
+    path: "/api/auth",
+  });
 }
 
 module.exports = {

@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "legal_process_types",
+  cacheNamespace: "parameter:legal-process-types",
   repository,
   label: "Jenis proses legal",
   searchFields: ["code", "name", "category", "description"],

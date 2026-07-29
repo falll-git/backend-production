@@ -59,6 +59,7 @@ const FEATURE_LABELS = {
 const MENU_CAPABILITIES = {
   "/dashboard": READ_ONLY,
   "/dashboard/storage-usage": READ_ONLY,
+  "/dashboard/account/security": READ_ONLY,
 
   "/dashboard/arsip-digital/input-dokumen": READ_CREATE,
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan": READ_ONLY,
@@ -105,6 +106,8 @@ const MENU_CAPABILITIES = {
   "/dashboard/legal/laporan/pihak-ketiga/dokumen": READ_ONLY,
   "/dashboard/legal/laporan/pihak-ketiga/dana-titipan": READ_ONLY,
   "/dashboard/legal/laporan": READ_ONLY,
+
+  "/dashboard/activity-centre": READ_ONLY,
 
   "/dashboard/users": CRUD,
   "/dashboard/parameter/role": CRUD,

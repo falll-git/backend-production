@@ -141,6 +141,16 @@ function deleteStoredFile(storedPath) {
   } catch {}
 }
 
+function deleteReplacedStoredFile(previousPath, nextPath) {
+  if (
+    previousPath &&
+    previousPath !== nextPath &&
+    previousPath.startsWith(`${PUBLIC_PREFIX}/`)
+  ) {
+    deleteStoredFile(previousPath);
+  }
+}
+
 function getStoredFileSizeBytes(storedPath) {
   const resolvedPath = resolveStoredFilePath(storedPath);
   if (!resolvedPath || !fs.existsSync(resolvedPath)) return null;
@@ -378,14 +388,6 @@ function persistDigitalArchiveFile({
     fallbackBaseName,
   });
 
-  if (
-    previousPath &&
-    previousPath !== stored.storedPath &&
-    previousPath.startsWith(PUBLIC_PREFIX)
-  ) {
-    deleteStoredFile(previousPath);
-  }
-
   return {
     ...stored,
     isNewUpload: true,
@@ -397,6 +399,7 @@ module.exports = {
   STORAGE_ROOT,
   PUBLIC_PREFIX,
   buildFileUrl,
+  deleteReplacedStoredFile,
   deleteStoredFile,
   deriveDocumentFileName,
   getStoredFileSizeBytes,

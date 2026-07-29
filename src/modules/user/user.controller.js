@@ -15,11 +15,10 @@ exports.getAll = async (req, res) => {
     const search = req.query.search || "";
     const status = req.query.status || "active";
 
-    const result = await service.getUsersForRequest({
+    const result = await service.getUsers({
       pagination,
       search,
       status,
-      requestUser: req.user,
     });
     paginatedResponse(res, result.data, result.meta);
   } catch (error) {
@@ -84,6 +83,21 @@ exports.delete = async (req, res) => {
     successResponse(res, null, "Pengguna berhasil dihapus.");
   } catch (error) {
     return res.status(resolveStatusCode(error, 500)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.getAssignable = async (req, res) => {
+  try {
+    const pagination = resolvePagination(req.query, PAGINATION_PROFILES.SETUP);
+    const search = req.query.search || "";
+    const result = await service.getAssignableUsers({ pagination, search });
+
+    paginatedResponse(res, result.data, result.meta);
+  } catch (error) {
+    res.status(resolveStatusCode(error, 400)).json({
       status: false,
       message: error.message,
     });

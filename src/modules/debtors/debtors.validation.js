@@ -134,3 +134,13 @@ exports.createDebtorDocumentSchema = Joi.object({
   file: fileSchema.optional(),
   files: filesSchema.optional(),
 }).or("file", "files");
+
+exports.updateCollateralExpirySchema = Joi.object({
+  has_expiry_date: Joi.boolean().required(),
+  expiry_date: Joi.when("has_expiry_date", {
+    is: true,
+    then: Joi.date().iso().required(),
+    otherwise: Joi.valid(null).required(),
+  }),
+  expiry_note: Joi.string().trim().max(1000).allow("", null).optional(),
+});

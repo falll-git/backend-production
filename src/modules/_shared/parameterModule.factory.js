@@ -11,6 +11,7 @@ const {
   resolvePagination,
 } = require("../../utils/pagination");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const { getApplicationCache } = require("../../system/application-cache");
 
 function normalizeText(value) {
   if (value === undefined) return undefined;
@@ -154,6 +155,22 @@ function createParameterService(config) {
     "updated_at",
   ];
   const filterFields = config.filterFields || ["is_active"];
+  const cacheNamespace = config.cacheNamespace || null;
+  const applicationCache = cacheNamespace
+    ? config.applicationCache || getApplicationCache()
+    : null;
+
+  async function invalidateCache() {
+    if (applicationCache && cacheNamespace) {
+      await applicationCache.invalidate(cacheNamespace);
+    }
+  }
+
+  async function findExisting(id) {
+    const data = await repository.findById(id);
+    if (!data) throw new AppError(`${label} tidak ditemukan.`, 404);
+    return data;
+  }
 
   return {
     async getAll(query = {}) {
@@ -165,60 +182,94 @@ function createParameterService(config) {
       ].filter((item) => item && Object.keys(item).length > 0);
       const where = clauses.length ? { AND: clauses } : {};
       const orderBy = buildOrderBy(query, sortableFields, config.defaultSort);
-      const [data, total] = await Promise.all([
-        repository.findMany({
-          where,
-          skip: pagination.skip,
-          take: pagination.take,
-          orderBy,
-        }),
-        repository.count(where),
-      ]);
+      const loader = async () => {
+        const [data, total] = await Promise.all([
+          repository.findMany({
+            where,
+            skip: pagination.skip,
+            take: pagination.take,
+            orderBy,
+          }),
+          repository.count(where),
+        ]);
 
-      return {
-        data,
-        meta: buildPaginationMeta(total, pagination),
+        return {
+          data,
+          meta: buildPaginationMeta(total, pagination),
+        };
       };
+
+      const cacheable =
+        applicationCache &&
+        cacheNamespace &&
+        pagination.page === 1 &&
+        !normalizeText(query.search);
+      if (!cacheable) return loader();
+
+      return applicationCache.getOrLoad({
+        namespace: cacheNamespace,
+        parts: {
+          type: "list",
+          where,
+          orderBy,
+          limit: pagination.limit,
+        },
+        loader,
+      });
     },
 
     async getById(id) {
-      const data = await repository.findById(id);
-      if (!data) throw new AppError(`${label} tidak ditemukan.`, 404);
-      return data;
+      const loader = async () => {
+        return findExisting(id);
+      };
+      if (!applicationCache || !cacheNamespace) return loader();
+      return applicationCache.getOrLoad({
+        namespace: cacheNamespace,
+        parts: { type: "detail", id },
+        loader,
+      });
     },
 
     async create(payload, userId) {
       try {
-        return await repository.create({
+        const created = await repository.create({
           ...normalizePayload(payload, config),
           created_by: userId || null,
         });
+        await invalidateCache();
+        return created;
       } catch (error) {
         handlePrismaWriteError(error, label);
       }
     },
 
     async update(id, payload, userId) {
-      await this.getById(id);
+      // Jalur write selalu memeriksa PostgreSQL, bukan hasil cache yang mungkin
+      // masih hidup ketika invalidasi Redis sebelumnya sempat gagal.
+      await findExisting(id);
 
       try {
-        return await repository.update(id, {
+        const updated = await repository.update(id, {
           ...normalizePayload(payload, config),
           updated_by: userId || null,
         });
+        await invalidateCache();
+        return updated;
       } catch (error) {
         handlePrismaWriteError(error, label);
       }
     },
 
     async delete(id, userId) {
-      await this.getById(id);
+      await findExisting(id);
 
-      return repository.update(id, {
+      const deleted = await repository.update(id, {
         is_active: false,
         deleted_at: new Date(),
         deleted_by: userId || null,
       });
+      await invalidateCache();
+      return deleted;
     },
   };
 }

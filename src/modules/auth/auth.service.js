@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const {
   generateAccessToken,
   generateRefreshToken,
+  verifyAccessToken,
   verifyRefreshToken,
 } = require("../../utils/jwt");
 const { hashPassword, comparePassword } = require("../../utils/bcrypt");
@@ -148,7 +149,13 @@ function getRefreshTokenExpiryDate(refreshToken) {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 }
 
-async function issueRefreshToken(user, oldRefreshTokenId = null) {
+async function issueRefreshToken(
+  user,
+  {
+    oldRefreshTokenId = null,
+    sessionContext = {},
+  } = {},
+) {
   const refreshTokenId = crypto.randomUUID();
   const refreshToken = generateRefreshToken({
     ...buildJwtPayload(user),
@@ -164,6 +171,8 @@ async function issueRefreshToken(user, oldRefreshTokenId = null) {
       userId: user.id,
       refreshTokenHash: hashToken(refreshToken),
       expiresAt,
+      ipAddress: sessionContext.ipAddress || null,
+      userAgent: sessionContext.userAgent || null,
       now,
     });
 
@@ -173,6 +182,34 @@ async function issueRefreshToken(user, oldRefreshTokenId = null) {
     sessionId,
     user: updatedUser,
   };
+}
+
+async function completeAuthentication(
+  user,
+  {
+    oldRefreshTokenId = null,
+    sessionContext = {},
+  } = {},
+) {
+  const refresh = await issueRefreshToken(user, {
+    oldRefreshTokenId,
+    sessionContext,
+  });
+  const token = generateAccessToken(buildJwtPayload(refresh.user, refresh.sessionId));
+
+  return {
+    data: buildAuthUserPayload(refresh.user),
+    token,
+    refreshToken: refresh.refreshToken,
+    refreshTokenExpiresAt: refresh.expiresAt,
+  };
+}
+
+async function assertCurrentPassword(user, password) {
+  const match = await comparePassword(password, user.password);
+  if (!match) {
+    throw new AppError("Password saat ini tidak sesuai.", 400);
+  }
 }
 
 async function sendResetPasswordEmail(user, resetPassword) {
@@ -195,7 +232,7 @@ async function sendResetPasswordEmail(user, resetPassword) {
   });
 }
 
-exports.login = async (payload) => {
+exports.login = async (payload, sessionContext = {}) => {
   const user = await repository.findByUsername(
     normalizeUsername(payload.username),
   );
@@ -204,20 +241,10 @@ exports.login = async (payload) => {
   const match = await comparePassword(payload.password, user.password);
   if (!match) throw new AppError("Username atau password tidak sesuai.", 401);
 
-  const refresh = await issueRefreshToken(user);
-  const token = generateAccessToken(
-    buildJwtPayload(refresh.user, refresh.sessionId),
-  );
-
-  return {
-    data: buildAuthUserPayload(refresh.user),
-    token,
-    refreshToken: refresh.refreshToken,
-    refreshTokenExpiresAt: refresh.expiresAt,
-  };
+  return completeAuthentication(user, { sessionContext });
 };
 
-exports.refreshToken = async (token) => {
+exports.refreshToken = async (token, sessionContext = {}) => {
   if (!token) {
     throw new AppError("Sesi login wajib disertakan.", 422);
   }
@@ -249,10 +276,11 @@ exports.refreshToken = async (token) => {
 
   ensureUserCanAuthenticate(user);
 
-  const refresh = await issueRefreshToken(user, oldRefreshTokenId);
-  const newAccessToken = generateAccessToken(
-    buildJwtPayload(refresh.user, refresh.sessionId),
-  );
+  const refresh = await issueRefreshToken(user, {
+    oldRefreshTokenId,
+    sessionContext,
+  });
+  const newAccessToken = generateAccessToken(buildJwtPayload(refresh.user, refresh.sessionId));
 
   return {
     token: newAccessToken,
@@ -270,23 +298,23 @@ exports.changePassword = async (userId, payload) => {
     throw new AppError("Pengguna tidak ditemukan.", 404);
   }
 
-  const match = await comparePassword(oldPassword, user.password);
+  await assertCurrentPassword(user, oldPassword);
 
-  if (!match) {
-    throw new AppError("Password saat ini tidak sesuai.", 400);
+  const reusesCurrentPassword = await comparePassword(newPassword, user.password);
+  if (reusesCurrentPassword) {
+    throw new AppError("Password baru tidak boleh sama dengan password saat ini.", 422);
   }
 
   const hashed = await hashPassword(newPassword);
   const now = new Date();
 
-  await repository.update(userId, {
+  await repository.changePasswordAndRevokeSessions({
+    userId,
     password: hashed,
-    password_set_at: now,
-    email_verified_at: user.email_verified_at || now,
-    onboarding_status: "ACTIVE",
-    activated_at: user.activated_at || now,
+    now,
+    emailVerifiedAt: user.email_verified_at || now,
+    activatedAt: user.activated_at || now,
   });
-  await repository.revokeActiveRefreshTokensByUserId(userId, now);
 
   return true;
 };
@@ -397,6 +425,13 @@ exports.resetPassword = async ({ token, password }) => {
     throw new AppError("Tautan reset password tidak valid atau sudah kedaluwarsa.", 400);
   }
 
+  if (await comparePassword(password, actionToken.user.password)) {
+    throw new AppError(
+      "Password baru tidak boleh sama dengan password saat ini.",
+      422,
+    );
+  }
+
   const now = new Date();
   const hashedPassword = await hashPassword(password);
   const user = await repository.completePasswordReset({
@@ -412,13 +447,34 @@ exports.resetPassword = async ({ token, password }) => {
   };
 };
 
-exports.logout = async (refreshToken) => {
-  if (!refreshToken) {
-    return true;
+exports.logout = async ({ refreshToken = null, accessToken = null } = {}) => {
+  const now = new Date();
+  let actorId = null;
+
+  if (refreshToken) {
+    const refreshTokenHash = hashToken(refreshToken);
+    const session = await repository.findActiveRefreshTokenIdentityByHash(
+      refreshTokenHash,
+    );
+    actorId = session?.user_id || null;
+    await repository.revokeActiveRefreshTokenByHash(refreshTokenHash, now);
   }
 
-  const now = new Date();
-  await repository.revokeActiveRefreshTokenByHash(hashToken(refreshToken), now);
+  if (accessToken) {
+    try {
+      const decoded = verifyAccessToken(accessToken);
+      if (decoded.session_id && decoded.id) {
+        actorId = decoded.id;
+        await repository.revokeActiveRefreshTokenByIdAndUserId(
+          decoded.session_id,
+          decoded.id,
+          now,
+        );
+      }
+    } catch {
+      // Logout tetap idempoten saat access token sudah tidak valid/kedaluwarsa.
+    }
+  }
 
-  return true;
+  return { actor_id: actorId };
 };

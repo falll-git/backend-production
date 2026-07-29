@@ -2,20 +2,44 @@
   "name": "be-ruwang-arsip",
   "version": "1.0.0",
   "main": "src/server.js",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "start": "node src/server.js",
     "worker:slik-import": "node src/workers/slik-import.worker.js",
+    "worker:watermark": "node src/workers/watermark.worker.js",
     "dev": "nodemon src/server.js",
     "build": "node scripts/check-js-syntax.js",
+    "test": "node --test",
+    "test:integration": "node scripts/run-api-integration-tests.js",
+    "test:fullstack": "playwright test --config=playwright.fullstack.config.js",
+    "test:load-smoke": "node scripts/run-performance.js --profile=smoke",
+    "performance:baseline": "node scripts/run-performance.js --profile=baseline",
+    "audit:dependencies": "npm audit --audit-level=high",
+    "ci:verify-workflow": "node scripts/verify-ci-workflow.mjs",
+    "quality": "npm run ci:verify-workflow && npm run release:contract && npm run build && npm test && npm run test:integration && npm run database:rls-verify && npm run audit:dependencies",
+    "quality:fullstack": "npm run quality && npm run test:fullstack",
+    "quality:release": "node scripts/release-quality-gate.js",
     "test:ideb-report": "node --test src/utils/ideb-report.test.js",
     "test:slik-reference": "node --test src/utils/slik-reference-dictionary.test.js",
     "check:slik-reference-coverage": "node scripts/check-slik-reference-coverage.js",
+    "storage:reconcile": "node scripts/reconcile-storage.js",
+    "storage:cleanup-temp": "node scripts/cleanup-temporary-files.js",
+    "database:report": "node scripts/database-maintenance-report.js",
+    "database:security-report": "node scripts/database-security-report.js",
+    "database:rls-verify": "node scripts/verify-rls-isolation.js",
+    "retention:report": "node scripts/retention-report.js",
+    "release:contract": "node scripts/verify-release-contract.js",
+    "release:preflight": "node scripts/production-preflight.js",
+    "release:verify": "node scripts/verify-production-release.js",
     "prisma:generate": "prisma generate",
     "migrate:status": "prisma migrate status",
     "migrate:deploy": "prisma migrate deploy",
     "apply:server": "prisma migrate deploy && node prisma/seed-system.js",
     "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
     "seed:system": "node prisma/seed-system.js",
+    "seed:ci-test-data": "node scripts/seed-ci-test-data.js",
     "seed": "prisma db seed"
   },
   "keywords": [],
@@ -23,8 +47,13 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@prisma/adapter-pg": "7.6.0",
-    "@prisma/client": "7.6.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
+    "@prisma/adapter-pg": "7.9.0",
+    "@prisma/client": "7.9.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.77.6",
     "cors": "^2.8.6",
@@ -33,20 +62,31 @@
     "express": "^5.2.1",
     "ioredis": "^5.11.0",
     "joi": "18.2.1",
+    "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pdf-lib": "^1.17.1",
     "pg": "8.18.0",
-    "prisma": "7.6.0",
+    "pino": "^10.3.1",
+    "prisma": "7.9.0",
     "resend": "^6.12.3",
-    "sharp": "^0.34.5"
+    "sharp": "0.35.3",
+    "swagger-ui-express": "^5.0.1"
   },
   "overrides": {
-    "@hono/node-server": "1.19.13",
-    "hono": "4.12.25",
+    "@prisma/dev": {
+      "valibot": "1.4.2"
+    },
+    "exceljs": {
+      "archiver": "8.0.0",
+      "unzipper": "0.12.5"
+    },
+    "find-my-way": "9.7.0",
     "uuid": "11.1.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "@playwright/test": "^1.61.1",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.1.4"
   }
 }

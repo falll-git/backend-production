@@ -42,6 +42,9 @@ const {
 const MEMORANDUM_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-memorandum";
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
+const { logger } = require("../../system/logger");
+
+const memorandumLogger = logger.child({ component: "memorandum" });
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 
@@ -52,7 +55,15 @@ async function queueMemorandumWatermark(entityId) {
       entityId,
     });
   } catch (error) {
-    console.error("Failed to queue memorandum watermark:", error);
+    memorandumLogger.error(
+      {
+        event: "watermark_enqueue_failed",
+        watermark_module: "memorandum",
+        entity_id: entityId,
+        err: error,
+      },
+      "Failed to queue memorandum watermark",
+    );
   }
 }
 

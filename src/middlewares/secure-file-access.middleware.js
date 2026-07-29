@@ -1,5 +1,8 @@
 const prisma = require("../config/prisma");
 const {
+  runWithDatabaseUserContext,
+} = require("../config/database-context");
+const {
   canScopeAccessDocument,
   getDigitalArchiveAccessScope,
 } = require("../utils/digital-archive-access");
@@ -951,9 +954,18 @@ function secureFileAccess(publicPrefix) {
 
     let allowed = false;
     try {
-      allowed = await canAccessFile(payload);
+      allowed = await runWithDatabaseUserContext(payload.user_id, () =>
+        canAccessFile(payload),
+      );
     } catch (error) {
-      console.error("Secure file access validation failed:", error);
+      logErrorOnce(error, {
+        event: "secure_file_access_validation_failed",
+        message: "Secure file access validation failed",
+        fields: {
+          file_module: payload.module || null,
+          entity_id: payload.entity_id || null,
+        },
+      });
       return res.status(500).json({
         status: false,
         message: "Gagal memvalidasi akses file.",
@@ -968,10 +980,19 @@ function secureFileAccess(publicPrefix) {
     }
 
     try {
-      const meta = await getFileResponseMeta(payload);
+      const meta = await runWithDatabaseUserContext(payload.user_id, () =>
+        getFileResponseMeta(payload),
+      );
       applySecureFileHeaders(res, payload, meta);
     } catch (error) {
-      console.error("Secure file metadata lookup failed:", error);
+      logErrorOnce(error, {
+        event: "secure_file_metadata_lookup_failed",
+        message: "Secure file metadata lookup failed",
+        fields: {
+          file_module: payload.module || null,
+          entity_id: payload.entity_id || null,
+        },
+      });
       applySecureFileHeaders(res, payload, null);
     }
 
@@ -982,3 +1003,4 @@ function secureFileAccess(publicPrefix) {
 }
 
 module.exports = secureFileAccess;
+const { logErrorOnce } = require("../system/error-observability");

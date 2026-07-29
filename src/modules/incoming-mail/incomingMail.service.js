@@ -42,6 +42,9 @@ const {
 const INCOMING_MAIL_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-surat-masuk";
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
+const { logger } = require("../../system/logger");
+
+const incomingMailLogger = logger.child({ component: "incoming_mail" });
 
 const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 
@@ -52,7 +55,15 @@ async function queueIncomingMailWatermark(entityId) {
       entityId,
     });
   } catch (error) {
-    console.error("Failed to queue incoming mail watermark:", error);
+    incomingMailLogger.error(
+      {
+        event: "watermark_enqueue_failed",
+        watermark_module: "incoming_mail",
+        entity_id: entityId,
+        err: error,
+      },
+      "Failed to queue incoming mail watermark",
+    );
   }
 }
 

@@ -31,9 +31,11 @@ const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
+const { logger } = require("../../system/logger");
 
 const OUTGOING_MAIL_MENU_URL =
   "/dashboard/manajemen-surat/kelola-surat/input-surat-keluar";
+const outgoingMailLogger = logger.child({ component: "outgoing_mail" });
 
 async function buildDeliveryMediaNameMap(codes) {
   const uniqueCodes = [...new Set((codes || []).filter(Boolean))];
@@ -94,7 +96,15 @@ async function queueOutgoingMailWatermark(entityId) {
       entityId,
     });
   } catch (error) {
-    console.error("Failed to queue outgoing mail watermark:", error);
+    outgoingMailLogger.error(
+      {
+        event: "watermark_enqueue_failed",
+        watermark_module: "outgoing_mail",
+        entity_id: entityId,
+        err: error,
+      },
+      "Failed to queue outgoing mail watermark",
+    );
   }
 }
 

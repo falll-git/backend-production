@@ -1,0 +1,195 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-quality:
+    name: Full quality gate (backend change)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: ruwang_arsip_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ruwang_arsip_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CI: "true"
+      NODE_ENV: development
+      HOST: 127.0.0.1
+      PORT: "7111"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ruwang_arsip_ci?schema=public
+      DATABASE_SYSTEM_URL: postgresql://postgres:postgres@postgres:5432/ruwang_arsip_ci?schema=public
+      MIGRATION_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ruwang_arsip_ci?schema=public
+      DB_REQUIRE_LEAST_PRIVILEGE: "false"
+      DB_REQUIRE_RLS: "false"
+      DB_POOL_MIN: "0"
+      DB_POOL_MAX: "10"
+      DB_SYSTEM_POOL_MAX: "3"
+      DB_CONNECTION_TIMEOUT_MS: "5000"
+      DB_POOL_IDLE_TIMEOUT_MS: "30000"
+      DB_STATEMENT_TIMEOUT_MS: "30000"
+      DB_QUERY_TIMEOUT_MS: "35000"
+      DB_LOCK_TIMEOUT_MS: "5000"
+      DB_IDLE_TRANSACTION_TIMEOUT_MS: "30000"
+      JWT_EXPIRES_IN: 1d
+      JWT_REFRESH_EXPIRES_IN: 7d
+      BCRYPT_ROUNDS: "10"
+      FILE_ACCESS_TOKEN_EXPIRES_IN: 15m
+      AUTH_REFRESH_COOKIE_NAME: ruang_arsip_ci_refresh_token
+      AUTH_COOKIE_SAME_SITE: lax
+      FRONTEND_URL: http://127.0.0.1:3100
+      CORS_ORIGIN: http://127.0.0.1:3100
+      PUBLIC_BASE_URL: http://127.0.0.1:3100
+      API_BASE_URL: http://127.0.0.1:7111/api/v1
+      API_DOCS_ENABLED: "false"
+      LOG_LEVEL: warn
+      HTTP_ACCESS_LOG_ENABLED: "false"
+      OTEL_ENABLED: "false"
+      UPLOAD_DIR: ${{ github.workspace }}/.ci-storage/uploads
+      UPLOAD_TEMP_DIR: ${{ github.workspace }}/.ci-storage/tmp/uploads
+      STORAGE_MIN_FREE_BYTES: "0"
+      STORAGE_MIN_FREE_PERCENT: "0"
+      STORAGE_MIN_FREE_INODES: "0"
+      RATE_LIMIT_STORE: memory
+      API_RATE_LIMIT_WINDOW_MS: "60000"
+      API_RATE_LIMIT_MAX: "5000"
+      AUTH_RATE_LIMIT_WINDOW_MS: "60000"
+      AUTH_IP_RATE_LIMIT_MAX: "5000"
+      AUTH_RATE_LIMIT_MAX: "1000"
+      AUTH_REFRESH_RATE_LIMIT_MAX: "5000"
+      APP_CACHE_ENABLED: "false"
+      SLIK_IMPORT_QUEUE_ENABLED: "false"
+      SLIK_IMPORT_LOCAL_FALLBACK_ENABLED: "true"
+      SLIK_IMPORT_REQUIRE_WORKER: "false"
+      WATERMARK_PROCESSING_MODE: inline
+      SEED_ADMIN_NAME: Admin CI
+      SEED_ADMIN_EMAIL: ci-admin@example.test
+      SEED_ADMIN_ROLE: Admin
+      SEED_ADMIN_DIVISION: IT
+      SEED_ADMIN_CAN_ACCESS_RESTRICTED_DOCUMENTS: "true"
+      SEED_RESET_EXISTING_PASSWORDS: "true"
+      FULLSTACK_FRONTEND_URL: http://127.0.0.1:3100
+      FULLSTACK_FRONTEND_DIR: ${{ github.workspace }}/frontend-production
+      FULLSTACK_BACKEND_HEALTH_URL: http://127.0.0.1:7111/health
+      FULLSTACK_REUSE_FRONTEND_BUILD: "false"
+      E2E_BACKEND_NODE_ENV: development
+      E2E_REUSE_FRONTEND_BUILD: "false"
+      E2E_API_RATE_LIMIT_WINDOW_SECONDS: "60"
+      PLAYWRIGHT_WORKERS: "1"
+      QUALITY_GATE_REPORT_DIR: quality-reports/ci
+      QUALITY_GATE_BACKEND_TIMEOUT_MS: "600000"
+      QUALITY_GATE_FRONTEND_TIMEOUT_MS: "1800000"
+      QUALITY_GATE_FULLSTACK_TIMEOUT_MS: "600000"
+      QUALITY_GATE_PERFORMANCE_TIMEOUT_MS: "300000"
+      QUALITY_GATE_HEARTBEAT_MS: "30000"
+    steps:
+      - name: Checkout backend change
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: backend-production
+          persist-credentials: false
+
+      - name: Checkout frontend main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: falll-git/frontend-production
+          ref: main
+          path: frontend-production
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend-production/package-lock.json
+            frontend-production/package-lock.json
+
+      - name: Generate ephemeral test credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          append_env() {
+            printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"
+          }
+          append_secret() {
+            printf '::add-mask::%s\n' "$2"
+            append_env "$1" "$2"
+          }
+
+          admin_username="ci-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          admin_password="$(openssl rand -base64 24 | tr -d '\n')Aa1"
+
+          append_env SEED_ADMIN_USERNAME "$admin_username"
+          append_env API_TEST_ADMIN_USERNAME "$admin_username"
+          append_env E2E_USERNAME "$admin_username"
+          append_secret SEED_ADMIN_PASSWORD "$admin_password"
+          append_secret API_TEST_ADMIN_PASSWORD "$admin_password"
+          append_secret E2E_PASSWORD "$admin_password"
+          append_secret JWT_SECRET "$(openssl rand -hex 32)"
+          append_secret JWT_REFRESH_SECRET "$(openssl rand -hex 32)"
+          append_secret FILE_ACCESS_SECRET "$(openssl rand -hex 32)"
+          append_secret RATE_LIMIT_KEY_SECRET "$(openssl rand -hex 32)"
+          append_secret NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "$(openssl rand -base64 32 | tr -d '\n')"
+
+      - name: Install backend dependencies
+        working-directory: backend-production
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend-production
+        run: npm ci
+
+      - name: Prepare ephemeral storage
+        shell: bash
+        run: mkdir -p "$UPLOAD_DIR" "$UPLOAD_TEMP_DIR"
+
+      - name: Apply migrations to ephemeral CI database
+        working-directory: backend-production
+        run: npm run migrate:deploy
+
+      - name: Seed ephemeral CI database
+        working-directory: backend-production
+        run: |
+          npm run seed
+          npm run seed:ci-test-data
+
+      - name: Run integrated quality gate
+        working-directory: backend-production
+        run: npm run quality:release
+
+      - name: Upload failure reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend-production/quality-reports/ci/latest
+            backend-production/playwright-report
+            backend-production/test-results
+            frontend-production/playwright-report
+            frontend-production/test-results
+          if-no-files-found: warn
+          retention-days: 7

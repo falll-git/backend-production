@@ -7,9 +7,9 @@ const {
 } = require("../../utils/pagination");
 const {
   normalizeUploadFiles,
-  persistDomainFiles,
   serializeFile,
   serializeFiles,
+  withDomainFileRollback,
 } = require("../../utils/domain-files");
 const {
   LEGAL_DATA_SCOPE_URLS,
@@ -923,61 +923,65 @@ async function createProgress({ req, modelName, payload, userId, category, entit
   await ensureContract(payload.contract_id, userId);
   await ensureCollateralForContract(payload.collateral_id, payload.contract_id);
   await ensureThirdParty(payload.third_party_id, category);
-  const fileMetas = persistDomainFiles({
-    entity,
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: category,
-  });
-  const primaryFile = fileMetas[0] || null;
-  const data = { ...payload };
-  delete data.file;
-  delete data.files;
-  if (data.collateral_id !== undefined) {
-    data.collateral_id = normalizeText(data.collateral_id);
-  }
-  const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
-  if (processCategory && data.deed_type !== undefined) {
-    data.deed_type = await resolveLegalProcessType(
-      data.deed_type,
-      processCategory,
-      "Jenis proses notaris",
-    );
-  }
-  if (processCategory && data.insurance_type !== undefined) {
-    data.insurance_type = await resolveLegalProcessType(
-      data.insurance_type,
-      processCategory,
-      "Jenis proses asuransi",
-    );
-  }
-  if (processCategory && data.appraisal_type !== undefined) {
-    data.appraisal_type = await resolveLegalProcessType(
-      data.appraisal_type,
-      processCategory,
-      "Jenis proses KJPP",
-    );
-  }
-  for (const key of Object.keys(data)) {
-    if (key.endsWith("_at") || key.startsWith("period_")) {
-      data[key] = data[key] ? new Date(data[key]) : null;
+  let fileMetas = [];
+  const saved = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity,
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: category,
+    });
+    const primaryFile = fileMetas[0] || null;
+    const data = { ...payload };
+    delete data.file;
+    delete data.files;
+    if (data.collateral_id !== undefined) {
+      data.collateral_id = normalizeText(data.collateral_id);
     }
-  }
-  data.status =
-    category === "INSURANCE"
-      ? normalizeUpper(data.status)
-      : normalizeUpper(data.status) || "PROSES";
-  validateDocumentProgressDates(data, category);
-  const saved = await repository.create(modelName, {
-    ...data,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    created_by: userId || null,
+    const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
+    if (processCategory && data.deed_type !== undefined) {
+      data.deed_type = await resolveLegalProcessType(
+        data.deed_type,
+        processCategory,
+        "Jenis proses notaris",
+      );
+    }
+    if (processCategory && data.insurance_type !== undefined) {
+      data.insurance_type = await resolveLegalProcessType(
+        data.insurance_type,
+        processCategory,
+        "Jenis proses asuransi",
+      );
+    }
+    if (processCategory && data.appraisal_type !== undefined) {
+      data.appraisal_type = await resolveLegalProcessType(
+        data.appraisal_type,
+        processCategory,
+        "Jenis proses KJPP",
+      );
+    }
+    for (const key of Object.keys(data)) {
+      if (key.endsWith("_at") || key.startsWith("period_")) {
+        data[key] = data[key] ? new Date(data[key]) : null;
+      }
+    }
+    data.status =
+      category === "INSURANCE"
+        ? normalizeUpper(data.status)
+        : normalizeUpper(data.status) || "PROSES";
+    validateDocumentProgressDates(data, category);
+
+    return repository.create(modelName, {
+      ...data,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      created_by: userId || null,
+    });
   });
   await recordLegalAudit(undefined, {
     req,
@@ -1008,59 +1012,63 @@ async function updateProgress({ req, modelName, id, payload, userId, category, e
     next.contract_id,
   );
   await ensureThirdParty(next.third_party_id, category);
-  const fileMetas = persistDomainFiles({
-    entity,
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: category,
-  });
-  const primaryFile =
-    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
-  const data = { ...payload };
-  delete data.file;
-  delete data.files;
-  if (data.collateral_id !== undefined) {
-    data.collateral_id = normalizeText(data.collateral_id);
-  }
-  const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
-  if (processCategory && data.deed_type !== undefined) {
-    data.deed_type = await resolveLegalProcessType(
-      data.deed_type,
-      processCategory,
-      "Jenis proses notaris",
-    );
-  }
-  if (processCategory && data.insurance_type !== undefined) {
-    data.insurance_type = await resolveLegalProcessType(
-      data.insurance_type,
-      processCategory,
-      "Jenis proses asuransi",
-    );
-  }
-  if (processCategory && data.appraisal_type !== undefined) {
-    data.appraisal_type = await resolveLegalProcessType(
-      data.appraisal_type,
-      processCategory,
-      "Jenis proses KJPP",
-    );
-  }
-  for (const key of Object.keys(data)) {
-    if (key.endsWith("_at") || key.startsWith("period_")) {
-      data[key] = data[key] ? new Date(data[key]) : null;
+  let fileMetas = [];
+  const saved = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity,
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: category,
+    });
+    const primaryFile =
+      !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
+    const data = { ...payload };
+    delete data.file;
+    delete data.files;
+    if (data.collateral_id !== undefined) {
+      data.collateral_id = normalizeText(data.collateral_id);
     }
-  }
-  if (data.status) data.status = normalizeUpper(data.status);
-  validateDocumentProgressDates({ ...next, ...data }, category);
-  const saved = await repository.update(modelName, id, {
-    ...data,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    updated_by: userId || null,
+    const processCategory = LEGAL_PROCESS_CATEGORY_BY_THIRD_PARTY[category];
+    if (processCategory && data.deed_type !== undefined) {
+      data.deed_type = await resolveLegalProcessType(
+        data.deed_type,
+        processCategory,
+        "Jenis proses notaris",
+      );
+    }
+    if (processCategory && data.insurance_type !== undefined) {
+      data.insurance_type = await resolveLegalProcessType(
+        data.insurance_type,
+        processCategory,
+        "Jenis proses asuransi",
+      );
+    }
+    if (processCategory && data.appraisal_type !== undefined) {
+      data.appraisal_type = await resolveLegalProcessType(
+        data.appraisal_type,
+        processCategory,
+        "Jenis proses KJPP",
+      );
+    }
+    for (const key of Object.keys(data)) {
+      if (key.endsWith("_at") || key.startsWith("period_")) {
+        data[key] = data[key] ? new Date(data[key]) : null;
+      }
+    }
+    if (data.status) data.status = normalizeUpper(data.status);
+    validateDocumentProgressDates({ ...next, ...data }, category);
+
+    return repository.update(modelName, id, {
+      ...data,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      updated_by: userId || null,
+    });
   });
   await recordLegalAudit(undefined, {
     req,
@@ -1284,36 +1292,40 @@ exports.createClaim = async ({ req, payload, userId }) => {
     throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
   }
   await ensureCollateralForContract(claimCollateralId, payload.contract_id);
-  const fileMetas = persistDomainFiles({
-    entity: "legal/claims",
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: payload.claim_type,
-  });
-  const primaryFile = fileMetas[0] || null;
-  const data = { ...payload };
-  delete data.file;
-  delete data.files;
-  data.collateral_id = claimCollateralId;
-  data.claim_type = await resolveLegalProcessType(
-    data.claim_type,
-    "INSURANCE_CLAIM",
-    "Jenis klaim",
-  );
-  const saved = await repository.create("legal_claims", {
-    ...data,
-    policy_number: normalizeText(data.policy_number),
-    status: normalizeUpper(data.status || "PENGAJUAN"),
-    submitted_at: new Date(data.submitted_at),
-    disbursed_at: data.disbursed_at ? new Date(data.disbursed_at) : null,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    created_by: userId || null,
+  let fileMetas = [];
+  const saved = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: "legal/claims",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: payload.claim_type,
+    });
+    const primaryFile = fileMetas[0] || null;
+    const data = { ...payload };
+    delete data.file;
+    delete data.files;
+    data.collateral_id = claimCollateralId;
+    data.claim_type = await resolveLegalProcessType(
+      data.claim_type,
+      "INSURANCE_CLAIM",
+      "Jenis klaim",
+    );
+
+    return repository.create("legal_claims", {
+      ...data,
+      policy_number: normalizeText(data.policy_number),
+      status: normalizeUpper(data.status || "PENGAJUAN"),
+      submitted_at: new Date(data.submitted_at),
+      disbursed_at: data.disbursed_at ? new Date(data.disbursed_at) : null,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      created_by: userId || null,
+    });
   });
   await recordLegalAudit(undefined, {
     req,
@@ -1332,77 +1344,84 @@ exports.updateClaim = async ({ req, id, payload, userId }) => {
   const current = await repository.findById("legal_claims", id, { deleted_at: null });
   if (!current) throw new AppError("Klaim tidak ditemukan.", 404);
   await ensureContract(current.contract_id, userId);
-  const fileMetas = persistDomainFiles({
-    entity: "legal/claims",
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: payload.claim_type || current.claim_type,
-  });
-  const primaryFile =
-    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
-  const data = { ...payload };
-  delete data.file;
-  delete data.files;
-  const targetContractId = data.contract_id || current.contract_id;
-  if (data.claim_type !== undefined) {
-    data.claim_type = await resolveLegalProcessType(
-      data.claim_type,
-      "INSURANCE_CLAIM",
-      "Jenis klaim",
-    );
-  }
-  if (data.status) data.status = normalizeUpper(data.status);
-  if (data.contract_id) await ensureContract(data.contract_id, userId);
-  const targetInsuranceProgressId =
-    data.insurance_progress_id !== undefined
-      ? normalizeText(data.insurance_progress_id)
-      : current.insurance_progress_id;
-  let insuranceProgress = null;
-  if (targetInsuranceProgressId) {
-    insuranceProgress = await repository.findById(
-      "legal_insurance_progress",
-      targetInsuranceProgressId,
-      { deleted_at: null },
-    );
-    if (!insuranceProgress) throw new AppError("Progress asuransi tidak ditemukan.", 404);
-    await ensureContract(insuranceProgress.contract_id, userId);
-    if (insuranceProgress.contract_id !== targetContractId) {
-      throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
+  let fileMetas = [];
+  const saved = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: "legal/claims",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: payload.claim_type || current.claim_type,
+    });
+    const primaryFile =
+      !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
+    const data = { ...payload };
+    delete data.file;
+    delete data.files;
+    const targetContractId = data.contract_id || current.contract_id;
+    if (data.claim_type !== undefined) {
+      data.claim_type = await resolveLegalProcessType(
+        data.claim_type,
+        "INSURANCE_CLAIM",
+        "Jenis klaim",
+      );
     }
-  }
-  const requestedCollateralId =
-    data.collateral_id !== undefined
-      ? normalizeText(data.collateral_id)
-      : current.collateral_id;
-  const claimCollateralId = requestedCollateralId || insuranceProgress?.collateral_id || null;
-  if (
-    insuranceProgress?.collateral_id &&
-    requestedCollateralId &&
-    requestedCollateralId !== insuranceProgress.collateral_id
-  ) {
-    throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
-  }
-  await ensureCollateralForContract(claimCollateralId, targetContractId);
-  if (data.collateral_id !== undefined || insuranceProgress?.collateral_id) {
-    data.collateral_id = claimCollateralId;
-  }
-  if (data.insurance_progress_id !== undefined) {
-    data.insurance_progress_id = normalizeText(data.insurance_progress_id);
-  }
-  if (data.submitted_at) data.submitted_at = new Date(data.submitted_at);
-  if (data.disbursed_at !== undefined) {
-    data.disbursed_at = data.disbursed_at ? new Date(data.disbursed_at) : null;
-  }
-  const saved = await repository.update("legal_claims", id, {
-    ...data,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    updated_by: userId || null,
+    if (data.status) data.status = normalizeUpper(data.status);
+    if (data.contract_id) await ensureContract(data.contract_id, userId);
+    const targetInsuranceProgressId =
+      data.insurance_progress_id !== undefined
+        ? normalizeText(data.insurance_progress_id)
+        : current.insurance_progress_id;
+    let insuranceProgress = null;
+    if (targetInsuranceProgressId) {
+      insuranceProgress = await repository.findById(
+        "legal_insurance_progress",
+        targetInsuranceProgressId,
+        { deleted_at: null },
+      );
+      if (!insuranceProgress) {
+        throw new AppError("Progress asuransi tidak ditemukan.", 404);
+      }
+      await ensureContract(insuranceProgress.contract_id, userId);
+      if (insuranceProgress.contract_id !== targetContractId) {
+        throw new AppError("Progress asuransi tidak sesuai dengan kontrak klaim.", 422);
+      }
+    }
+    const requestedCollateralId =
+      data.collateral_id !== undefined
+        ? normalizeText(data.collateral_id)
+        : current.collateral_id;
+    const claimCollateralId =
+      requestedCollateralId || insuranceProgress?.collateral_id || null;
+    if (
+      insuranceProgress?.collateral_id &&
+      requestedCollateralId &&
+      requestedCollateralId !== insuranceProgress.collateral_id
+    ) {
+      throw new AppError("Agunan klaim tidak sesuai dengan progress asuransi.", 422);
+    }
+    await ensureCollateralForContract(claimCollateralId, targetContractId);
+    if (data.collateral_id !== undefined || insuranceProgress?.collateral_id) {
+      data.collateral_id = claimCollateralId;
+    }
+    if (data.insurance_progress_id !== undefined) {
+      data.insurance_progress_id = normalizeText(data.insurance_progress_id);
+    }
+    if (data.submitted_at) data.submitted_at = new Date(data.submitted_at);
+    if (data.disbursed_at !== undefined) {
+      data.disbursed_at = data.disbursed_at ? new Date(data.disbursed_at) : null;
+    }
+
+    return repository.update("legal_claims", id, {
+      ...data,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      updated_by: userId || null,
+    });
   });
   await recordLegalAudit(undefined, {
     req,
@@ -1469,8 +1488,9 @@ exports.createDeposit = async ({ req, payload, userId }) => {
     );
   }
 
-  return repository.transaction(async (tx) => {
-    const deposit = await repository.create(
+  return withDomainFileRollback((persistFiles) =>
+    repository.transaction(async (tx) => {
+      const deposit = await repository.create(
       "legal_deposits",
       {
         deposit_type_id: depositTypeId,
@@ -1495,7 +1515,7 @@ exports.createDeposit = async ({ req, payload, userId }) => {
       if (action !== "TITIPAN") {
         throw new AppError("Transaksi awal dana titipan wajib berupa TITIPAN.", 422);
       }
-      const openingFileMetas = persistDomainFiles({
+      const openingFileMetas = persistFiles({
         entity: "legal/deposit-transactions",
         inputs: openingInputs,
         fallbackBaseName: `bukti-titipan-${deposit.id}`,
@@ -1557,8 +1577,9 @@ exports.createDeposit = async ({ req, payload, userId }) => {
         },
       });
     }
-    return serializeDeposit(req, finalDeposit);
-  });
+      return serializeDeposit(req, finalDeposit);
+    }),
+  );
 };
 
 exports.updateDeposit = async ({ req, id, payload, userId }) => {
@@ -1662,8 +1683,9 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
   const action = assertDepositTransactionAction(payload.action);
   const amountValue = number(payload.amount);
 
-  return repository.transaction(async (tx) => {
-    const currentDeposit = await repository.findById(
+  return withDomainFileRollback((persistFiles) =>
+    repository.transaction(async (tx) => {
+      const currentDeposit = await repository.findById(
       "legal_deposits",
       payload.deposit_id,
       { deleted_at: null },
@@ -1671,7 +1693,7 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
     );
     if (!currentDeposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
     assertDepositCanDecreaseBalance(currentDeposit, action, amountValue);
-    const fileMetas = persistDomainFiles({
+      const fileMetas = persistFiles({
       entity: "legal/deposit-transactions",
       inputs: normalizeUploadFiles(payload),
       fallbackBaseName: `bukti-${action.toLowerCase()}-${payload.deposit_id}`,
@@ -1711,8 +1733,9 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
         files_count: fileMetas.length,
       },
     });
-    return serializeDepositTransaction(req, transaction);
-  });
+      return serializeDepositTransaction(req, transaction);
+    }),
+  );
 };
 
 exports.getSummaryReport = async (_query = {}, userId = null) => {

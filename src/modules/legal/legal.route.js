@@ -3,6 +3,10 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  reportRateLimit,
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
@@ -29,6 +33,7 @@ const DEPOSIT_FUNDS_REPORT_URLS = [
   "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
 ];
 const uploadBody = [
+  uploadRateLimit,
   uploadDomainFiles("files", 20),
   normalizePersuratanMultipartBody({
     jsonFields: ["opening_transaction"],
@@ -203,24 +208,28 @@ router.get(
   "/reports/summary",
   auth,
   authorize(LEGAL_REPORT_URLS, "read"),
+  reportRateLimit,
   controller.summaryReport,
 );
 router.get(
   "/reports/third-party-documents",
   auth,
   authorize(THIRD_PARTY_PROGRESS_REPORT_URLS, "read"),
+  reportRateLimit,
   controller.thirdPartyDocumentsReport,
 );
 router.get(
   "/reports/third-party-deposit-funds",
   auth,
   authorize(DEPOSIT_FUNDS_REPORT_URLS, "read"),
+  reportRateLimit,
   controller.thirdPartyDepositFundsReport,
 );
 router.get(
   "/reports/activity-logs",
   auth,
   authorize(LEGAL_REPORT_URLS, "read"),
+  reportRateLimit,
   controller.activityLogsReport,
 );
 

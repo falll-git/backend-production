@@ -31,8 +31,20 @@ const {
 const {
   PUBLIC_PREFIX: WATERMARKED_PUBLIC_PREFIX,
   STORAGE_ROOT: WATERMARKED_STORAGE_ROOT,
+  deleteWatermarkedFile,
 } = require("../../utils/watermarked-files");
 const { toSizeBytesBigInt } = require("../../utils/size-bytes");
+const { logger } = require("../../system/logger");
+const {
+  runWithRequestContext,
+} = require("../../utils/request-context");
+const {
+  SpanKind,
+  recordActiveException,
+  runWithSpan,
+} = require("../../system/observability");
+
+const watermarkLogger = logger.child({ component: "watermark_processor" });
 
 const DEFAULT_WATERMARK_MAX_PROCESS_SIZE_BYTES = 512 * 1024 * 1024;
 const WATERMARK_MAX_PROCESS_SIZE_BYTES =
@@ -88,6 +100,23 @@ const WATERMARK_LABELS = {
 };
 
 let isWorkerRunning = false;
+
+function resolveWatermarkProcessingMode(env = process.env) {
+  const configured = String(env.WATERMARK_PROCESSING_MODE || "")
+    .trim()
+    .toLowerCase();
+  if (configured) return configured;
+  return env.NODE_ENV === "production" ? "worker" : "inline";
+}
+
+function isInlineWatermarkProcessingEnabled(env = process.env) {
+  return resolveWatermarkProcessingMode(env) === "inline";
+}
+
+function readPositiveIntEnv(key, fallback) {
+  const value = Number(process.env[key]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
 function ensureDirectory(target) {
   fs.mkdirSync(target, { recursive: true });
@@ -722,11 +751,22 @@ async function enqueueRecordWatermark({ module, entityId }) {
     },
   });
 
+  watermarkLogger.info(
+    {
+      event: "watermark_job_scheduled",
+      job_id: `watermark:${module}:${entityId}`,
+      watermark_module: module,
+      entity_id: entityId,
+    },
+    "Watermark job scheduled",
+  );
   kickWatermarkWorker();
   return findRecord(module, entityId);
 }
 
 async function processPendingRecord({ module, entityId }) {
+  const config = MODULE_CONFIG[module];
+  if (!config) return null;
   const settings = await getSettings();
   const settingsHash = getWatermarkSettingsHash(settings);
   const record = await findRecord(module, entityId);
@@ -737,24 +777,28 @@ async function processPendingRecord({ module, entityId }) {
   }
 
   const model = getPrismaModel(module);
-  await model.update({
+  const claim = await model.updateMany({
     where: {
       id: entityId,
+      [config.deletedField]: null,
+      watermark_status: "PENDING",
     },
     data: {
       watermark_status: "PROCESSING",
       watermark_error_message: null,
     },
   });
+  if (claim.count !== 1) return null;
 
+  let watermarkedPath = null;
   try {
-    const watermarkedPath = await createWatermarkedFile({
+    watermarkedPath = await createWatermarkedFile({
       module,
       record,
       settings,
     });
 
-    return model.update({
+    const updated = await model.update({
       where: {
         id: entityId,
       },
@@ -768,7 +812,27 @@ async function processPendingRecord({ module, entityId }) {
         watermark_applied_at: new Date(),
       },
     });
+    if (
+      record.watermark_file &&
+      record.watermark_file !== watermarkedPath.storedPath
+    ) {
+      deleteWatermarkedFile(record.watermark_file);
+    }
+    return updated;
   } catch (error) {
+    if (watermarkedPath?.storedPath) {
+      deleteWatermarkedFile(watermarkedPath.storedPath);
+    }
+    watermarkLogger.error(
+      {
+        event: "watermark_processing_failed",
+        watermark_module: module,
+        entity_id: entityId,
+        err: error,
+      },
+      "Watermark document processing failed",
+    );
+    recordActiveException(error);
     return model.update({
       where: {
         id: entityId,
@@ -777,8 +841,8 @@ async function processPendingRecord({ module, entityId }) {
         watermark_status:
           error?.code === "UNSUPPORTED" ? "UNSUPPORTED" : "FAILED",
         watermark_error_message:
-          error instanceof Error
-            ? error.message
+          error?.code === "UNSUPPORTED"
+            ? "Format dokumen belum didukung."
             : "Watermark dokumen gagal diproses.",
       },
     });
@@ -810,35 +874,83 @@ async function findNextPendingRecord() {
   return null;
 }
 
-async function runWatermarkWorker() {
-  if (isWorkerRunning) return;
+async function runWatermarkWorker({ batchSize = 100 } = {}) {
+  if (isWorkerRunning) {
+    return { busy: true, processed_count: 0, has_more: true };
+  }
   isWorkerRunning = true;
   let hitBatchLimit = true;
+  let processedCount = 0;
 
   try {
-    for (let index = 0; index < 100; index += 1) {
+    for (let index = 0; index < batchSize; index += 1) {
       const pendingRecord = await findNextPendingRecord();
       if (!pendingRecord) {
         hitBatchLimit = false;
         break;
       }
-      await processPendingRecord(pendingRecord);
+      const jobId =
+        `watermark:${pendingRecord.module}:${pendingRecord.entityId}`;
+      const processed = await runWithSpan(
+        "Watermark job",
+        {
+          kind: SpanKind.CONSUMER,
+          attributes: {
+            "messaging.system": "postgresql",
+            "messaging.destination.name": "watermark_pending_records",
+            "messaging.message.id": jobId,
+          },
+        },
+        () =>
+          runWithRequestContext(
+            {
+              job_id: jobId,
+              watermark_module: pendingRecord.module,
+              entity_id: pendingRecord.entityId,
+            },
+            () => processPendingRecord(pendingRecord),
+          ),
+      );
+      if (processed) {
+        processedCount += 1;
+        watermarkLogger.info(
+          {
+            event: "watermark_job_completed",
+            watermark_status: processed.watermark_status || null,
+          },
+          "Watermark job completed",
+        );
+      }
     }
   } finally {
     isWorkerRunning = false;
   }
 
-  if (hitBatchLimit) {
+  if (hitBatchLimit && isInlineWatermarkProcessingEnabled()) {
     kickWatermarkWorker();
   }
+
+  return {
+    busy: false,
+    processed_count: processedCount,
+    has_more: hitBatchLimit,
+  };
 }
 
 function kickWatermarkWorker() {
+  if (!isInlineWatermarkProcessingEnabled()) return false;
   setImmediate(() => {
     runWatermarkWorker().catch((error) => {
-      console.error("Watermark worker failed:", error);
+      watermarkLogger.error(
+        {
+          event: "watermark_worker_run_failed",
+          err: error,
+        },
+        "Watermark worker run failed",
+      );
     });
   });
+  return true;
 }
 
 function isWatermarkTargetEnabled({ module, settings }) {
@@ -893,20 +1005,33 @@ async function scheduleExistingWatermarkJobs() {
   return { scheduled_count: scheduledCount };
 }
 
-async function recoverPendingWatermarkJobs() {
+async function recoverPendingWatermarkJobs({
+  staleMs = readPositiveIntEnv(
+    "WATERMARK_PROCESSING_STALE_MS",
+    6 * 60 * 60 * 1000,
+  ),
+  now = () => Date.now(),
+} = {}) {
+  const staleBefore = new Date(now() - staleMs);
+  let recoveredCount = 0;
   for (const module of Object.keys(MODULE_CONFIG)) {
     const model = getPrismaModel(module);
-    await model.updateMany({
+    const recovered = await model.updateMany({
       where: {
         watermark_status: "PROCESSING",
+        updated_at: {
+          lt: staleBefore,
+        },
       },
       data: {
         watermark_status: "PENDING",
       },
     });
+    recoveredCount += recovered.count;
   }
 
   kickWatermarkWorker();
+  return { recovered_count: recoveredCount };
 }
 
 async function getWatermarkQueueSummary() {
@@ -1001,7 +1126,11 @@ module.exports = {
   buildWatermarkedFileUrl,
   enqueueRecordWatermark,
   getWatermarkQueueSummary,
+  isInlineWatermarkProcessingEnabled,
+  processPendingRecord,
   recoverPendingWatermarkJobs,
   resolveEffectiveFileUrl,
+  resolveWatermarkProcessingMode,
+  runWatermarkWorker,
   scheduleExistingWatermarkJobs,
 };

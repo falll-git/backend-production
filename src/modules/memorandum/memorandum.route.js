@@ -4,6 +4,9 @@ const controller = require("./memorandum.controller");
 const validate = require("../../middlewares/validate.middleware");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
+const {
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
 const { REDISPOSE_FEATURE } = require("../../utils/menu-access");
 const {
   normalizePersuratanMultipartBody,
@@ -23,6 +26,7 @@ router.post(
   "/with-disposition",
   auth,
   authorize(MEMORANDUM_MENU_URL, "create"),
+  uploadRateLimit,
   uploadPersuratanFile("file"),
   normalizePersuratanMultipartBody({
     jsonFields: ["target_division_ids"],
@@ -61,6 +65,7 @@ router.put(
   "/:id",
   auth,
   authorize(MEMORANDUM_MENU_URL, "update"),
+  uploadRateLimit,
   uploadPersuratanFile("file"),
   normalizePersuratanMultipartBody({
     numberFields: ["status"],

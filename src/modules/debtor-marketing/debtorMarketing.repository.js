@@ -1,5 +1,18 @@
 const prisma = require("../../config/prisma");
 
+const CREATOR_SELECT = {
+  id: true,
+  name: true,
+  username: true,
+  email: true,
+  division_id: true,
+  division: {
+    select: {
+      name: true,
+    },
+  },
+};
+
 const INCLUDE = {
   debtor: {
     select: {
@@ -37,40 +50,67 @@ const INCLUDE = {
   files: true,
 };
 
-function findMany({ where, skip, take, orderBy }) {
-  return prisma.debtor_marketing_activities.findMany({
+async function attachCreators(items) {
+  const rows = Array.isArray(items) ? items : items ? [items] : [];
+  const creatorIds = Array.from(
+    new Set(rows.map((item) => item.created_by).filter(Boolean)),
+  );
+  const creators =
+    creatorIds.length > 0
+      ? await prisma.users.findMany({
+          where: { id: { in: creatorIds } },
+          select: CREATOR_SELECT,
+        })
+      : [];
+  const creatorById = new Map(creators.map((user) => [user.id, user]));
+  const enriched = rows.map((item) => ({
+    ...item,
+    creator: item.created_by ? creatorById.get(item.created_by) || null : null,
+  }));
+  return Array.isArray(items) ? enriched : enriched[0] || null;
+}
+
+async function findMany({ where, skip, take, orderBy }) {
+  const items = await prisma.debtor_marketing_activities.findMany({
     where,
     skip,
     take,
     orderBy,
     include: INCLUDE,
   });
+  return attachCreators(items);
 }
 
 function count(where) {
   return prisma.debtor_marketing_activities.count({ where });
 }
 
-function findById(id, where = {}) {
-  return prisma.debtor_marketing_activities.findFirst({
+async function findById(id, where = {}) {
+  const item = await prisma.debtor_marketing_activities.findFirst({
     where: {
       id,
       ...where,
     },
     include: INCLUDE,
   });
+  return attachCreators(item);
 }
 
-function create(data) {
-  return prisma.debtor_marketing_activities.create({ data, include: INCLUDE });
+async function create(data) {
+  const item = await prisma.debtor_marketing_activities.create({
+    data,
+    include: INCLUDE,
+  });
+  return attachCreators(item);
 }
 
-function update(id, data) {
-  return prisma.debtor_marketing_activities.update({
+async function update(id, data) {
+  const item = await prisma.debtor_marketing_activities.update({
     where: { id },
     data,
     include: INCLUDE,
   });
+  return attachCreators(item);
 }
 
 function findDebtorById(id) {

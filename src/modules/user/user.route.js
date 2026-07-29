@@ -18,15 +18,20 @@ const DIGITAL_DOCUMENT_INPUT_MENU_URL =
   "/dashboard/arsip-digital/input-dokumen";
 const DIGITAL_DOCUMENT_LIST_MENU_URL =
   "/dashboard/arsip-digital/ruang-arsip/list-dokumen";
-const USER_READ_MENU_URLS = [
-  USER_MENU_URL,
+const ASSIGNABLE_USER_READ_MENU_URLS = [
   DIGITAL_DOCUMENT_INPUT_MENU_URL,
   DIGITAL_DOCUMENT_LIST_MENU_URL,
   ...DEBTOR_MENU_URLS,
 ];
 
-router.get("/", auth, authorize(USER_READ_MENU_URLS, "read"), controller.getAll);
+router.get("/", auth, authorize(USER_MENU_URL, "read"), controller.getAll);
 router.get("/me", auth, controller.getMe);
+router.get(
+  "/assignable",
+  auth,
+  authorize(ASSIGNABLE_USER_READ_MENU_URLS, "read"),
+  controller.getAssignable,
+);
 router.post(
   "/",
   auth,

@@ -1,4 +1,9 @@
 const prisma = require("../../config/prisma");
+const {
+  withRlsUserContext,
+  withSystemDatabaseClient,
+} = require("../../config/database-rls");
+const { AppError } = require("../../utils/errors");
 
 const authUserSelect = {
   id: true,
@@ -64,7 +69,7 @@ exports.findById = (id) => {
 };
 
 function findActionToken(tokenHash, type) {
-  return prisma.auth_action_tokens.findFirst({
+  return withSystemDatabaseClient((client) => client.auth_action_tokens.findFirst({
     where: {
       token_hash: tokenHash,
       type,
@@ -78,7 +83,7 @@ function findActionToken(tokenHash, type) {
         select: authUserSelect,
       },
     },
-  });
+  }));
 }
 
 exports.findInviteActionToken = (tokenHash) => {
@@ -90,7 +95,7 @@ exports.findResetPasswordActionToken = (tokenHash) => {
 };
 
 function invalidateActionTokens(userId, type, usedAt) {
-  return prisma.auth_action_tokens.updateMany({
+  return withSystemDatabaseClient((client) => client.auth_action_tokens.updateMany({
     where: {
       user_id: userId,
       type,
@@ -99,7 +104,7 @@ function invalidateActionTokens(userId, type, usedAt) {
     data: {
       used_at: usedAt,
     },
-  });
+  }));
 }
 
 exports.invalidateInviteTokens = (userId, usedAt) => {
@@ -111,9 +116,9 @@ exports.invalidateResetPasswordTokens = (userId, usedAt) => {
 };
 
 exports.createActionToken = (data) => {
-  return prisma.auth_action_tokens.create({
+  return withSystemDatabaseClient((client) => client.auth_action_tokens.create({
     data,
-  });
+  }));
 };
 
 exports.createInviteToken = (data) => {
@@ -121,12 +126,12 @@ exports.createInviteToken = (data) => {
 };
 
 exports.markActionTokenUsed = (id, usedAt) => {
-  return prisma.auth_action_tokens.update({
+  return withSystemDatabaseClient((client) => client.auth_action_tokens.update({
     where: { id },
     data: {
       used_at: usedAt,
     },
-  });
+  }));
 };
 
 exports.update = (id, data) => {
@@ -141,7 +146,7 @@ exports.createRefreshToken = (data, client = prisma) => {
 };
 
 exports.findActiveRefreshTokenByHash = (tokenHash) => {
-  return prisma.refresh_tokens.findFirst({
+  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
     where: {
       token_hash: tokenHash,
       revoked_at: null,
@@ -154,7 +159,7 @@ exports.findActiveRefreshTokenByHash = (tokenHash) => {
         select: authUserSelect,
       },
     },
-  });
+  }));
 };
 
 exports.revokeRefreshToken = (id, revokedAt, client = prisma) => {
@@ -178,12 +183,22 @@ exports.revokeActiveRefreshTokensByUserId = (userId, revokedAt, client = prisma)
   });
 };
 
+exports.findActiveRefreshTokenIdentityByHash = (tokenHash) => {
+  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+    where: {
+      token_hash: tokenHash,
+      revoked_at: null,
+      expires_at: { gt: new Date() },
+    },
+    select: { user_id: true },
+  }));
+};
+
 exports.revokeActiveRefreshTokenByHash = (
   tokenHash,
   revokedAt,
-  client = prisma,
 ) => {
-  return client.refresh_tokens.updateMany({
+  return withSystemDatabaseClient((client) => client.refresh_tokens.updateMany({
     where: {
       token_hash: tokenHash,
       revoked_at: null,
@@ -191,7 +206,24 @@ exports.revokeActiveRefreshTokenByHash = (
     data: {
       revoked_at: revokedAt,
     },
-  });
+  }));
+};
+
+exports.revokeActiveRefreshTokenByIdAndUserId = (
+  id,
+  userId,
+  revokedAt,
+) => {
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.updateMany({
+    where: {
+      id,
+      user_id: userId,
+      revoked_at: null,
+    },
+    data: {
+      revoked_at: revokedAt,
+    },
+  }));
 };
 
 exports.rotateRefreshToken = async ({
@@ -200,11 +232,24 @@ exports.rotateRefreshToken = async ({
   userId,
   refreshTokenHash,
   expiresAt,
+  ipAddress,
+  userAgent,
   now,
 }) => {
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await withRlsUserContext(userId, async (tx) => {
     if (oldRefreshTokenId) {
-      await exports.revokeRefreshToken(oldRefreshTokenId, now, tx);
+      const revoked = await tx.refresh_tokens.updateMany({
+        where: {
+          id: oldRefreshTokenId,
+          user_id: userId,
+          revoked_at: null,
+          expires_at: { gt: now },
+        },
+        data: { revoked_at: now },
+      });
+      if (revoked.count !== 1) {
+        throw new AppError("Sesi login tidak valid.", 401);
+      }
     } else {
       await exports.revokeActiveRefreshTokensByUserId(userId, now, tx);
     }
@@ -215,6 +260,9 @@ exports.rotateRefreshToken = async ({
         user_id: userId,
         token_hash: refreshTokenHash,
         expires_at: expiresAt,
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        last_used_at: now,
       },
       tx,
     );
@@ -236,7 +284,24 @@ exports.completeInviteOnboarding = async ({
   password,
   now,
 }) => {
-  await prisma.$transaction(async (tx) => {
+  await withRlsUserContext(userId, async (tx) => {
+    const consumed = await tx.auth_action_tokens.updateMany({
+      where: {
+        id: tokenId,
+        user_id: userId,
+        type: "INVITE",
+        used_at: null,
+        expires_at: { gt: now },
+      },
+      data: { used_at: now },
+    });
+    if (consumed.count !== 1) {
+      throw new AppError(
+        "Tautan aktivasi tidak valid atau sudah kedaluwarsa.",
+        400,
+      );
+    }
+
     await tx.users.update({
       where: { id: userId },
       data: {
@@ -258,12 +323,6 @@ exports.completeInviteOnboarding = async ({
       },
     });
 
-    await tx.auth_action_tokens.update({
-      where: { id: tokenId },
-      data: {
-        used_at: now,
-      },
-    });
   });
 
   return exports.findById(userId);
@@ -276,7 +335,24 @@ exports.completePasswordReset = async ({
   now,
   emailVerifiedAt,
 }) => {
-  await prisma.$transaction(async (tx) => {
+  await withRlsUserContext(userId, async (tx) => {
+    const consumed = await tx.auth_action_tokens.updateMany({
+      where: {
+        id: tokenId,
+        user_id: userId,
+        type: "RESET_PASSWORD",
+        used_at: null,
+        expires_at: { gt: now },
+      },
+      data: { used_at: now },
+    });
+    if (consumed.count !== 1) {
+      throw new AppError(
+        "Tautan reset password tidak valid atau sudah kedaluwarsa.",
+        400,
+      );
+    }
+
     await tx.users.update({
       where: { id: userId },
       data: {
@@ -311,4 +387,37 @@ exports.completePasswordReset = async ({
   });
 
   return exports.findById(userId);
+};
+
+exports.changePasswordAndRevokeSessions = async ({
+  userId,
+  password,
+  now,
+  emailVerifiedAt,
+  activatedAt,
+}) => {
+  return withRlsUserContext(userId, async (tx) => {
+    await tx.users.update({
+      where: { id: userId },
+      data: {
+        password,
+        password_set_at: now,
+        email_verified_at: emailVerifiedAt,
+        onboarding_status: "ACTIVE",
+        activated_at: activatedAt,
+      },
+    });
+    await tx.refresh_tokens.updateMany({
+      where: { user_id: userId, revoked_at: null },
+      data: { revoked_at: now },
+    });
+    await tx.auth_action_tokens.updateMany({
+      where: {
+        user_id: userId,
+        type: "RESET_PASSWORD",
+        used_at: null,
+      },
+      data: { used_at: now },
+    });
+  });
 };

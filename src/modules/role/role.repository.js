@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 exports.findMany = ({ where, skip, take }) => {
   return prisma.roles.findMany({
@@ -61,7 +62,7 @@ exports.delete = (id) => {
 };
 
 exports.deleteWithRoleMenus = async (id) => {
-  const role = await prisma.$transaction(async (client) => {
+  const role = await withDatabaseTransaction(async (client) => {
     await client.role_menus.deleteMany({ where: { role_id: id } });
     return client.roles.delete({ where: { id } });
   });

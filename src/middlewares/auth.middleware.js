@@ -1,4 +1,7 @@
-const prisma = require("../config/prisma");
+const { withRlsUserContext } = require("../config/database-rls");
+const {
+  runWithDatabaseUserContext,
+} = require("../config/database-context");
 const { verifyAccessToken } = require("../utils/jwt");
 
 module.exports = async (req, res, next) => {
@@ -22,24 +25,47 @@ module.exports = async (req, res, next) => {
       });
     }
 
-    const activeSession = await prisma.refresh_tokens.findFirst({
-      where: {
-        id: decoded.session_id,
-        user_id: decoded.id,
-        revoked_at: null,
-        expires_at: {
-          gt: new Date(),
-        },
-      },
-      select: {
-        user: {
-          select: {
-            id: true,
-            is_active: true,
-            password_set_at: true,
+    const activeSession = await withRlsUserContext(decoded.id, async (client) => {
+      const session = await client.refresh_tokens.findFirst({
+        where: {
+          id: decoded.session_id,
+          user_id: decoded.id,
+          revoked_at: null,
+          expires_at: {
+            gt: new Date(),
           },
         },
-      },
+        select: {
+          last_used_at: true,
+          user: {
+            select: {
+              id: true,
+              is_active: true,
+              password_set_at: true,
+              role_id: true,
+              division_id: true,
+            },
+          },
+        },
+      });
+
+      const now = new Date();
+      const touchBefore = new Date(now.getTime() - 5 * 60 * 1000);
+      if (session && (!session.last_used_at || session.last_used_at < touchBefore)) {
+        await client.refresh_tokens
+          .updateMany({
+            where: {
+              id: decoded.session_id,
+              user_id: decoded.id,
+              revoked_at: null,
+              last_used_at: { lt: touchBefore },
+            },
+            data: { last_used_at: now },
+          })
+          .catch(() => null);
+      }
+
+      return session;
     });
     const user = activeSession?.user || null;
 
@@ -64,9 +90,14 @@ module.exports = async (req, res, next) => {
       });
     }
 
-    req.user = decoded;
+    req.user = {
+      ...decoded,
+      id: user.id,
+      role_id: user.role_id,
+      division_id: user.division_id,
+    };
 
-    next();
+    return runWithDatabaseUserContext(user.id, next);
   } catch (err) {
     return res.status(401).json({
       status: false,

@@ -2,6 +2,9 @@ const express = require("express");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
+const {
+  reportRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
 const controller = require("./correspondence.controller");
 const validation = require("./correspondence.validation");
 
@@ -11,6 +14,7 @@ router.get(
   "/report",
   auth,
   authorize("/dashboard/manajemen-surat/laporan", "read"),
+  reportRateLimit,
   validate(validation.reportQuerySchema, { source: "query" }),
   controller.getReport,
 );

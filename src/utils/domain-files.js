@@ -2,11 +2,14 @@ const crypto = require("crypto");
 const fs = require("fs");
 const {
   buildFileUrl,
+  deleteStoredFile,
   deriveDocumentFileName,
   persistDigitalArchiveFile,
 } = require("./digital-archive-files");
 const { appendFileAccessToken } = require("./file-access-token");
 const { normalizeDownloadFileName } = require("./file-names");
+
+const NEW_UPLOAD = Symbol("domain-file-new-upload");
 
 function getInputSize(input) {
   if (input && typeof input === "object") {
@@ -64,7 +67,7 @@ function persistDomainFile({ entity, input, previousPath, fallbackBaseName }) {
 
   if (!stored?.storedPath) return null;
 
-  return {
+  const fileMeta = {
     file_path: stored.storedPath,
     file_name:
       stored.fileName ||
@@ -73,6 +76,13 @@ function persistDomainFile({ entity, input, previousPath, fallbackBaseName }) {
     size_bytes: getInputSize(input),
     checksum,
   };
+
+  Object.defineProperty(fileMeta, NEW_UPLOAD, {
+    value: stored.isNewUpload === true,
+    enumerable: false,
+  });
+
+  return fileMeta;
 }
 
 function normalizeUploadFiles(payload, options = {}) {
@@ -102,6 +112,36 @@ function persistDomainFiles({ entity, inputs, fallbackBaseName }) {
       }),
     )
     .filter(Boolean);
+}
+
+function cleanupPersistedDomainFiles(fileMetas) {
+  if (!Array.isArray(fileMetas)) return;
+
+  for (const fileMeta of fileMetas) {
+    if (fileMeta?.[NEW_UPLOAD] === true) {
+      deleteStoredFile(fileMeta.file_path);
+    }
+  }
+}
+
+async function withDomainFileRollback(operation) {
+  if (typeof operation !== "function") {
+    throw new TypeError("Operasi file domain wajib berupa fungsi.");
+  }
+
+  const persistedFileMetas = [];
+  const persistFiles = (options) => {
+    const fileMetas = persistDomainFiles(options);
+    persistedFileMetas.push(...fileMetas);
+    return fileMetas;
+  };
+
+  try {
+    return await operation(persistFiles);
+  } catch (error) {
+    cleanupPersistedDomainFiles(persistedFileMetas);
+    throw error;
+  }
 }
 
 function applyFileMeta(data, fileMeta, prefix = "") {
@@ -220,10 +260,12 @@ function serializeFiles(req, record, options = {}) {
 
 module.exports = {
   applyFileMeta,
+  cleanupPersistedDomainFiles,
   persistDomainFile,
   persistDomainFiles,
   normalizeUploadFiles,
   serializeFile,
   serializeFiles,
   serializeStoredFile,
+  withDomainFileRollback,
 };

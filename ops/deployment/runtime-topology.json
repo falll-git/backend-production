@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "node": {
+    "supported_major_versions": [24]
+  },
+  "orchestration": {
+    "managed_on_vps": true,
+    "implementation": "vps-choice-pending",
+    "automatic_deployment": false
+  },
+  "recovery": {
+    "startup_job_recovery_required": true,
+    "backup_automation": false
+  },
+  "operations": {
+    "data_backup_restore_status": "deferred",
+    "rpo_rto_status": "pending-decision"
+  },
+  "processes": [
+    {
+      "id": "frontend",
+      "repository": "frontend",
+      "package_script": "start",
+      "runtime_role": null,
+      "required": true,
+      "minimum_instances": 1
+    },
+    {
+      "id": "api",
+      "repository": "backend",
+      "package_script": "start",
+      "runtime_role": "api",
+      "required": true,
+      "minimum_instances": 1
+    },
+    {
+      "id": "slik-import-worker",
+      "repository": "backend",
+      "package_script": "worker:slik-import",
+      "runtime_role": "slik-import-worker",
+      "required": true,
+      "minimum_instances": 1
+    },
+    {
+      "id": "watermark-worker",
+      "repository": "backend",
+      "package_script": "worker:watermark",
+      "runtime_role": "watermark-worker",
+      "required": true,
+      "minimum_instances": 1
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "postgresql",
+      "required": true
+    },
+    {
+      "id": "redis",
+      "required": true
+    },
+    {
+      "id": "persistent-storage",
+      "required": true
+    }
+  ],
+  "probes": {
+    "api_liveness_path": "/health",
+    "api_readiness_path": "/ready",
+    "frontend_path": "/"
+  },
+  "release_sequence": [
+    {
+      "id": "backend-dependencies",
+      "repository": "backend",
+      "package_script": null,
+      "command": "npm ci",
+      "automatic": false
+    },
+    {
+      "id": "frontend-dependencies",
+      "repository": "frontend",
+      "package_script": null,
+      "command": "npm ci",
+      "automatic": false
+    },
+    {
+      "id": "release-contract",
+      "repository": "backend",
+      "package_script": "release:contract",
+      "automatic": false
+    },
+    {
+      "id": "frontend-build",
+      "repository": "frontend",
+      "package_script": "build",
+      "automatic": false
+    },
+    {
+      "id": "database-migration",
+      "repository": "backend",
+      "package_script": "migrate:deploy",
+      "automatic": false
+    },
+    {
+      "id": "production-preflight",
+      "repository": "backend",
+      "package_script": "release:preflight",
+      "automatic": false
+    },
+    {
+      "id": "process-start-or-restart",
+      "repository": "vps",
+      "package_script": null,
+      "automatic": false
+    },
+    {
+      "id": "post-deploy-verification",
+      "repository": "backend",
+      "package_script": "release:verify",
+      "automatic": false
+    }
+  ],
+  "required_environment": [
+    "NODE_ENV",
+    "RUNTIME_ROLE",
+    "DATABASE_URL",
+    "DATABASE_SYSTEM_URL",
+    "MIGRATION_DATABASE_URL",
+    "DATABASE_RUNTIME_ROLE",
+    "DATABASE_SYSTEM_ROLE",
+    "DB_REQUIRE_LEAST_PRIVILEGE",
+    "DB_REQUIRE_RLS",
+    "UPLOAD_DIR",
+    "UPLOAD_TEMP_DIR",
+    "REDIS_URL",
+    "RATE_LIMIT_STORE",
+    "SLIK_IMPORT_QUEUE_ENABLED",
+    "SLIK_IMPORT_LOCAL_FALLBACK_ENABLED",
+    "SLIK_IMPORT_REQUIRE_WORKER",
+    "WATERMARK_PROCESSING_MODE",
+    "FRONTEND_URL",
+    "PUBLIC_BASE_URL",
+    "API_BASE_URL",
+    "RELEASE_FRONTEND_DIR",
+    "RELEASE_VERIFY_FRONTEND_URL",
+    "RELEASE_VERIFY_API_HEALTH_URL",
+    "RELEASE_VERIFY_API_READY_URL"
+  ]
+}

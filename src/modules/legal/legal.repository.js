@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 const USER_SELECT = {
   id: true,
@@ -63,7 +64,7 @@ function client(tx) {
   return tx || prisma;
 }
 
-exports.transaction = (callback) => prisma.$transaction(callback);
+exports.transaction = (callback) => withDatabaseTransaction(callback);
 
 exports.findContractById = (id, tx, extraWhere = {}) =>
   client(tx).debtor_contracts.findFirst({

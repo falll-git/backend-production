@@ -1,7 +1,10 @@
+const fs = require("fs/promises");
+const path = require("path");
 const repository = require("./debtors.repository");
 const debtorContractsService = require("../debtor-contracts/debtorContracts.service");
 const { AppError } = require("../../utils/errors");
 const {
+  buildContractManageWhere,
   buildContractVisibilityWhere,
   buildDebtorManageWhere,
   buildDebtorVisibilityWhere,
@@ -16,9 +19,9 @@ const {
 } = require("../../utils/pagination");
 const {
   normalizeUploadFiles,
-  persistDomainFiles,
   serializeFile,
   serializeFiles,
+  withDomainFileRollback,
 } = require("../../utils/domain-files");
 const {
   SLIK_REFERENCE_FIELD_MAPPINGS,
@@ -31,11 +34,30 @@ const {
 } = require("../../utils/ideb-report");
 const {
   auditSnapshot,
+  requestMetadata,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
 const {
   serializeVisitLocation,
 } = require("../../utils/debtor-marketing-location");
+const {
+  buildCollateralMonitoring,
+} = require("../../utils/collateral-monitoring");
+const {
+  buildImportError,
+  matchCollateralExpiryImportRows,
+  parseCollateralExpiryWorkbook,
+  safeExpiryImportParserErrorMessage,
+  summarizeImportErrors,
+} = require("../../utils/collateral-expiry-import");
+
+const COLLATERAL_EXPIRY_TEMPLATE_FILE = "template-update-expired-agunan.xlsx";
+const COLLATERAL_EXPIRY_TEMPLATE_PATH = path.resolve(
+  __dirname,
+  "../../assets/templates",
+  COLLATERAL_EXPIRY_TEMPLATE_FILE,
+);
+const COLLATERAL_EXPIRY_IMPORT_LOOKUP_BATCH = 200;
 
 const SORTABLE_FIELDS = new Set([
   "debtor_number",
@@ -79,6 +101,19 @@ const DEBTOR_DOCUMENT_AUDIT_FIELDS = [
   "size_bytes",
   "uploaded_by",
   "created_by",
+];
+const COLLATERAL_EXPIRY_AUDIT_FIELDS = [
+  "id",
+  "debtor_id",
+  "contract_id",
+  "collateral_number",
+  "collateral_type",
+  "proof_number",
+  "has_expiry_date",
+  "expiry_date",
+  "expiry_note",
+  "expiry_updated_by",
+  "expiry_updated_at",
 ];
 const CUSTOMER_TYPE_LABELS = {
   INDIVIDUAL: "Perorangan",
@@ -511,6 +546,7 @@ function serializeMarketingActivity(req, item) {
     timeline: item.timeline || null,
     related_activity: item.related_activity || null,
     created_by: item.created_by,
+    creator: serializeUser(item.creator),
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -547,37 +583,6 @@ function readSummaryValue(source, keys) {
     if (value !== undefined && value !== null && value !== "") return value;
   }
   return null;
-}
-
-function normalizeCompareText(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const normalized = String(value).trim().replace(/\s+/g, " ");
-  return normalized || null;
-}
-
-function normalizeCompareKey(value) {
-  const text = normalizeCompareText(value);
-  return text ? text.toUpperCase() : null;
-}
-
-function parseCompareNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const normalized = String(value)
-    .trim()
-    .replace(/[^\d,.-]/g, "")
-    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
-    .replace(",", ".");
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function collectibilityLevel(value) {
-  const text = normalizeCompareText(value);
-  if (!text) return null;
-  const match = text.match(/\b([1-5])\b/) || text.match(/^([1-5])/);
-  return match ? match[1] : null;
 }
 
 function activityRowId(kind) {
@@ -647,9 +652,11 @@ function buildMarketingTimeline(items, timelines = []) {
         related_activity_id: item.related_activity_id,
         related_activity: item.related_activity || null,
         created_by: item.created_by,
+        creator: serializeUser(item.creator),
         visit_address: item.visit_address,
         ...serializeVisitLocation(item),
         file: item.file,
+        files: item.files,
         contract: item.contract || null,
         timeline: serializedTimeline,
       };
@@ -890,189 +897,6 @@ function serializeActivityLog(item) {
   };
 }
 
-function idebResultSummary(upload) {
-  return upload?.result_summary && typeof upload.result_summary === "object" && !Array.isArray(upload.result_summary)
-    ? upload.result_summary
-    : {};
-}
-
-function idebFacilitiesFromUpload(upload) {
-  const summary = idebResultSummary(upload);
-  return Array.isArray(summary.facilities)
-    ? summary.facilities.filter((item) => item && typeof item === "object" && !Array.isArray(item))
-    : [];
-}
-
-function buildExternalIdebFacility(facility) {
-  return {
-    reporter: normalizeCompareText(readSummaryValue(facility, ["reporter_name", "reporter_code"])) || "-",
-    account_number: normalizeCompareText(readSummaryValue(facility, ["account_number", "no_rekening", "noRekening"])) || "-",
-    product: normalizeCompareText(readSummaryValue(facility, ["credit_type", "credit_type_code"])) || "-",
-    akad: normalizeCompareText(readSummaryValue(facility, ["financing_scheme", "financing_scheme_code"])) || "-",
-    plafond: parseCompareNumber(readSummaryValue(facility, ["plafond", "initial_plafond"])),
-    outstanding: parseCompareNumber(readSummaryValue(facility, ["outstanding"])),
-    collectibility: normalizeCompareText(readSummaryValue(facility, ["collectibility", "collectibility_code", "kol"])) || "-",
-    dpd: parseCompareNumber(readSummaryValue(facility, ["days_past_due", "dpd"])),
-    condition: normalizeCompareText(readSummaryValue(facility, ["condition", "condition_code"])) || "-",
-    due_date: normalizeCompareText(readSummaryValue(facility, ["due_date"])),
-    period_month: normalizeCompareText(readSummaryValue(facility, ["period_month"])),
-  };
-}
-
-function buildInternalIdebFacility(contract) {
-  const snapshot = contract?.latest_slik_snapshot || null;
-  return {
-    contract_id: contract?.id || null,
-    no_kontrak: contract?.no_kontrak || "-",
-    facility_number: snapshot?.facility_number || contract?.no_kontrak || "-",
-    product:
-      snapshot?.credit_type_display ||
-      snapshot?.credit_type_code ||
-      contract?.product?.name ||
-      "-",
-    akad:
-      snapshot?.financing_scheme_display ||
-      snapshot?.financing_scheme_code ||
-      contract?.akad_type?.name ||
-      "-",
-    plafond:
-      snapshot?.plafond ??
-      snapshot?.initial_plafond ??
-      contract?.plafond ??
-      null,
-    outstanding:
-      snapshot?.baki_debet ??
-      contract?.outstanding_pokok ??
-      null,
-    collectibility:
-      snapshot?.collectibility_display ||
-      snapshot?.collectibility_code ||
-      contract?.latest_collectibility?.code ||
-      contract?.latest_collectibility?.name ||
-      "-",
-    dpd:
-      snapshot?.days_past_due ??
-      contract?.latest_collectibility?.dpd ??
-      null,
-    condition:
-      snapshot?.condition_display ||
-      snapshot?.condition_code ||
-      contract?.status ||
-      "-",
-    due_date:
-      snapshot?.due_date ||
-      contract?.tanggal_jatuh_tempo ||
-      null,
-    period_month:
-      snapshot?.period_month ||
-      contract?.latest_collectibility?.period_month ||
-      null,
-  };
-}
-
-function comparisonDisplayValue(value, kind = "text") {
-  if (value === null || value === undefined || value === "") return "-";
-  if (kind === "number") return Number(value);
-  return String(value);
-}
-
-function addComparisonDifference(differences, field, label, external, internal, kind = "text") {
-  const externalEmpty = external === null || external === undefined || external === "" || external === "-";
-  const internalEmpty = internal === null || internal === undefined || internal === "" || internal === "-";
-  if (externalEmpty && internalEmpty) return;
-
-  let isDifferent = false;
-  if (kind === "number") {
-    const externalNumber = parseCompareNumber(external);
-    const internalNumber = parseCompareNumber(internal);
-    isDifferent = externalNumber !== internalNumber;
-  } else if (kind === "kol") {
-    isDifferent = collectibilityLevel(external) !== collectibilityLevel(internal);
-  } else {
-    isDifferent = normalizeCompareKey(external) !== normalizeCompareKey(internal);
-  }
-
-  if (!isDifferent) return;
-  differences.push({
-    field,
-    label,
-    external: comparisonDisplayValue(external, kind === "number" ? "number" : "text"),
-    internal: comparisonDisplayValue(internal, kind === "number" ? "number" : "text"),
-  });
-}
-
-function compareIdebFacilities(external, internal) {
-  const differences = [];
-  addComparisonDifference(differences, "product", "Produk", external.product, internal.product);
-  addComparisonDifference(differences, "akad", "Akad", external.akad, internal.akad);
-  addComparisonDifference(differences, "plafond", "Plafon", external.plafond, internal.plafond, "number");
-  addComparisonDifference(differences, "outstanding", "Baki Debet", external.outstanding, internal.outstanding, "number");
-  addComparisonDifference(differences, "collectibility", "KOL", external.collectibility, internal.collectibility, "kol");
-  addComparisonDifference(differences, "dpd", "DPD", external.dpd, internal.dpd, "number");
-  addComparisonDifference(differences, "condition", "Kondisi", external.condition, internal.condition);
-  addComparisonDifference(differences, "due_date", "Jatuh Tempo", external.due_date, internal.due_date);
-  addComparisonDifference(differences, "period_month", "Periode", external.period_month, internal.period_month);
-  return differences;
-}
-
-function buildIdebComparisonItems(externalFacilities, internalContracts) {
-  const internalByKey = new Map();
-  for (const contract of internalContracts) {
-    const internal = buildInternalIdebFacility(contract);
-    for (const key of [internal.no_kontrak, internal.facility_number]) {
-      const normalized = normalizeCompareKey(key);
-      if (normalized && normalized !== "-") internalByKey.set(normalized, { contract, internal });
-    }
-  }
-
-  const matchedContractIds = new Set();
-  const items = [];
-
-  for (const rawExternal of externalFacilities) {
-    const external = buildExternalIdebFacility(rawExternal);
-    const matchKey = normalizeCompareKey(external.account_number);
-    const matched = matchKey ? internalByKey.get(matchKey) : null;
-
-    if (!matched) {
-      items.push({
-        status: "EXTERNAL_ONLY",
-        status_label: "Fasilitas Eksternal",
-        match_key: external.account_number,
-        external,
-        internal: null,
-        differences: [],
-      });
-      continue;
-    }
-
-    matchedContractIds.add(matched.contract.id);
-    const differences = compareIdebFacilities(external, matched.internal);
-    items.push({
-      status: differences.length > 0 ? "DIFFERENT" : "MATCHED",
-      status_label: differences.length > 0 ? "Beda Data" : "Cocok",
-      match_key: external.account_number,
-      external,
-      internal: matched.internal,
-      differences,
-    });
-  }
-
-  for (const contract of internalContracts) {
-    if (matchedContractIds.has(contract.id)) continue;
-    const internal = buildInternalIdebFacility(contract);
-    items.push({
-      status: "INTERNAL_ONLY",
-      status_label: "Internal Tidak Muncul",
-      match_key: internal.facility_number || internal.no_kontrak,
-      external: null,
-      internal,
-      differences: [],
-    });
-  }
-
-  return items;
-}
-
 function serializePrint(req, item) {
   return {
     ...item,
@@ -1121,9 +945,15 @@ function serializeWarningLetter(req, item) {
 function serializeClaim(req, item) {
   return {
     ...item,
-    collateral: item.collateral ? serializeCollateral(item.collateral) : null,
+    collateral: item.collateral
+      ? serializeCollateral(item.collateral)
+      : null,
     insurance_progress: item.insurance_progress
-      ? serializeProgress(req, item.insurance_progress, item.insurance_progress.insurance_type)
+      ? serializeProgress(
+          req,
+          item.insurance_progress,
+          item.insurance_progress.insurance_type,
+        )
       : item.insurance_progress,
     claim_amount: decimalToNumber(item.claim_amount),
     approved_amount:
@@ -1168,6 +998,7 @@ function serializeDeposit(req, item) {
 
 function serializeCollateral(item) {
   if (!item) return null;
+  const monitoring = buildCollateralMonitoring(item, new Date());
   return withSlikReferenceFields({
     id: item.id,
     debtor_id: item.debtor_id,
@@ -1213,6 +1044,11 @@ function serializeCollateral(item) {
     operation_code: item.operation_code,
     period_month: item.period_month,
     last_import_period_month: item.last_import_period_month,
+    ...monitoring,
+    expiry_note: item.expiry_note,
+    expiry_updated_by: item.expiry_updated_by,
+    expiry_updated_at: item.expiry_updated_at,
+    expiry_updater: serializeUser(item.expiry_updater),
     debtor: item.debtor ? serializeDebtor(item.debtor) : null,
     contract: item.contract || null,
     created_at: item.created_at,
@@ -1325,6 +1161,27 @@ function buildCollateralVisibilityWhere(scope) {
       {
         contract: {
           is: buildContractVisibilityWhere(scope),
+        },
+      },
+    ],
+  };
+}
+
+function buildCollateralManageWhere(scope) {
+  if (scope?.canManageAll) return {};
+  if (!scope?.userId) return { id: "__no_collateral_manage_access__" };
+
+  return {
+    OR: [
+      { created_by: scope.userId },
+      {
+        debtor: {
+          is: buildDebtorManageWhere(scope),
+        },
+      },
+      {
+        contract: {
+          is: buildContractManageWhere(scope),
         },
       },
     ],
@@ -1581,6 +1438,161 @@ exports.getCollaterals = async ({ query, userId }) => {
   };
 };
 
+function throwCollateralExpiryImportErrors(errors) {
+  const error = new AppError(summarizeImportErrors(errors), 422);
+  error.details = errors;
+  throw error;
+}
+
+exports.getCollateralExpiryTemplate = async () => ({
+  buffer: await fs.readFile(COLLATERAL_EXPIRY_TEMPLATE_PATH),
+  fileName: COLLATERAL_EXPIRY_TEMPLATE_FILE,
+});
+
+exports.importCollateralExpiry = async ({ req, file, userId }) => {
+  let parsed;
+  try {
+    parsed = await parseCollateralExpiryWorkbook(file);
+  } catch (error) {
+    throwCollateralExpiryImportErrors([
+      buildImportError(null, [safeExpiryImportParserErrorMessage(error)]),
+    ]);
+  }
+  if (parsed.errors.length > 0) {
+    throwCollateralExpiryImportErrors(parsed.errors);
+  }
+
+  const scope = await getDebtorAccessScope(userId);
+  const manageWhere = {
+    AND: [{ deleted_at: null }, buildCollateralManageWhere(scope)],
+  };
+  const requestInfo = requestMetadata(req);
+  const result = await repository.transaction(
+    async (tx) => {
+      const candidates = [];
+      for (
+        let offset = 0;
+        offset < parsed.rows.length;
+        offset += COLLATERAL_EXPIRY_IMPORT_LOOKUP_BATCH
+      ) {
+        const batch = parsed.rows
+          .slice(offset, offset + COLLATERAL_EXPIRY_IMPORT_LOOKUP_BATCH)
+          .map((row) => row.collateralNumber);
+        candidates.push(
+          ...(await repository.findCollateralsForExpiryImport(
+            batch,
+            manageWhere,
+            tx,
+          )),
+        );
+      }
+
+      const matching = matchCollateralExpiryImportRows(parsed.rows, candidates);
+      if (matching.errors.length > 0) {
+        throwCollateralExpiryImportErrors(matching.errors);
+      }
+
+      let statusYes = 0;
+      let statusNo = 0;
+      const updatedAt = new Date();
+      for (const row of parsed.rows) {
+        const current = matching.candidatesByNumber.get(
+          row.normalizedCollateralNumber,
+        )[0];
+        await repository.updateCollateral(
+          current.id,
+          {
+            has_expiry_date: row.hasExpiryDate,
+            expiry_date: row.expiryDate,
+            expiry_note: row.expiryNote,
+            expiry_updated_by: userId || null,
+            expiry_updated_at: updatedAt,
+          },
+          tx,
+        );
+        const fullCollateral = await repository.findCollateralById(current.id, {}, tx);
+        await safeRecordDebtorActivity(tx, {
+          actor_id: userId || null,
+          action: "BULK_UPDATE_COLLATERAL_EXPIRY",
+          source: "EXCEL",
+          entity_type: "debtor_collaterals",
+          entity_id: fullCollateral.id,
+          debtor_id: fullCollateral.debtor_id || null,
+          contract_id: fullCollateral.contract_id || null,
+          title: `Upload monitoring expired agunan ${fullCollateral.collateral_number}`,
+          before_data: auditSnapshot(current, COLLATERAL_EXPIRY_AUDIT_FIELDS),
+          after_data: auditSnapshot(fullCollateral, COLLATERAL_EXPIRY_AUDIT_FIELDS),
+          metadata: {
+            file_name: normalizeText(file?.name) || null,
+            worksheet: parsed.sheetName,
+            row_number: row.rowNumber,
+          },
+          ...requestInfo,
+        });
+        if (row.hasExpiryDate) statusYes += 1;
+        else statusNo += 1;
+      }
+
+      return {
+        total_rows: parsed.rows.length,
+        updated_rows: parsed.rows.length,
+        status_yes: statusYes,
+        status_no: statusNo,
+      };
+    },
+    { maxWait: 5000, timeout: 120000 },
+  );
+
+  return result;
+};
+
+exports.updateCollateralExpiry = async ({ req, id, payload, userId }) => {
+  const scope = await getDebtorAccessScope(userId);
+  const current = await repository.findCollateralById(id, {
+    deleted_at: null,
+    ...buildCollateralManageWhere(scope),
+  });
+  if (!current) {
+    throw new AppError("Agunan tidak ditemukan atau tidak dapat diperbarui.", 404);
+  }
+
+  const hasExpiryDate = payload.has_expiry_date === true;
+  const expiryDate = hasExpiryDate
+    ? normalizeDateField(payload.expiry_date)
+    : null;
+  const expiryNote = normalizeText(payload.expiry_note) ?? null;
+  const updated = await repository.transaction(async (tx) => {
+    await repository.updateCollateral(
+      id,
+      {
+        has_expiry_date: hasExpiryDate,
+        expiry_date: expiryDate,
+        expiry_note: expiryNote,
+        expiry_updated_by: userId || null,
+        expiry_updated_at: new Date(),
+      },
+      tx,
+    );
+    const fullCollateral = await repository.findCollateralById(id, {}, tx);
+    await safeRecordDebtorActivity(tx, {
+      actor_id: userId || null,
+      action: "UPDATE_COLLATERAL_EXPIRY",
+      source: "MANUAL",
+      entity_type: "debtor_collaterals",
+      entity_id: fullCollateral.id,
+      debtor_id: fullCollateral.debtor_id || null,
+      contract_id: fullCollateral.contract_id || null,
+      title: `Perbarui monitoring expired agunan ${fullCollateral.collateral_number}`,
+      before_data: auditSnapshot(current, COLLATERAL_EXPIRY_AUDIT_FIELDS),
+      after_data: auditSnapshot(fullCollateral, COLLATERAL_EXPIRY_AUDIT_FIELDS),
+      ...requestMetadata(req),
+    });
+    return fullCollateral;
+  });
+
+  return serializeCollateral(updated);
+};
+
 exports.getById = async ({ id, userId }) => {
   const scope = await getDebtorAccessScope(userId);
   const debtor = await repository.findById(id, {
@@ -1648,10 +1660,18 @@ exports.getWorkflow = async ({ req, id, userId }) => {
           serializeProgress(req, item, item.deed_type),
         ),
         insurance_progress: workflow.insuranceProgress.map((item) =>
-          serializeProgress(req, item, item.insurance_type),
+          serializeProgress(
+            req,
+            item,
+            item.insurance_type,
+          ),
         ),
         kjpp_progress: workflow.kjppProgress.map((item) =>
-          serializeProgress(req, item, item.appraisal_type),
+          serializeProgress(
+            req,
+            item,
+            item.appraisal_type,
+          ),
         ),
         claims: workflow.claims.map((item) => serializeClaim(req, item)),
         deposits: workflow.deposits.map((item) => serializeDeposit(req, item)),
@@ -1698,54 +1718,6 @@ exports.getWorkflow = async ({ req, id, userId }) => {
       : [],
     legal: legalWorkflow,
     activity_logs: activityLogs.map(serializeActivityLog).filter(Boolean),
-  };
-};
-
-exports.getIdebComparison = async ({ id, query, userId }) => {
-  const uploadId = normalizeText(query.ideb_upload_id || query.idebUploadId);
-  if (!uploadId) throw new AppError("ID upload IDEB wajib dikirim.", 422);
-
-  const scope = await getDebtorAccessScope(userId);
-  const debtor = await repository.findById(id, {
-    deleted_at: null,
-    ...buildDebtorVisibilityWhere(scope),
-  });
-  if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
-
-  const upload = await repository.findIdebUploadById(uploadId);
-  if (!upload) throw new AppError("Upload IDEB tidak ditemukan.", 404);
-  const linkedDebtorId = upload.debtor_id || upload.contract?.debtor_id || null;
-  if (!linkedDebtorId || linkedDebtorId !== id) {
-    throw new AppError("Upload IDEB tidak terhubung dengan debitur ini.", 404);
-  }
-
-  const serializedDebtor = serializeDebtor(debtor);
-  const externalFacilities = idebFacilitiesFromUpload(upload);
-  const items = buildIdebComparisonItems(externalFacilities, serializedDebtor.contracts);
-  const summary = items.reduce(
-    (current, item) => {
-      current.total += 1;
-      if (item.status === "MATCHED") current.matched += 1;
-      if (item.status === "DIFFERENT") current.different += 1;
-      if (item.status === "EXTERNAL_ONLY") current.external_only += 1;
-      if (item.status === "INTERNAL_ONLY") current.internal_only += 1;
-      return current;
-    },
-    {
-      total: 0,
-      matched: 0,
-      different: 0,
-      external_only: 0,
-      internal_only: 0,
-    },
-  );
-
-  return {
-    ideb_upload_id: upload.id,
-    debtor_id: id,
-    period_month: idebResultSummary(upload).period_month || null,
-    summary,
-    items,
   };
 };
 
@@ -1929,27 +1901,30 @@ exports.createDocument = async ({ req, debtorId, payload, userId }) => {
     }
   }
 
-  const fileMetas = persistDomainFiles({
-    entity: "debtor-documents",
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: payload.document_type,
-  });
-  const primaryFile = fileMetas[0] || null;
-  if (!primaryFile) throw new AppError("File dokumen wajib diunggah.", 422);
+  let fileMetas = [];
+  const document = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: "debtor-documents",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: payload.document_type,
+    });
+    const primaryFile = fileMetas[0] || null;
+    if (!primaryFile) throw new AppError("File dokumen wajib diunggah.", 422);
 
-  const document = await repository.createDocument({
-    debtor_id: debtorId,
-    contract_id: normalizeText(payload.contract_id),
-    document_checklist_id: normalizeText(payload.document_checklist_id),
-    document_type: normalizeUpper(checklist?.document_type || payload.document_type),
-    category: normalizeUpper(checklist?.category || payload.category || "LAINNYA"),
-    description: normalizeText(payload.description),
-    ...primaryFile,
-    files: {
-      create: buildStoredFiles(fileMetas),
-    },
-    uploaded_by: userId || null,
-    created_by: userId || null,
+    return repository.createDocument({
+      debtor_id: debtorId,
+      contract_id: normalizeText(payload.contract_id),
+      document_checklist_id: normalizeText(payload.document_checklist_id),
+      document_type: normalizeUpper(checklist?.document_type || payload.document_type),
+      category: normalizeUpper(checklist?.category || payload.category || "LAINNYA"),
+      description: normalizeText(payload.description),
+      ...primaryFile,
+      files: {
+        create: buildStoredFiles(fileMetas),
+      },
+      uploaded_by: userId || null,
+      created_by: userId || null,
+    });
   });
   await safeRecordDebtorActivity(undefined, {
     actor_id: userId || null,

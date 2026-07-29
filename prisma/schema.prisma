@@ -66,11 +66,13 @@ model users {
   digital_document_activity_logs      digital_document_activity_logs[]   @relation("DigitalDocumentActivityActor")
   debtor_activity_logs                debtor_activity_logs[]             @relation("DebtorActivityLogActor")
   legal_activity_logs                 legal_activity_logs[]              @relation("LegalActivityLogActor")
+  system_activity_logs                system_activity_logs[]             @relation("SystemActivityLogActor")
   received_notifications              notifications[]                    @relation("NotificationRecipient")
   created_notifications               notifications[]                    @relation("NotificationCreator")
   marketing_debtors                   digital_debtors[]                  @relation("DebtorMarketingOwner")
   marketing_contracts                 debtor_contracts[]                 @relation("ContractMarketingOwner")
   uploaded_ideb_reports               debtor_ideb_uploads[]              @relation("DebtorIdebUploader")
+  updated_collateral_expiries         debtor_collaterals[]               @relation("CollateralExpiryUpdater")
 
   created_outgoing_mails outgoing_mails[] @relation("OutgoingMailsCreator")
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
@@ -86,6 +88,8 @@ model users {
 
   @@index([deactivated_by])
   @@index([reactivated_by])
+  @@index([role_id])
+  @@index([division_id])
 }
 
 enum user_onboarding_statuses {
@@ -182,18 +186,22 @@ model auth_action_tokens {
 }
 
 model refresh_tokens {
-  id         String    @id @default(uuid())
-  user_id    String
-  token_hash String    @unique
-  expires_at DateTime
-  revoked_at DateTime?
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  user_id      String
+  token_hash   String    @unique
+  expires_at   DateTime
+  revoked_at   DateTime?
+  ip_address   String?
+  user_agent   String?
+  last_used_at DateTime  @default(now())
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
 
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, revoked_at])
   @@index([expires_at])
+  @@index([user_id, last_used_at])
 }
 
 model roles {
@@ -261,6 +269,7 @@ model role_menus {
   updated_at DateTime @updatedAt
 
   @@unique([role_id, menu_id])
+  @@index([menu_id])
 }
 
 model notifications {
@@ -457,6 +466,7 @@ model incoming_mails {
 
   @@index([letter_prioritie_id])
   @@index([storage_id])
+  @@index([created_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -502,6 +512,8 @@ model incoming_mail_dispositions {
   child_dispositions incoming_mail_dispositions[] @relation("IncomingMailDispositionChain")
 
   @@index([incoming_mails_id, status])
+  @@index([receiver_id, status])
+  @@index([sender_id])
   @@index([parent_disposition_id])
 }
 
@@ -599,7 +611,7 @@ model digital_debtors {
   warning_letters         debtor_warning_letters[]
   ideb_uploads            debtor_ideb_uploads[]
   activity_logs           debtor_activity_logs[]
-  legal_activity_logs     legal_activity_logs[] @relation("LegalActivityLogDebtor")
+  legal_activity_logs     legal_activity_logs[]            @relation("LegalActivityLogDebtor")
 
   @@index([name])
   @@index([financing_number])
@@ -769,6 +781,7 @@ model digital_document_access_requests {
   @@index([document_id, requester_id, status, expires_at], map: "digital_document_access_requests_document_requester_status_expi")
   @@index([requester_id, status])
   @@index([owner_id, status])
+  @@index([acted_by])
   @@index([status, expires_at])
 }
 
@@ -804,6 +817,10 @@ model digital_document_loans {
 
   @@index([document_id, status])
   @@index([borrower_id, status])
+  @@index([approved_by])
+  @@index([rejected_by])
+  @@index([handed_over_by])
+  @@index([returned_by])
   @@index([status, requested_due_date])
 }
 
@@ -868,6 +885,7 @@ model outgoing_mails {
 
   @@index([letter_prioritie_id])
   @@index([storage_id])
+  @@index([created_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -913,6 +931,7 @@ model memorandums {
 
   @@index([origin_division_id])
   @@index([storage_id])
+  @@index([created_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -958,6 +977,8 @@ model memorandum_dispositions {
   child_dispositions memorandum_dispositions[] @relation("MemorandumDispositionChain")
 
   @@index([memorandums_id, status])
+  @@index([receiver_id, status])
+  @@index([sender_id])
   @@index([parent_disposition_id])
 }
 
@@ -1061,11 +1082,11 @@ model third_parties {
   created_at     DateTime  @default(now())
   updated_at     DateTime  @updatedAt
 
-  notary_progress    legal_notary_progress[]
-  insurance_progress legal_insurance_progress[]
-  kjpp_progress      legal_kjpp_progress[]
-  deposits           legal_deposits[]
-  legal_activity_logs legal_activity_logs[] @relation("LegalActivityLogThirdParty")
+  notary_progress     legal_notary_progress[]
+  insurance_progress  legal_insurance_progress[]
+  kjpp_progress       legal_kjpp_progress[]
+  deposits            legal_deposits[]
+  legal_activity_logs legal_activity_logs[]      @relation("LegalActivityLogThirdParty")
 
   @@unique([category, name])
   @@index([category])
@@ -1246,7 +1267,7 @@ model debtor_contracts {
   claims              legal_claims[]
   deposits            legal_deposits[]
   activity_logs       debtor_activity_logs[]
-  legal_activity_logs legal_activity_logs[] @relation("LegalActivityLogContract")
+  legal_activity_logs legal_activity_logs[]            @relation("LegalActivityLogContract")
 
   @@index([debtor_id])
   @@index([product_id])
@@ -1386,6 +1407,11 @@ model debtor_collaterals {
   operation_code              String?
   period_month                String
   last_import_period_month    String?
+  has_expiry_date             Boolean   @default(false)
+  expiry_date                 DateTime?
+  expiry_note                 String?
+  expiry_updated_by           String?
+  expiry_updated_at           DateTime?
   raw_data                    Json?
   created_by                  String?
   updated_by                  String?
@@ -1396,17 +1422,20 @@ model debtor_collaterals {
 
   debtor                   digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
   contract                 debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  expiry_updater           users?                     @relation("CollateralExpiryUpdater", fields: [expiry_updated_by], references: [id], onDelete: SetNull)
   legal_notary_progress    legal_notary_progress[]
   legal_insurance_progress legal_insurance_progress[]
   legal_kjpp_progress      legal_kjpp_progress[]
   legal_claims             legal_claims[]
-  legal_activity_logs      legal_activity_logs[] @relation("LegalActivityLogCollateral")
+  legal_activity_logs      legal_activity_logs[]      @relation("LegalActivityLogCollateral")
 
   @@index([collateral_number, facility_number])
   @@index([debtor_id])
   @@index([contract_id])
   @@index([facility_number])
   @@index([period_month])
+  @@index([has_expiry_date, expiry_date])
+  @@index([expiry_updated_by])
   @@index([deleted_at])
 }
 
@@ -1437,10 +1466,10 @@ model debtor_import_jobs {
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt
 
-  records      debtor_external_records[]
-  segments     debtor_import_segments[]
-  slik_records debtor_slik_records[]
-  ideb_uploads debtor_ideb_uploads[]
+  records       debtor_external_records[]
+  segments      debtor_import_segments[]
+  slik_records  debtor_slik_records[]
+  ideb_uploads  debtor_ideb_uploads[]
   activity_logs debtor_activity_logs[]
 
   @@index([type, status])
@@ -1524,6 +1553,7 @@ model debtor_external_records {
   contract   debtor_contracts?   @relation(fields: [contract_id], references: [id], onDelete: SetNull)
 
   @@index([source_type, status])
+  @@index([import_job_id])
   @@index([debtor_id])
   @@index([contract_id])
   @@index([period_month])
@@ -1610,38 +1640,38 @@ model debtor_marketing_timelines {
 }
 
 model debtor_marketing_activities {
-  id                  String    @id @default(uuid())
-  activity_kind       String
-  debtor_id           String
-  contract_id         String?
-  timeline_id         String?
-  timeline_group_id   String?
-  related_activity_id String?
-  activity_date       DateTime?
-  target_date         DateTime?
-  status              String    @default("PENDING")
-  action_plan         String?
-  visit_address       String?
-  visit_latitude      Decimal?  @db.Decimal(9, 6)
-  visit_longitude     Decimal?  @db.Decimal(9, 6)
-  visit_location_accuracy_m Decimal? @db.Decimal(12, 3)
+  id                         String    @id @default(uuid())
+  activity_kind              String
+  debtor_id                  String
+  contract_id                String?
+  timeline_id                String?
+  timeline_group_id          String?
+  related_activity_id        String?
+  activity_date              DateTime?
+  target_date                DateTime?
+  status                     String    @default("PENDING")
+  action_plan                String?
+  visit_address              String?
+  visit_latitude             Decimal?  @db.Decimal(9, 6)
+  visit_longitude            Decimal?  @db.Decimal(9, 6)
+  visit_location_accuracy_m  Decimal?  @db.Decimal(12, 3)
   visit_location_recorded_at DateTime? @db.Timestamptz(3)
-  visit_result        String?
-  conclusion          String?
-  handling_step       String?
-  handling_result     String?
-  notes               String?
-  file_path           String?
-  file_name           String?
-  mime_type           String?
-  size_bytes          Int?
-  checksum            String?
-  created_by          String?
-  updated_by          String?
-  deleted_by          String?
-  deleted_at          DateTime?
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @updatedAt
+  visit_result               String?
+  conclusion                 String?
+  handling_step              String?
+  handling_result            String?
+  notes                      String?
+  file_path                  String?
+  file_name                  String?
+  mime_type                  String?
+  size_bytes                 Int?
+  checksum                   String?
+  created_by                 String?
+  updated_by                 String?
+  deleted_by                 String?
+  deleted_at                 DateTime?
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
 
   debtor             digital_debtors                   @relation(fields: [debtor_id], references: [id])
   contract           debtor_contracts?                 @relation(fields: [contract_id], references: [id], onDelete: SetNull)
@@ -1699,9 +1729,9 @@ model debtor_warning_letters {
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
 
-  debtor   digital_debtors               @relation(fields: [debtor_id], references: [id])
-  contract debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  files    debtor_warning_letter_files[]
+  debtor        digital_debtors               @relation(fields: [debtor_id], references: [id])
+  contract      debtor_contracts?             @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  files         debtor_warning_letter_files[]
   activity_logs debtor_activity_logs[]
 
   @@index([debtor_id])
@@ -1845,11 +1875,11 @@ model debtor_ideb_uploads {
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt
 
-  import_job debtor_import_jobs?        @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
-  debtor     digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract   debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
-  uploader   users?                     @relation("DebtorIdebUploader", fields: [uploaded_by], references: [id], onDelete: SetNull)
-  files      debtor_ideb_upload_files[]
+  import_job    debtor_import_jobs?        @relation(fields: [import_job_id], references: [id], onDelete: SetNull)
+  debtor        digital_debtors?           @relation(fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract      debtor_contracts?          @relation(fields: [contract_id], references: [id], onDelete: SetNull)
+  uploader      users?                     @relation("DebtorIdebUploader", fields: [uploaded_by], references: [id], onDelete: SetNull)
+  files         debtor_ideb_upload_files[]
   activity_logs debtor_activity_logs[]
 
   @@index([import_job_id])
@@ -1947,12 +1977,12 @@ model legal_activity_logs {
   user_agent             String?
   created_at             DateTime @default(now())
 
-  actor               users?                     @relation("LegalActivityLogActor", fields: [actor_id], references: [id], onDelete: SetNull)
-  debtor              digital_debtors?           @relation("LegalActivityLogDebtor", fields: [debtor_id], references: [id], onDelete: SetNull)
-  contract            debtor_contracts?          @relation("LegalActivityLogContract", fields: [contract_id], references: [id], onDelete: SetNull)
-  collateral          debtor_collaterals?        @relation("LegalActivityLogCollateral", fields: [collateral_id], references: [id], onDelete: SetNull)
+  actor               users?                      @relation("LegalActivityLogActor", fields: [actor_id], references: [id], onDelete: SetNull)
+  debtor              digital_debtors?            @relation("LegalActivityLogDebtor", fields: [debtor_id], references: [id], onDelete: SetNull)
+  contract            debtor_contracts?           @relation("LegalActivityLogContract", fields: [contract_id], references: [id], onDelete: SetNull)
+  collateral          debtor_collaterals?         @relation("LegalActivityLogCollateral", fields: [collateral_id], references: [id], onDelete: SetNull)
   third_party         third_parties?              @relation("LegalActivityLogThirdParty", fields: [third_party_id], references: [id], onDelete: SetNull)
-  deposit             legal_deposits?            @relation("LegalActivityLogDeposit", fields: [deposit_id], references: [id], onDelete: SetNull)
+  deposit             legal_deposits?             @relation("LegalActivityLogDeposit", fields: [deposit_id], references: [id], onDelete: SetNull)
   deposit_transaction legal_deposit_transactions? @relation("LegalActivityLogDepositTransaction", fields: [deposit_transaction_id], references: [id], onDelete: SetNull)
 
   @@index([actor_id, created_at])
@@ -1965,6 +1995,38 @@ model legal_activity_logs {
   @@index([third_party_id, created_at])
   @@index([deposit_id, created_at])
   @@index([deposit_transaction_id, created_at])
+}
+
+model system_activity_logs {
+  id              String   @id @default(uuid())
+  actor_id        String?
+  module          String
+  action          String
+  source          String   @default("API")
+  entity_type     String
+  entity_id       String?
+  object_label    String?
+  title           String
+  summary         String?
+  request_method  String?
+  request_path    String?
+  response_status Int?
+  request_id      String?
+  before_data     Json?
+  after_data      Json?
+  metadata        Json?
+  user_agent      String?
+  created_at      DateTime @default(now())
+
+  actor users? @relation("SystemActivityLogActor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([created_at])
+  @@index([actor_id, created_at])
+  @@index([module, created_at])
+  @@index([action, created_at])
+  @@index([source, created_at])
+  @@index([entity_type, entity_id])
+  @@index([request_id])
 }
 
 model legal_notary_progress {
@@ -2207,11 +2269,11 @@ model legal_deposits {
   created_at       DateTime  @default(now())
   updated_at       DateTime  @updatedAt
 
-  deposit_type deposit_types?               @relation(fields: [deposit_type_id], references: [id], onDelete: SetNull)
-  contract     debtor_contracts             @relation(fields: [contract_id], references: [id])
-  third_party  third_parties?               @relation(fields: [third_party_id], references: [id], onDelete: SetNull)
-  transactions legal_deposit_transactions[]
-  activity_logs legal_activity_logs[]       @relation("LegalActivityLogDeposit")
+  deposit_type  deposit_types?               @relation(fields: [deposit_type_id], references: [id], onDelete: SetNull)
+  contract      debtor_contracts             @relation(fields: [contract_id], references: [id])
+  third_party   third_parties?               @relation(fields: [third_party_id], references: [id], onDelete: SetNull)
+  transactions  legal_deposit_transactions[]
+  activity_logs legal_activity_logs[]        @relation("LegalActivityLogDeposit")
 
   @@index([deposit_type_id])
   @@index([type])
@@ -2235,9 +2297,9 @@ model legal_deposit_transactions {
   created_by       String?
   created_at       DateTime @default(now())
 
-  deposit legal_deposits                    @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
-  files   legal_deposit_transaction_files[]
-  activity_logs legal_activity_logs[]       @relation("LegalActivityLogDepositTransaction")
+  deposit       legal_deposits                    @relation(fields: [deposit_id], references: [id], onDelete: Cascade)
+  files         legal_deposit_transaction_files[]
+  activity_logs legal_activity_logs[]             @relation("LegalActivityLogDepositTransaction")
 
   @@index([deposit_id])
   @@index([transaction_date])

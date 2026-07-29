@@ -10,6 +10,8 @@ const UPLOAD_TEMP_DIR = process.env.UPLOAD_TEMP_DIR
   ? path.resolve(process.env.UPLOAD_TEMP_DIR)
   : path.join(UPLOAD_ROOT, "tmp", "uploads");
 const RESPONSE_TEMP_PATHS = Symbol("responseUploadTempPaths");
+const REQUEST_TEMP_PATHS = Symbol("requestUploadTempPaths");
+const ACTIVE_UPLOAD_TEMP_PATHS = new Set();
 
 function ensureUploadTempDir() {
   fs.mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
@@ -44,10 +46,31 @@ function isUploadTempPath(filePath) {
   );
 }
 
+function normalizeUploadTempPath(filePath) {
+  return isUploadTempPath(filePath) ? path.resolve(filePath) : null;
+}
+
+function markUploadTempPathActive(filePath) {
+  const normalized = normalizeUploadTempPath(filePath);
+  if (normalized) ACTIVE_UPLOAD_TEMP_PATHS.add(normalized);
+  return normalized;
+}
+
+function releaseUploadTempPath(filePath) {
+  const normalized = normalizeUploadTempPath(filePath);
+  if (normalized) ACTIVE_UPLOAD_TEMP_PATHS.delete(normalized);
+}
+
+function getActiveUploadTempPaths() {
+  return new Set(ACTIVE_UPLOAD_TEMP_PATHS);
+}
+
 function cleanupUploadTempFile(filePath) {
   if (!isUploadTempPath(filePath)) return;
 
-  fs.rm(filePath, { force: true }, () => {});
+  fs.rm(filePath, { force: true }, () => {
+    releaseUploadTempPath(filePath);
+  });
 }
 
 function cleanupUploadTempFileSync(filePath) {
@@ -55,7 +78,10 @@ function cleanupUploadTempFileSync(filePath) {
 
   try {
     fs.rmSync(filePath, { force: true });
-  } catch {}
+  } catch {
+  } finally {
+    releaseUploadTempPath(filePath);
+  }
 }
 
 function attachUploadTempCleanup(res, filePaths) {
@@ -85,7 +111,7 @@ function attachUploadTempCleanup(res, filePaths) {
 }
 
 function buildDiskUploadStorage(multer) {
-  return multer.diskStorage({
+  const storage = multer.diskStorage({
     destination(req, file, callback) {
       try {
         callback(null, ensureUploadTempDir());
@@ -94,9 +120,22 @@ function buildDiskUploadStorage(multer) {
       }
     },
     filename(req, file, callback) {
-      callback(null, createUploadTempFileName(file.originalname));
+      const fileName = createUploadTempFileName(file.originalname);
+      const tempPath = path.join(ensureUploadTempDir(), fileName);
+      markUploadTempPathActive(tempPath);
+      if (!req[REQUEST_TEMP_PATHS]) req[REQUEST_TEMP_PATHS] = new Set();
+      req[REQUEST_TEMP_PATHS].add(tempPath);
+      callback(null, fileName);
     },
   });
+  const removeFile = storage._removeFile.bind(storage);
+  storage._removeFile = (req, file, callback) => {
+    removeFile(req, file, (error) => {
+      releaseUploadTempPath(file?.path);
+      callback(error);
+    });
+  };
+  return storage;
 }
 
 module.exports = {
@@ -105,5 +144,8 @@ module.exports = {
   buildDiskUploadStorage,
   cleanupUploadTempFileSync,
   ensureUploadTempDir,
+  getActiveUploadTempPaths,
   isUploadTempPath,
+  markUploadTempPathActive,
+  releaseUploadTempPath,
 };

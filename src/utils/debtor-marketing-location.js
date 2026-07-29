@@ -6,6 +6,7 @@ const VISIT_LOCATION_AUDIT_FIELDS = [
   "visit_location_accuracy_m",
   "visit_location_recorded_at",
 ];
+const VISIT_LOCATION_MAX_ACCURACY_M = 100;
 
 function hasOwn(value, field) {
   return Object.prototype.hasOwnProperty.call(value || {}, field);
@@ -82,6 +83,12 @@ function resolveVisitLocation({
     }
     return currentLocation(current);
   }
+  if (!hasAccuracy) {
+    throw new AppError(
+      "Akurasi lokasi wajib dikirim bersama koordinat kunjungan.",
+      422,
+    );
+  }
 
   const latitude = validateCoordinate(payload.visit_latitude, {
     label: "Latitude kunjungan",
@@ -93,12 +100,19 @@ function resolveVisitLocation({
     min: -180,
     max: 180,
   });
-  const accuracy = hasAccuracy
-    ? toFiniteNumber(payload.visit_location_accuracy_m, "Akurasi lokasi")
-    : null;
+  const accuracy = toFiniteNumber(
+    payload.visit_location_accuracy_m,
+    "Akurasi lokasi",
+  );
 
-  if (accuracy !== null && accuracy < 0) {
+  if (accuracy < 0) {
     throw new AppError("Akurasi lokasi tidak boleh bernilai negatif.", 422);
+  }
+  if (accuracy > VISIT_LOCATION_MAX_ACCURACY_M) {
+    throw new AppError(
+      `Akurasi lokasi harus ${VISIT_LOCATION_MAX_ACCURACY_M} meter atau lebih baik.`,
+      422,
+    );
   }
 
   const recordedAt = now();
@@ -131,6 +145,7 @@ function serializeVisitLocation(item = {}) {
 
 module.exports = {
   VISIT_LOCATION_AUDIT_FIELDS,
+  VISIT_LOCATION_MAX_ACCURACY_M,
   resolveVisitLocation,
   serializeVisitLocation,
 };
