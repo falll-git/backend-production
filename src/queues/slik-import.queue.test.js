@@ -99,6 +99,10 @@ test("health queue melaporkan worker aktif dan backlog tanpa data koneksi", asyn
 });
 
 test("job tetap masuk backlog saat worker belum aktif dan health pulih saat worker aktif", async () => {
+  const originalEnabled = process.env.SLIK_IMPORT_QUEUE_ENABLED;
+  const originalRequired = process.env.SLIK_IMPORT_REQUIRE_WORKER;
+  process.env.SLIK_IMPORT_QUEUE_ENABLED = "true";
+  process.env.SLIK_IMPORT_REQUIRE_WORKER = "true";
   const added = [];
   let workerCount = 0;
   const jobs = new Map();
@@ -126,32 +130,45 @@ test("job tetap masuk backlog saat worker belum aktif dan health pulih saat work
     },
   };
 
-  const queuedJob = await runWithRequestContext(
-    { request_id: "request-import-123" },
-    () =>
-      enqueueSlikImportJob({
-        jobId: "import-123",
-        userId: "user-123",
-        queueInstance,
-      }),
-  );
-  const withoutWorker = await checkSlikImportQueueHealth(1000, {
-    queueInstance,
-  });
+  try {
+    const queuedJob = await runWithRequestContext(
+      { request_id: "request-import-123" },
+      () =>
+        enqueueSlikImportJob({
+          jobId: "import-123",
+          userId: "user-123",
+          queueInstance,
+        }),
+    );
+    const withoutWorker = await checkSlikImportQueueHealth(1000, {
+      queueInstance,
+    });
 
-  assert.equal(queuedJob.id, "slik-import-import-123");
-  assert.equal(queuedJob.data.requestId, "request-import-123");
-  assert.equal(added.length, 1);
-  assert.equal(withoutWorker.workers_available, false);
-  assert.equal(withoutWorker.queue_counts.waiting, 1);
+    assert.equal(queuedJob.id, "slik-import-import-123");
+    assert.equal(queuedJob.data.requestId, "request-import-123");
+    assert.equal(added.length, 1);
+    assert.equal(withoutWorker.workers_available, false);
+    assert.equal(withoutWorker.queue_counts.waiting, 1);
 
-  workerCount = 1;
-  const recovered = await checkSlikImportQueueHealth(1000, {
-    queueInstance,
-  });
-  assert.equal(recovered.workers_available, true);
-  assert.equal(recovered.worker_count, 1);
-  assert.equal(recovered.queue_counts.waiting, 1);
+    workerCount = 1;
+    const recovered = await checkSlikImportQueueHealth(1000, {
+      queueInstance,
+    });
+    assert.equal(recovered.workers_available, true);
+    assert.equal(recovered.worker_count, 1);
+    assert.equal(recovered.queue_counts.waiting, 1);
+  } finally {
+    if (originalEnabled === undefined) {
+      delete process.env.SLIK_IMPORT_QUEUE_ENABLED;
+    } else {
+      process.env.SLIK_IMPORT_QUEUE_ENABLED = originalEnabled;
+    }
+    if (originalRequired === undefined) {
+      delete process.env.SLIK_IMPORT_REQUIRE_WORKER;
+    } else {
+      process.env.SLIK_IMPORT_REQUIRE_WORKER = originalRequired;
+    }
+  }
 });
 
 test("shutdown queue memutus koneksi Redis eksternal agar proses tidak tertahan retry", async () => {

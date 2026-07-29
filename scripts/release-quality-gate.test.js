@@ -146,17 +146,22 @@ test("health URL harus memakai port backend yang sama", () => {
 });
 
 test("timeout dan direktori laporan divalidasi ketat", () => {
+  const backendDirectory = path.resolve("backend");
   assert.equal(parseDurationMs(undefined, "TIMEOUT", 1234), 1234);
   assert.equal(parseDurationMs("5000", "TIMEOUT", 1234), 5000);
   assert.throws(() => parseDurationMs("999", "TIMEOUT", 1234), /1000/);
   assert.throws(() => parseDurationMs("abc", "TIMEOUT", 1234), /bilangan/);
   assert.throws(
-    () => resolveReportDirectory({ QUALITY_GATE_REPORT_DIR: "." }, "C:\\backend"),
+    () =>
+      resolveReportDirectory(
+        { QUALITY_GATE_REPORT_DIR: "." },
+        backendDirectory,
+      ),
     /tidak aman/,
   );
   assert.equal(
-    resolveReportDirectory({}, "C:\\backend"),
-    path.resolve("C:\\backend", "quality-reports"),
+    resolveReportDirectory({}, backendDirectory),
+    path.resolve(backendDirectory, "quality-reports"),
   );
 });
 
