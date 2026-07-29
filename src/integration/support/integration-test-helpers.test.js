@@ -15,18 +15,47 @@ test("guard integration menerima database loopback", () => {
   assert.equal(result.hostname, "127.0.0.1");
 });
 
-test("guard integration menerima database remote yang eksplisit bernama test", () => {
+test("guard integration menerima service PostgreSQL khusus GitHub Actions", () => {
   const result = assertSafeIntegrationDatabase("test", {
-    DATABASE_URL: "postgresql://user:secret@postgres:5432/ruwang_arsip_test",
+    CI: "true",
+    GITHUB_ACTIONS: "true",
+    DATABASE_URL: "postgresql://postgres:5432/ruwang_arsip_ci",
   });
-  assert.equal(result.databaseName, "ruwang_arsip_test");
+  assert.deepEqual(result, {
+    databaseName: "ruwang_arsip_ci",
+    hostname: "postgres",
+  });
 });
 
-test("guard integration menolak database remote tanpa penanda test/local", () => {
+test("guard integration menolak service PostgreSQL di luar GitHub Actions", () => {
   assert.throws(
     () =>
       assertSafeIntegrationDatabase("test", {
-        DATABASE_URL: "postgresql://user:secret@db.example.invalid:5432/production",
+        CI: "true",
+        DATABASE_URL: "postgresql://postgres:5432/ruwang_arsip_ci",
+      }),
+    /ditolak/,
+  );
+});
+
+test("guard integration menolak service GitHub Actions tanpa penanda ci/test/local", () => {
+  assert.throws(
+    () =>
+      assertSafeIntegrationDatabase("test", {
+        CI: "true",
+        GITHUB_ACTIONS: "true",
+        DATABASE_URL: "postgresql://postgres:5432/ruwang_arsip",
+      }),
+    /ditolak/,
+  );
+});
+
+test("guard integration menolak database remote biasa walau bernama test", () => {
+  assert.throws(
+    () =>
+      assertSafeIntegrationDatabase("test", {
+        DATABASE_URL:
+          "postgresql://db.example.invalid:5432/ruwang_arsip_test",
       }),
     /ditolak/,
   );

@@ -19,13 +19,17 @@ function assertSafeIntegrationDatabase(label = "Integration test", env = process
     hostname === "[::1]" ||
     hostname === "::1" ||
     hostname.startsWith("127.");
-  const explicitlyTestDatabase = /(?:^|[_-])(?:test|local)(?:$|[_-])/i.test(
+  const githubService =
+    hostname === "postgres" &&
+    String(env.CI || "").trim().toLowerCase() === "true" &&
+    String(env.GITHUB_ACTIONS || "").trim().toLowerCase() === "true";
+  const explicitlyTestDatabase = /(?:^|[_-])(?:ci|test|local)(?:$|[_-])/i.test(
     databaseName,
   );
 
-  if (!loopback && !explicitlyTestDatabase) {
+  if (!loopback && !(githubService && explicitlyTestDatabase)) {
     throw new Error(
-      `${label} ditolak: DATABASE_URL harus loopback atau memakai database bernama test/local.`,
+      `${label} ditolak: DATABASE_URL harus loopback atau service PostgreSQL GitHub Actions dengan database ci/test/local.`,
     );
   }
 
