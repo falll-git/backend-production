@@ -154,6 +154,7 @@ function createIntegrationFixture(prisma, label, options = {}) {
       ...values("legalClaim"),
       ...values("legalDeposit"),
       ...values("legalTransaction"),
+      ...values("thirdParty"),
       ...values("debtorDocument"),
       ...values("marketingActivity"),
       ...values("warningLetter"),
@@ -229,6 +230,13 @@ function createIntegrationFixture(prisma, label, options = {}) {
     if (legalInsuranceIds.length > 0) {
       await prisma.legal_insurance_progress.deleteMany({
         where: { id: { in: legalInsuranceIds } },
+      });
+    }
+
+    const thirdPartyIds = values("thirdParty");
+    if (thirdPartyIds.length > 0) {
+      await prisma.third_parties.deleteMany({
+        where: { id: { in: thirdPartyIds } },
       });
     }
 

@@ -80,31 +80,35 @@ test(
       where: { username: credentials.username.toLowerCase() },
     });
     assert.ok(admin, "Admin integration test wajib tersedia.");
-    const [product, contractType, notary, insurance, kjpp, staffRole, division] =
-      await Promise.all([
+    const [product, contractType, staffRole, division] = await Promise.all([
       prisma.financing_products.findFirst({ where: { is_active: true } }),
       prisma.contract_types.findFirst({ where: { is_active: true } }),
-      prisma.third_parties.findFirst({
-        where: { category: "NOTARY", is_active: true, deleted_at: null },
-      }),
-      prisma.third_parties.findFirst({
-        where: { category: "INSURANCE", is_active: true, deleted_at: null },
-      }),
-      prisma.third_parties.findFirst({
-        where: { category: "KJPP", is_active: true, deleted_at: null },
-      }),
       prisma.roles.findUnique({ where: { name: "Staf" } }),
       prisma.divisions.findFirst({ orderBy: { created_at: "asc" } }),
     ]);
     assert.ok(product, "Produk pembiayaan aktif wajib tersedia.");
     assert.ok(contractType, "Jenis akad aktif wajib tersedia.");
-    assert.ok(notary, "Pihak ketiga NOTARY aktif wajib tersedia.");
-    assert.ok(insurance, "Pihak ketiga INSURANCE aktif wajib tersedia.");
-    assert.ok(kjpp, "Pihak ketiga KJPP aktif wajib tersedia.");
     assert.ok(staffRole, "Role Staf wajib tersedia.");
     assert.ok(division, "Divisi baseline wajib tersedia.");
 
     const suffix = fixture.runId.replace(/-/g, "").slice(0, 10);
+    const thirdParties = {};
+    for (const category of ["NOTARY", "INSURANCE", "KJPP"]) {
+      const thirdParty = await prisma.third_parties.create({
+        data: {
+          code: `IT-${category}-${suffix}`,
+          name: fixture.name(`Pihak Ketiga ${category}`),
+          category,
+          is_active: true,
+          created_by: admin.id,
+        },
+      });
+      fixture.track("thirdParty", thirdParty.id);
+      thirdParties[category] = thirdParty;
+    }
+    const notary = thirdParties.NOTARY;
+    const insurance = thirdParties.INSURANCE;
+    const kjpp = thirdParties.KJPP;
     const outsider = await createActiveUser(prisma, fixture, {
       username: `it_legal_outsider_${suffix}`,
       roleId: staffRole.id,
