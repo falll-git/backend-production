@@ -41,6 +41,16 @@ test("workflow Quality mewajibkan semua checkout memutus credential Git", () => 
   );
 });
 
+test("workflow Quality mewajibkan Prisma Client dibuat sebelum seed", () => {
+  assert.throws(
+    () =>
+      validateQualityWorkflow(
+        workflow.replace(/\n\s+- name: Generate Prisma client[\s\S]*?run: npm run prisma:generate\n/, "\n"),
+      ),
+    /Prisma Client/,
+  );
+});
+
 test("workflow Quality menolak pull_request_target", () => {
   assert.throws(
     () => validateQualityWorkflow(`${workflow}\npull_request_target:\n`),

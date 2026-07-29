@@ -15,6 +15,7 @@ const REQUIRED_PATTERNS = Object.freeze([
   [/^\s+postgres:\s*$/m, "PostgreSQL service CI"],
   [/postgresql:\/\/postgres:postgres@postgres:5432\/ruwang_arsip_ci\?schema=public/, "database PostgreSQL service khusus CI"],
   [/^\s+persist-credentials:\s*false\s*$/m, "checkout tanpa menyimpan credential Git"],
+  [/npm run prisma:generate/, "Prisma Client generation"],
   [/npm run quality:release/, "quality gate release"],
   [/^\s+if:\s*\$\{\{\s*failure\(\)\s*\}\}\s*$/m, "artefak hanya saat gagal"],
   [/^\s+retention-days:\s*\d+\s*$/m, "retensi artefak terbatas"],
@@ -51,6 +52,12 @@ export function validateQualityWorkflow(source) {
   ).length;
   if (detachedCheckoutCount < checkoutCount) {
     errors.push("Setiap checkout wajib memakai persist-credentials: false.");
+  }
+
+  const prismaGenerateIndex = text.indexOf("npm run prisma:generate");
+  const seedIndex = text.indexOf("npm run seed");
+  if (prismaGenerateIndex < 0 || seedIndex < 0 || prismaGenerateIndex > seedIndex) {
+    errors.push("Prisma Client wajib dibuat sebelum database CI di-seed.");
   }
 
   const unpinnedActions = text

@@ -162,6 +162,10 @@ jobs:
         working-directory: frontend-production
         run: npm ci
 
+      - name: Generate Prisma client
+        working-directory: backend-production
+        run: npm run prisma:generate
+
       - name: Prepare ephemeral storage
         shell: bash
         run: mkdir -p "$UPLOAD_DIR" "$UPLOAD_TEMP_DIR"
