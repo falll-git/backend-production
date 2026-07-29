@@ -256,6 +256,7 @@ function createLogger({
       },
       base: {
         service: "ruwang-arsip-backend",
+        app_instance: env.APP_INSTANCE_KEY || "local",
         runtime_role: env.RUNTIME_ROLE || "api",
         environment: env.NODE_ENV || "development",
         pid: process.pid,

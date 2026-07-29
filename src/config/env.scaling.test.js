@@ -29,6 +29,7 @@ function productionScalingEnv(overrides = {}) {
   return {
     NODE_ENV: "production",
     RUNTIME_ROLE: "api",
+    APP_INSTANCE_KEY: "demoruwangarsip",
     DB_WORKER_POOL_MAX: "3",
     HTTP_KEEP_ALIVE_TIMEOUT_MS: "65000",
     HTTP_HEADERS_TIMEOUT_MS: "66000",
@@ -39,10 +40,12 @@ function productionScalingEnv(overrides = {}) {
     JOB_QUEUE_REDIS_URL: "redis://127.0.0.1:6379",
     JOB_QUEUE_REDIS_CONNECT_TIMEOUT_MS: "5000",
     SLIK_IMPORT_QUEUE_ENABLED: "true",
+    SLIK_IMPORT_QUEUE_NAME: "ruwang-arsip-demoruwangarsip-slik-import",
     SLIK_IMPORT_LOCAL_FALLBACK_ENABLED: "false",
     SLIK_IMPORT_REQUIRE_WORKER: "true",
     WORKER_SHUTDOWN_TIMEOUT_MS: "120000",
-    WORKER_HEARTBEAT_KEY_PREFIX: "ruwang-arsip:worker-heartbeat",
+    WORKER_HEARTBEAT_KEY_PREFIX:
+      "ruwang-arsip:demoruwangarsip:worker-heartbeat",
     WORKER_HEARTBEAT_INTERVAL_MS: "5000",
     WORKER_HEARTBEAT_TTL_MS: "15000",
     WORKER_HEARTBEAT_REDIS_CONNECT_TIMEOUT_MS: "1000",
@@ -114,4 +117,23 @@ test("production tidak boleh mematikan least privilege atau RLS", () => {
 
   assert.match(message, /DB_REQUIRE_LEAST_PRIVILEGE wajib true/);
   assert.match(message, /DB_REQUIRE_RLS wajib true/);
+});
+
+test("production menolak namespace Redis yang tidak memuat instance domain", () => {
+  const message = validationMessage(
+    productionScalingEnv({
+      APP_CACHE_KEY_PREFIX: "ruwang-arsip:cache",
+      RATE_LIMIT_KEY_PREFIX: "ruwang-arsip:rate-limit",
+      SLIK_IMPORT_QUEUE_NAME: "ruwang-arsip-slik-import",
+      WORKER_HEARTBEAT_KEY_PREFIX: "ruwang-arsip:worker-heartbeat",
+    }),
+  );
+
+  assert.match(message, /APP_CACHE_KEY_PREFIX wajib memuat APP_INSTANCE_KEY/);
+  assert.match(message, /RATE_LIMIT_KEY_PREFIX wajib memuat APP_INSTANCE_KEY/);
+  assert.match(message, /SLIK_IMPORT_QUEUE_NAME wajib memuat APP_INSTANCE_KEY/);
+  assert.match(
+    message,
+    /WORKER_HEARTBEAT_KEY_PREFIX wajib memuat APP_INSTANCE_KEY/,
+  );
 });
