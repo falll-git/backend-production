@@ -1,0 +1,12 @@
+# Include di dalam location API setelah OWASP CRS diuji dalam detection mode.
+limit_req zone=ruwang_api burst=40 nodelay;
+limit_conn ruwang_conn 30;
+client_body_timeout 30s;
+client_header_timeout 15s;
+send_timeout 60s;
+client_max_body_size 1g;
+
+# Directive ini membuat `nginx -t` gagal bila ModSecurity belum terpasang.
+# Aktifkan hanya setelah modul dan /etc/nginx/modsec/main.conf tersedia.
+modsecurity on;
+modsecurity_rules_file /etc/nginx/modsec/main.conf;

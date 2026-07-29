@@ -3,6 +3,9 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
@@ -23,9 +26,9 @@ const MANAGE_MENU_URL = "/dashboard/informasi-debitur/master-debitur";
 const uploadBody = [uploadDomainFiles("files", 20), normalizePersuratanMultipartBody({})];
 
 router.get("/", auth, authorize(READ_MENU_URLS, "read"), controller.getAll);
-router.post("/", auth, authorize(MANAGE_MENU_URL, "create"), ...uploadBody, validate(createWarningLetterSchema), controller.create);
+router.post("/", auth, authorize(MANAGE_MENU_URL, "create"), uploadRateLimit, ...uploadBody, validate(createWarningLetterSchema), controller.create);
 router.get("/:id", auth, authorize(READ_MENU_URLS, "read"), controller.getById);
-router.put("/:id", auth, authorize(MANAGE_MENU_URL, "update"), ...uploadBody, validate(updateWarningLetterSchema), controller.update);
+router.put("/:id", auth, authorize(MANAGE_MENU_URL, "update"), uploadRateLimit, ...uploadBody, validate(updateWarningLetterSchema), controller.update);
 router.delete("/:id", auth, authorize(MANAGE_MENU_URL, "delete"), controller.delete);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 const IDEB_USER_SELECT = {
   id: true,
@@ -219,7 +220,7 @@ function findIdebUploadById(
 }
 
 function transaction(callback, options) {
-  return prisma.$transaction(callback, options);
+  return withDatabaseTransaction(callback, options);
 }
 
 module.exports = {

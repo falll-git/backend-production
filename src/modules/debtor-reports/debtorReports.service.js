@@ -7,7 +7,10 @@ const {
 } = require("../../utils/debtor-access");
 const { REPORT_ALL_FEATURE } = require("../../utils/menu-access");
 const { roleHasFeature } = require("../../utils/rbac");
-const { serializeFile } = require("../../utils/domain-files");
+const {
+  serializeFile,
+  serializeFiles,
+} = require("../../utils/domain-files");
 const {
   serializeVisitLocation,
 } = require("../../utils/debtor-marketing-location");
@@ -21,6 +24,9 @@ const {
   resolveSlikReference,
   withSlikReferenceFields,
 } = require("../../utils/slik-reference-dictionary");
+const {
+  buildCollateralMonitoring,
+} = require("../../utils/collateral-monitoring");
 
 const REPORT_URLS = {
   summary: "/dashboard/informasi-debitur/laporan",
@@ -602,6 +608,7 @@ function serializeDebtor(debtor, aggregate = null, options = {}) {
 
 function serializeCollateral(item) {
   if (!item) return null;
+  const monitoring = buildCollateralMonitoring(item, new Date());
   return withSlikReferenceFields({
     id: item.id,
     debtor_id: item.debtor_id,
@@ -637,6 +644,11 @@ function serializeCollateral(item) {
     operation_code: item.operation_code,
     period_month: item.period_month,
     last_import_period_month: item.last_import_period_month,
+    ...monitoring,
+    expiry_note: item.expiry_note,
+    expiry_updated_by: item.expiry_updated_by,
+    expiry_updated_at: item.expiry_updated_at,
+    expiry_updater: serializeUser(item.expiry_updater),
     debtor: serializeDebtorSummary(item.debtor || item.contract?.debtor),
     contract: item.contract
       ? {
@@ -746,6 +758,10 @@ function serializeMarketingReportActivity(req, item) {
     file: serializeFile(req, item, {
       module: "debtor_information",
       entityId: item.id,
+      fallbackBaseName: item.activity_kind,
+    }),
+    files: serializeFiles(req, item, {
+      module: "debtor_information",
       fallbackBaseName: item.activity_kind,
     }),
     created_at: item.created_at,
@@ -1391,9 +1407,7 @@ exports.getCompleteness = async (query = {}, userId = null) => {
               issue_type: "REQUIRED_DOCUMENTS_INCOMPLETE",
               debtor,
               debtorAggregate: aggregate,
-            }, {
-              preferredPeriodMonth,
-            });
+            }, { preferredPeriodMonth });
           })
           .filter(Boolean);
       }),

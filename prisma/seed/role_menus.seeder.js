@@ -22,6 +22,7 @@ const DASHBOARD_URL = "/dashboard";
 const DASHBOARD_WIDGET_MENU_TYPE = "DASHBOARD_WIDGET";
 const URLS = {
   dashboard: DASHBOARD_URL,
+  accountSecurity: "/dashboard/account/security",
   storageUsage: "/dashboard/storage-usage",
 
   archiveInput: "/dashboard/arsip-digital/input-dokumen",
@@ -74,6 +75,8 @@ const URLS = {
     "/dashboard/legal/laporan/pihak-ketiga/dokumen",
   legalReportThirdPartyDepositFunds:
     "/dashboard/legal/laporan/pihak-ketiga/dana-titipan",
+
+  activityCentre: "/dashboard/activity-centre",
 
   users: "/dashboard/users",
   role: "/dashboard/parameter/role",
@@ -198,7 +201,9 @@ const DISABLED_MENU_URLS = [
 const ROLE_MENU_POLICIES = {
   Admin: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.accountSecurity, permissions: ["read"] },
     { url: URLS.storageUsage, permissions: ["read"] },
+    { url: URLS.activityCentre, permissions: ["read"] },
 
     ...CORE_PARAMETER_URLS.map((url) => ({
       url,
@@ -323,7 +328,9 @@ const ROLE_MENU_POLICIES = {
   ],
   Manager: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.accountSecurity, permissions: ["read"] },
     { url: URLS.storageUsage, permissions: ["read"] },
+    { url: URLS.activityCentre, permissions: ["read"] },
 
     {
       url: URLS.archiveStorage,
@@ -450,6 +457,7 @@ const ROLE_MENU_POLICIES = {
   ],
   Supervisor: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.accountSecurity, permissions: ["read"] },
 
     {
       url: URLS.archiveInput,
@@ -573,6 +581,7 @@ const ROLE_MENU_POLICIES = {
   ],
   Staf: [
     { url: URLS.dashboard, permissions: ["read"] },
+    { url: URLS.accountSecurity, permissions: ["read"] },
 
     { url: URLS.archiveInput, permissions: ["create", "read"] },
     { url: URLS.archiveStorage, permissions: ["read"] },

@@ -7,9 +7,9 @@ const {
 } = require("../../utils/pagination");
 const {
   normalizeUploadFiles,
-  persistDomainFiles,
   serializeFile,
   serializeFiles,
+  withDomainFileRollback,
 } = require("../../utils/domain-files");
 const {
   buildContractManageWhere,
@@ -117,6 +117,18 @@ function buildWhere(query) {
   return { AND: clauses };
 }
 
+function buildRelatedAccessWhere(debtorWhere, contractWhere) {
+  const clauses = [];
+  if (debtorWhere && Object.keys(debtorWhere).length > 0) {
+    clauses.push({ debtor: debtorWhere });
+  }
+  if (contractWhere && Object.keys(contractWhere).length > 0) {
+    clauses.push({ contract: contractWhere });
+  }
+
+  return clauses.length > 0 ? { OR: clauses } : {};
+}
+
 function normalizePayload(payload, current = {}) {
   return {
     debtor_id: normalizeText(payload.debtor_id) ?? current.debtor_id,
@@ -168,15 +180,16 @@ async function ensureReferences(data, userId) {
 exports.getAll = async ({ req, query, userId }) => {
   const pagination = resolvePagination(query, PAGINATION_PROFILES.TABLE);
   const scope = await getDebtorAccessScope(userId, READ_SCOPE_URLS);
+  const relatedAccessWhere = buildRelatedAccessWhere(
+    buildDebtorVisibilityWhere(scope),
+    buildContractVisibilityWhere(scope),
+  );
   const where = {
     AND: [
       buildWhere(query),
-      {
-        OR: [
-          { debtor: buildDebtorVisibilityWhere(scope) },
-          { contract: buildContractVisibilityWhere(scope) },
-        ],
-      },
+      ...(Object.keys(relatedAccessWhere).length > 0
+        ? [relatedAccessWhere]
+        : []),
     ],
   };
   const [data, total] = await Promise.all([
@@ -196,12 +209,13 @@ exports.getAll = async ({ req, query, userId }) => {
 
 exports.getById = async ({ req, id, userId }) => {
   const scope = await getDebtorAccessScope(userId, READ_SCOPE_URLS);
+  const relatedAccessWhere = buildRelatedAccessWhere(
+    buildDebtorVisibilityWhere(scope),
+    buildContractVisibilityWhere(scope),
+  );
   const item = await repository.findById(id, {
     deleted_at: null,
-    OR: [
-      { debtor: buildDebtorVisibilityWhere(scope) },
-      { contract: buildContractVisibilityWhere(scope) },
-    ],
+    ...relatedAccessWhere,
   });
   if (!item) throw new AppError("Surat peringatan tidak ditemukan.", 404);
   return serialize(req, item);
@@ -210,12 +224,13 @@ exports.getById = async ({ req, id, userId }) => {
 exports.getByIdForManage = async ({ req, id, userId }) => {
   void req;
   const scope = await getDebtorAccessScope(userId, MANAGE_SCOPE_URLS);
+  const relatedAccessWhere = buildRelatedAccessWhere(
+    buildDebtorManageWhere(scope),
+    buildContractManageWhere(scope),
+  );
   const item = await repository.findById(id, {
     deleted_at: null,
-    OR: [
-      { debtor: buildDebtorManageWhere(scope) },
-      { contract: buildContractManageWhere(scope) },
-    ],
+    ...relatedAccessWhere,
   });
   if (!item) {
     throw new AppError("Surat peringatan tidak ditemukan atau tidak bisa dikelola.", 404);
@@ -226,27 +241,26 @@ exports.getByIdForManage = async ({ req, id, userId }) => {
 exports.create = async ({ req, payload, userId }) => {
   const data = normalizePayload(payload);
   await ensureReferences(data, userId);
-  const fileMetas = persistDomainFiles({
-    entity: "debtor-warning-letters",
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: data.letter_type,
-  });
-  if (fileMetas.length === 0) {
-    throw new AppError("File surat peringatan wajib dipilih.", 400);
-  }
-  const primaryFile = fileMetas[0] || null;
+  let fileMetas = [];
+  const created = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: "debtor-warning-letters",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: data.letter_type,
+    });
+    if (fileMetas.length === 0) {
+      throw new AppError("File surat peringatan wajib dipilih.", 400);
+    }
+    const primaryFile = fileMetas[0] || null;
 
-  const created = await repository.create({
-    ...data,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    created_by: userId || null,
+    return repository.create({
+      ...data,
+      ...(primaryFile || {}),
+      files: {
+        create: buildStoredFiles(fileMetas),
+      },
+      created_by: userId || null,
+    });
   });
   await safeRecordDebtorActivity(undefined, {
     actor_id: userId || null,
@@ -273,25 +287,28 @@ exports.update = async ({ req, id, payload, userId }) => {
   const current = await exports.getByIdForManage({ req, id, userId });
   const data = normalizePayload(payload, current);
   await ensureReferences(data, userId);
-  const fileMetas = persistDomainFiles({
-    entity: "debtor-warning-letters",
-    inputs: normalizeUploadFiles(payload),
-    fallbackBaseName: data.letter_type,
-  });
-  const primaryFile =
-    !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
+  let fileMetas = [];
+  const updated = await withDomainFileRollback(async (persistFiles) => {
+    fileMetas = persistFiles({
+      entity: "debtor-warning-letters",
+      inputs: normalizeUploadFiles(payload),
+      fallbackBaseName: data.letter_type,
+    });
+    const primaryFile =
+      !current.file_path && fileMetas.length > 0 ? fileMetas[0] : null;
 
-  const updated = await repository.update(id, {
-    ...data,
-    ...(primaryFile || {}),
-    ...(fileMetas.length > 0
-      ? {
-          files: {
-            create: buildStoredFiles(fileMetas),
-          },
-        }
-      : {}),
-    updated_by: userId || null,
+    return repository.update(id, {
+      ...data,
+      ...(primaryFile || {}),
+      ...(fileMetas.length > 0
+        ? {
+            files: {
+              create: buildStoredFiles(fileMetas),
+            },
+          }
+        : {}),
+      updated_by: userId || null,
+    });
   });
   await safeRecordDebtorActivity(undefined, {
     actor_id: userId || null,

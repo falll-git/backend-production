@@ -1,4 +1,8 @@
 const prisma = require("../../config/prisma");
+const {
+  withRlsUserContext,
+  withSystemDatabaseClient,
+} = require("../../config/database-rls");
 
 const USER_SELECT = {
   id: true,
@@ -16,8 +20,8 @@ const notificationInclude = {
   },
 };
 
-function findMany({ where, skip, take }) {
-  return prisma.notifications.findMany({
+function findMany({ where, skip, take, userId }) {
+  return withRlsUserContext(userId, (client) => client.notifications.findMany({
     where,
     skip,
     take,
@@ -25,62 +29,64 @@ function findMany({ where, skip, take }) {
       created_at: "desc",
     },
     include: notificationInclude,
-  });
+  }));
 }
 
-function count(where) {
-  return prisma.notifications.count({ where });
+function count(where, userId) {
+  return withRlsUserContext(userId, (client) =>
+    client.notifications.count({ where }),
+  );
 }
 
 function countUnread(recipientId) {
-  return prisma.notifications.count({
+  return withRlsUserContext(recipientId, (client) => client.notifications.count({
     where: {
       recipient_id: recipientId,
       read_at: null,
       deleted_at: null,
     },
-  });
+  }));
 }
 
 function findByIdForRecipient(id, recipientId) {
-  return prisma.notifications.findFirst({
+  return withRlsUserContext(recipientId, (client) => client.notifications.findFirst({
     where: {
       id,
       recipient_id: recipientId,
       deleted_at: null,
     },
     include: notificationInclude,
-  });
+  }));
 }
 
 function findByDedupeKey(dedupeKey) {
   if (!dedupeKey) return null;
 
-  return prisma.notifications.findUnique({
+  return withSystemDatabaseClient((client) => client.notifications.findUnique({
     where: {
       dedupe_key: dedupeKey,
     },
     include: notificationInclude,
-  });
+  }));
 }
 
 async function create(data) {
-  return prisma.notifications.create({
+  return withSystemDatabaseClient((client) => client.notifications.create({
     data,
     include: notificationInclude,
-  });
+  }));
 }
 
 function update(id, data) {
-  return prisma.notifications.update({
+  return withSystemDatabaseClient((client) => client.notifications.update({
     where: { id },
     data,
     include: notificationInclude,
-  });
+  }));
 }
 
 function markRead(id, recipientId) {
-  return prisma.notifications.updateMany({
+  return withRlsUserContext(recipientId, (client) => client.notifications.updateMany({
     where: {
       id,
       recipient_id: recipientId,
@@ -90,11 +96,11 @@ function markRead(id, recipientId) {
     data: {
       read_at: new Date(),
     },
-  });
+  }));
 }
 
 function markAllRead(recipientId) {
-  return prisma.notifications.updateMany({
+  return withRlsUserContext(recipientId, (client) => client.notifications.updateMany({
     where: {
       recipient_id: recipientId,
       deleted_at: null,
@@ -103,11 +109,11 @@ function markAllRead(recipientId) {
     data: {
       read_at: new Date(),
     },
-  });
+  }));
 }
 
 function softDeleteOne(id, recipientId) {
-  return prisma.notifications.updateMany({
+  return withRlsUserContext(recipientId, (client) => client.notifications.updateMany({
     where: {
       id,
       recipient_id: recipientId,
@@ -116,11 +122,11 @@ function softDeleteOne(id, recipientId) {
     data: {
       deleted_at: new Date(),
     },
-  });
+  }));
 }
 
 function softDeleteAll(recipientId) {
-  return prisma.notifications.updateMany({
+  return withRlsUserContext(recipientId, (client) => client.notifications.updateMany({
     where: {
       recipient_id: recipientId,
       deleted_at: null,
@@ -128,7 +134,7 @@ function softDeleteAll(recipientId) {
     data: {
       deleted_at: new Date(),
     },
-  });
+  }));
 }
 
 function findUsersByIds(ids) {

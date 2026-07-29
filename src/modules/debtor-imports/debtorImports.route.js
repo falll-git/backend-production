@@ -3,6 +3,11 @@ const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const validate = require("../../middlewares/validate.middleware");
 const {
+  exportRateLimit,
+  importRateLimit,
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadDomainFiles,
 } = require("../../middlewares/domain-upload.middleware");
 const {
@@ -20,10 +25,13 @@ const {
 } = require("./debtorImports.validation");
 
 const router = express.Router();
-const READ_URLS = [
+const IMPORT_JOB_READ_URLS = [
   "/dashboard/informasi-debitur/admin/upload-slik",
   "/dashboard/informasi-debitur/admin/monitoring-import",
   "/dashboard/informasi-debitur/admin/upload-ideb",
+];
+const IDEB_REPORT_READ_URLS = [
+  ...IMPORT_JOB_READ_URLS,
   "/dashboard/informasi-debitur/laporan-ideb",
 ];
 
@@ -48,7 +56,12 @@ function uploadSlikAndValidate() {
   ];
 }
 
-router.get("/", auth, authorize(READ_URLS, "read"), controller.getAll);
+router.get(
+  "/",
+  auth,
+  authorize(IMPORT_JOB_READ_URLS, "read"),
+  controller.getAll,
+);
 router.get(
   "/ideb/pending",
   auth,
@@ -58,7 +71,8 @@ router.get(
 router.get(
   "/ideb/:uploadId/resume-pdf",
   auth,
-  authorize(READ_URLS, "read"),
+  authorize(IDEB_REPORT_READ_URLS, "read"),
+  exportRateLimit,
   validate(idebResumePdfQuerySchema, { source: "query" }),
   controller.getIdebResumePdf,
 );
@@ -73,24 +87,29 @@ router.post(
   "/slik/:jobId/retry",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  importRateLimit,
   controller.retrySlik,
 );
 router.post(
   "/master",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  importRateLimit,
   controller.createDeprecated,
 );
 router.post(
   "/collectibility",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  importRateLimit,
   controller.createDeprecated,
 );
 router.post(
   "/slik",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-slik", "create"),
+  importRateLimit,
+  uploadRateLimit,
   ...uploadSlikAndValidate(),
   controller.createSlik,
 );
@@ -98,6 +117,8 @@ router.post(
   "/ideb",
   auth,
   authorize("/dashboard/informasi-debitur/admin/upload-ideb", "create"),
+  importRateLimit,
+  uploadRateLimit,
   ...uploadIdebAndValidate(),
   controller.createIdeb,
 );

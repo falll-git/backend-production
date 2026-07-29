@@ -22,9 +22,10 @@ const longitudeSchema = Joi.number().min(-180).max(180).messages({
   "number.min": "Longitude kunjungan harus berada pada rentang -180 sampai 180.",
   "number.max": "Longitude kunjungan harus berada pada rentang -180 sampai 180.",
 });
-const locationAccuracySchema = Joi.number().min(0).messages({
+const locationAccuracySchema = Joi.number().min(0).max(100).messages({
   "number.base": "Akurasi lokasi harus berupa angka yang valid.",
   "number.min": "Akurasi lokasi tidak boleh bernilai negatif.",
+  "number.max": "Akurasi lokasi harus 100 meter atau lebih baik.",
 });
 
 const payload = {
@@ -53,6 +54,7 @@ const payload = {
 function requireCoordinatePair(schema) {
   return schema
     .and("visit_latitude", "visit_longitude")
+    .with("visit_latitude", "visit_location_accuracy_m")
     .with("visit_location_accuracy_m", [
       "visit_latitude",
       "visit_longitude",
@@ -61,7 +63,7 @@ function requireCoordinatePair(schema) {
       "object.and":
         "Latitude dan longitude kunjungan wajib dikirim berpasangan.",
       "object.with":
-        "Akurasi lokasi hanya dapat dikirim bersama koordinat kunjungan.",
+        "Koordinat dan akurasi lokasi wajib dikirim bersama sebagai satu bukti lokasi.",
     });
 }
 

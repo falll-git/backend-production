@@ -9,6 +9,7 @@ const {
 } = require("../modules/debtor-marketing/debtorMarketing.validation");
 const {
   VISIT_LOCATION_AUDIT_FIELDS,
+  VISIT_LOCATION_MAX_ACCURACY_M,
   resolveVisitLocation,
   serializeVisitLocation,
 } = require("./debtor-marketing-location");
@@ -37,7 +38,11 @@ test("Joi menerima batas koordinat dan menolak nilai di luar rentang", () => {
     assert.deepEqual(
       validationMessages(
         createMarketingActivitySchema,
-        createPayload({ visit_latitude: latitude, visit_longitude: longitude }),
+        createPayload({
+          visit_latitude: latitude,
+          visit_longitude: longitude,
+          visit_location_accuracy_m: 10,
+        }),
       ),
       [],
     );
@@ -46,20 +51,28 @@ test("Joi menerima batas koordinat dan menolak nilai di luar rentang", () => {
   assert.match(
     validationMessages(
       createMarketingActivitySchema,
-      createPayload({ visit_latitude: 90.000001, visit_longitude: 0 }),
+      createPayload({
+        visit_latitude: 90.000001,
+        visit_longitude: 0,
+        visit_location_accuracy_m: 10,
+      }),
     ).join(" "),
     /-90 sampai 90/,
   );
   assert.match(
     validationMessages(
       createMarketingActivitySchema,
-      createPayload({ visit_latitude: 0, visit_longitude: -180.000001 }),
+      createPayload({
+        visit_latitude: 0,
+        visit_longitude: -180.000001,
+        visit_location_accuracy_m: 10,
+      }),
     ).join(" "),
     /-180 sampai 180/,
   );
 });
 
-test("Joi mewajibkan pasangan koordinat dan akurasi non-negatif", () => {
+test("Joi mewajibkan pasangan koordinat dan akurasi maksimal 100 meter", () => {
   assert.match(
     validationMessages(
       createMarketingActivitySchema,
@@ -71,7 +84,17 @@ test("Joi mewajibkan pasangan koordinat dan akurasi non-negatif", () => {
     validationMessages(updateMarketingActivitySchema, {
       visit_location_accuracy_m: 5,
     }).join(" "),
-    /hanya dapat dikirim bersama koordinat/,
+    /wajib dikirim bersama/,
+  );
+  assert.match(
+    validationMessages(
+      createMarketingActivitySchema,
+      createPayload({
+        visit_latitude: -6.2,
+        visit_longitude: 106.8,
+      }),
+    ).join(" "),
+    /wajib dikirim bersama/,
   );
   assert.match(
     validationMessages(
@@ -83,6 +106,17 @@ test("Joi mewajibkan pasangan koordinat dan akurasi non-negatif", () => {
       }),
     ).join(" "),
     /tidak boleh bernilai negatif/,
+  );
+  assert.match(
+    validationMessages(
+      createMarketingActivitySchema,
+      createPayload({
+        visit_latitude: -6.2,
+        visit_longitude: 106.8,
+        visit_location_accuracy_m: 100.001,
+      }),
+    ).join(" "),
+    /100 meter atau lebih baik/,
   );
 });
 
@@ -177,6 +211,35 @@ test("ambil ulang lokasi mengganti koordinat, akurasi, dan timestamp backend", (
   assert.notEqual(location.visit_location_recorded_at, clientTimestamp);
 });
 
+test("backend menolak koordinat tanpa akurasi dan akurasi di atas batas", () => {
+  assert.equal(VISIT_LOCATION_MAX_ACCURACY_M, 100);
+  assert.throws(
+    () =>
+      resolveVisitLocation({
+        kind: "VISIT_RESULT",
+        payload: {
+          visit_latitude: -8.1335,
+          visit_longitude: 113.2248,
+        },
+        requireLocation: true,
+      }),
+    /Akurasi lokasi wajib dikirim/,
+  );
+  assert.throws(
+    () =>
+      resolveVisitLocation({
+        kind: "VISIT_RESULT",
+        payload: {
+          visit_latitude: -8.1335,
+          visit_longitude: 113.2248,
+          visit_location_accuracy_m: 100.001,
+        },
+        requireLocation: true,
+      }),
+    /100 meter atau lebih baik/,
+  );
+});
+
 test("akurasi saja tidak dapat mengubah bukti lokasi", () => {
   assert.throws(
     () =>
@@ -246,6 +309,13 @@ test("audit dan seluruh serializer aktivitas memakai kontrak lokasi yang sama", 
     ),
     "utf8",
   );
+  const reportRepositorySource = readFileSync(
+    resolve(
+      backendRoot,
+      "src/modules/debtor-reports/debtorReports.repository.js",
+    ),
+    "utf8",
+  );
 
   assert.match(marketingSource, /\.\.\.VISIT_LOCATION_AUDIT_FIELDS/);
   assert.equal(
@@ -263,6 +333,15 @@ test("audit dan seluruh serializer aktivitas memakai kontrak lokasi yang sama", 
     2,
   );
   assert.match(reportSource, /\.\.\.serializeVisitLocation\(item\)/);
+  assert.match(reportSource, /files:\s*serializeFiles\(req, item/);
+  assert.match(
+    reportRepositorySource,
+    /findRecentMarketingActivities[\s\S]*?files:\s*true/,
+  );
+  assert.match(
+    debtorsSource,
+    /buildMarketingTimeline[\s\S]*?file:\s*item\.file,[\s\S]*?files:\s*item\.files/,
+  );
 });
 
 test("migration geotag nullable dan tidak melakukan backfill data lama", () => {

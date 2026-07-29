@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "document_checklists",
+  cacheNamespace: "parameter:document-checklists",
   repository,
   label: "Checklist dokumen",
   searchFields: ["code", "name", "category", "document_type", "description"],

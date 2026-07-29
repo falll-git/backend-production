@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "deposit_types",
+  cacheNamespace: "parameter:deposit-types",
   repository,
   label: "Jenis titipan",
   searchFields: ["code", "name", "category", "description"],

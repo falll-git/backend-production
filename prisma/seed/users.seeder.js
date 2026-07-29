@@ -95,9 +95,9 @@ function assertValidSeedPassword(seedUser) {
     throw new Error(`Password seed wajib diisi untuk user ${seedUser.username}.`);
   }
 
-  if (seedUser.password.length < 8) {
+  if (seedUser.password.length < 12) {
     throw new Error(
-      `Password seed user ${seedUser.username} minimal 8 karakter.`,
+      `Password seed user ${seedUser.username} minimal 12 karakter.`,
     );
   }
 

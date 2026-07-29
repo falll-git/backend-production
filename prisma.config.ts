@@ -8,6 +8,8 @@ module.exports = defineConfig({
         seed: "node prisma/seed.js",
     },
     datasource: {
-        url: process.env.DATABASE_URL,
+        // Migration credentials may own DDL privileges; the application runtime
+        // must use the least-privileged DATABASE_URL account instead.
+        url: process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL,
     },
 });

@@ -34,6 +34,70 @@ exports.getCollaterals = async (req, res) => {
   }
 };
 
+exports.downloadCollateralExpiryTemplate = async (req, res) => {
+  try {
+    const template = await service.getCollateralExpiryTemplate();
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${template.fileName}"`,
+    );
+    res.setHeader("Content-Length", String(template.buffer.length));
+    return res.status(200).send(template.buffer);
+  } catch (error) {
+    return res.status(status(error, 500)).json({
+      status: false,
+      success: false,
+      message: error.message || "Template Excel tidak dapat diunduh.",
+    });
+  }
+};
+
+exports.importCollateralExpiry = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.importCollateralExpiry({
+        req,
+        file: req.body?.file,
+        userId: req.user?.id,
+      }),
+      "Data expired agunan berhasil diperbarui dari Excel.",
+    );
+  } catch (error) {
+    return res.status(status(error)).json({
+      status: false,
+      success: false,
+      message: error.message,
+      errors: Array.isArray(error.details) ? error.details : undefined,
+    });
+  }
+};
+
+exports.updateCollateralExpiry = async (req, res) => {
+  try {
+    return successResponse(
+      res,
+      await service.updateCollateralExpiry({
+        req,
+        id: req.params.id,
+        payload: req.body,
+        userId: req.user?.id,
+      }),
+      "Monitoring expired agunan berhasil diperbarui.",
+    );
+  } catch (error) {
+    return res.status(status(error, 404)).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 exports.getWorkflow = async (req, res) => {
   try {
     return successResponse(
@@ -53,21 +117,6 @@ exports.getActivityLogs = async (req, res) => {
       userId: req.user?.id,
     });
     return paginatedResponse(res, result.data, result.meta);
-  } catch (error) {
-    return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
-  }
-};
-
-exports.getIdebComparison = async (req, res) => {
-  try {
-    return successResponse(
-      res,
-      await service.getIdebComparison({
-        id: req.params.id,
-        query: req.query,
-        userId: req.user?.id,
-      }),
-    );
   } catch (error) {
     return res.status(status(error, 404)).json({ status: false, success: false, message: error.message });
   }

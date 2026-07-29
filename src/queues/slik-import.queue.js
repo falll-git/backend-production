@@ -1,10 +1,26 @@
 const { Queue, Worker } = require("bullmq");
 const IORedis = require("ioredis");
+const {
+  getRequestContext,
+  runWithRequestContext,
+} = require("../utils/request-context");
+const {
+  attachEmitterErrorLogging,
+} = require("../system/infrastructure-events");
+const { logger } = require("../system/logger");
+const {
+  SpanKind,
+  injectTraceCarrier,
+  runWithSpan,
+} = require("../system/observability");
+
+const queueLogger = logger.child({ component: "slik_import_queue" });
 
 const SLIK_IMPORT_QUEUE_NAME = "slik-import";
 const SLIK_IMPORT_JOB_NAME = "process-slik-import";
 
 let queue;
+const redisConnections = new Set();
 
 function readBooleanEnv(key, fallback = true) {
   const value = process.env[key];
@@ -21,22 +37,133 @@ function isSlikImportQueueEnabled() {
   return readBooleanEnv("SLIK_IMPORT_QUEUE_ENABLED", true);
 }
 
-function getRedisUrl() {
-  return process.env.REDIS_URL || "redis://127.0.0.1:6379";
+function isSlikImportLocalFallbackEnabled(env = process.env) {
+  const value = env.SLIK_IMPORT_LOCAL_FALLBACK_ENABLED;
+  if (value === undefined || value === null || value === "") {
+    return env.NODE_ENV !== "production";
+  }
+  return ["1", "true", "yes", "on"].includes(
+    String(value).trim().toLowerCase(),
+  );
+}
+
+function isSlikImportWorkerRequired(env = process.env) {
+  const value = env.SLIK_IMPORT_REQUIRE_WORKER;
+  if (value === undefined || value === null || value === "") {
+    return env.NODE_ENV === "production";
+  }
+  return ["1", "true", "yes", "on"].includes(
+    String(value).trim().toLowerCase(),
+  );
+}
+
+function getRedisUrl(env = process.env) {
+  const configured = env.JOB_QUEUE_REDIS_URL || env.REDIS_URL;
+  if (configured) return configured;
+  if (env.NODE_ENV === "production") {
+    throw new Error(
+      "JOB_QUEUE_REDIS_URL atau REDIS_URL wajib untuk queue production.",
+    );
+  }
+  return "redis://127.0.0.1:6379";
 }
 
 function createRedisConnection({ worker = false } = {}) {
   const connection = new IORedis(getRedisUrl(), {
-    connectTimeout: 5000,
+    connectTimeout: readPositiveIntEnv(
+      "JOB_QUEUE_REDIS_CONNECT_TIMEOUT_MS",
+      5000,
+    ),
     maxRetriesPerRequest: worker ? null : 1,
     enableOfflineQueue: worker,
     retryStrategy(times) {
-      if (!worker && times > 3) return null;
       return Math.min(times * 250, 2000);
     },
   });
-  connection.on("error", () => {});
+  attachEmitterErrorLogging(connection, {
+    component: worker
+      ? "slik_import_worker_redis"
+      : "slik_import_queue_redis",
+    event: "redis_connection_error",
+  });
+  redisConnections.add(connection);
+  connection.once("end", () => {
+    redisConnections.delete(connection);
+  });
   return connection;
+}
+
+function trackRedisConnection(connection) {
+  if (!connection) return connection;
+  redisConnections.add(connection);
+  connection.once?.("end", () => {
+    redisConnections.delete(connection);
+  });
+  return connection;
+}
+
+function disconnectTrackedRedisConnections() {
+  for (const connection of redisConnections) {
+    try {
+      if (connection.status !== "end") connection.disconnect();
+    } catch {
+      // Shutdown tetap dilanjutkan; koneksi sedang ditutup secara paksa.
+    }
+  }
+  redisConnections.clear();
+}
+
+async function checkSlikImportQueueHealth(
+  timeoutMs = 1500,
+  { queueInstance } = {},
+) {
+  if (!isSlikImportQueueEnabled()) {
+    return {
+      enabled: false,
+      reachable: null,
+      worker_required: isSlikImportWorkerRequired(),
+      worker_count: 0,
+      workers_available: false,
+    };
+  }
+
+  const importQueue = queueInstance || getSlikImportQueue();
+  let timeout;
+
+  try {
+    const details = await Promise.race([
+      (async () => {
+        await importQueue.waitUntilReady();
+        const [workerCount, counts] = await Promise.all([
+          importQueue.getWorkersCount(),
+          importQueue.getJobCounts("waiting", "active", "delayed", "failed"),
+        ]);
+        return {
+          enabled: true,
+          reachable: true,
+          worker_required: isSlikImportWorkerRequired(),
+          worker_count: workerCount,
+          workers_available: workerCount > 0,
+          queue_counts: {
+            waiting: Number(counts.waiting || 0),
+            active: Number(counts.active || 0),
+            delayed: Number(counts.delayed || 0),
+            failed: Number(counts.failed || 0),
+          },
+        };
+      })(),
+      new Promise((resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Redis health check timed out.")),
+          timeoutMs,
+        );
+      }),
+    ]);
+
+    return details;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function getSlikImportQueue() {
@@ -62,14 +189,23 @@ function getSlikImportQueue() {
         },
       },
     });
-    queue.on("error", () => {});
+    attachEmitterErrorLogging(queue, {
+      component: "slik_import_queue",
+      event: "queue_error",
+    });
   }
 
   return queue;
 }
 
-async function enqueueSlikImportJob({ jobId, userId = null, force = false }) {
-  const importQueue = getSlikImportQueue();
+async function enqueueSlikImportJob({
+  jobId,
+  userId = null,
+  force = false,
+  queueInstance,
+}) {
+  const importQueue = queueInstance || getSlikImportQueue();
+  const requestContext = getRequestContext();
   await importQueue.waitUntilReady();
   const queueJobId = `slik-import-${jobId}`;
   const existingJob = await importQueue.getJob(queueJobId);
@@ -83,13 +219,28 @@ async function enqueueSlikImportJob({ jobId, userId = null, force = false }) {
     }
   }
 
-  return importQueue.add(
+  const addedJob = await importQueue.add(
     SLIK_IMPORT_JOB_NAME,
-    { jobId, userId },
+    {
+      jobId,
+      userId,
+      requestId: requestContext.request_id || null,
+      traceContext: injectTraceCarrier(),
+    },
     {
       jobId: queueJobId,
     },
   );
+  queueLogger.info(
+    {
+      event: "slik_import_job_scheduled",
+      job_id: queueJobId,
+      import_job_id: jobId,
+      queue_name: SLIK_IMPORT_QUEUE_NAME,
+    },
+    "SLIK import job scheduled",
+  );
+  return addedJob;
 }
 
 function createSlikImportWorker(processor, options = {}) {
@@ -105,26 +256,57 @@ function createSlikImportWorker(processor, options = {}) {
   return new Worker(
     SLIK_IMPORT_QUEUE_NAME,
     async (job) => {
-      await processor(job.data.jobId, job.data.userId || null);
+      await runWithSpan(
+        "SLIK import job",
+        {
+          kind: SpanKind.CONSUMER,
+          parentCarrier: job.data?.traceContext || null,
+          attributes: {
+            "messaging.system": "bullmq",
+            "messaging.destination.name": SLIK_IMPORT_QUEUE_NAME,
+            "messaging.message.id": String(job.id),
+          },
+        },
+        () =>
+          runWithRequestContext(
+            {
+              request_id: job.data?.requestId || null,
+              job_id: String(job.id),
+              import_job_id: job.data?.jobId || null,
+              queue_name: SLIK_IMPORT_QUEUE_NAME,
+            },
+            () => processor(job.data.jobId, job.data.userId || null),
+          ),
+      );
     },
     {
       connection: createRedisConnection({ worker: true }),
       concurrency,
+      autorun: options.autorun !== false,
     },
   );
 }
 
 async function closeSlikImportQueue() {
-  if (queue) {
-    await queue.close();
-    queue = null;
+  const currentQueue = queue;
+  queue = null;
+  try {
+    if (currentQueue) await currentQueue.close();
+  } finally {
+    disconnectTrackedRedisConnections();
   }
 }
 
 module.exports = {
   SLIK_IMPORT_QUEUE_NAME,
+  checkSlikImportQueueHealth,
   enqueueSlikImportJob,
   createSlikImportWorker,
   closeSlikImportQueue,
+  disconnectTrackedRedisConnections,
+  getRedisUrl,
+  isSlikImportLocalFallbackEnabled,
   isSlikImportQueueEnabled,
+  isSlikImportWorkerRequired,
+  trackRedisConnection,
 };

@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 
 const auditUserSelect = {
   id: true,
@@ -326,7 +327,7 @@ exports.update = (id, data) => {
 };
 
 exports.updateAccessStatus = ({ id, data, revokedAt = null }) => {
-  return prisma.$transaction(async (tx) => {
+  return withDatabaseTransaction(async (tx) => {
     const user = await tx.users.update({
       where: { id },
       data,

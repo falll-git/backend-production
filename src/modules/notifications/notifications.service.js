@@ -13,6 +13,9 @@ const {
   REJECT_FEATURE,
   RETURN_FEATURE,
 } = require("../../utils/menu-access");
+const { logger } = require("../../system/logger");
+
+const notificationLogger = logger.child({ component: "notifications" });
 
 const EMAIL_EVENT_TYPES = new Set([
   "ACTION_REQUIRED",
@@ -129,7 +132,16 @@ async function sendNotificationEmail(notification) {
       email_status: "FAILED",
       email_error: String(error.message || "Email gagal dikirim.").slice(0, 500),
     }).catch(() => {});
-    console.error("Failed to send notification email:", error);
+    notificationLogger.error(
+      {
+        event: "notification_email_failed",
+        notification_id: notification.id,
+        entity_type: notification.entity_type,
+        entity_id: notification.entity_id,
+        err: error,
+      },
+      "Failed to send notification email",
+    );
   }
 }
 
@@ -178,7 +190,16 @@ async function safeCreateNotification(payload) {
   try {
     return await createNotification(payload);
   } catch (error) {
-    console.error("Failed to create notification:", error);
+    notificationLogger.error(
+      {
+        event: "notification_create_failed",
+        notification_module: payload.module || null,
+        entity_type: payload.entity_type || null,
+        entity_id: payload.entity_id || null,
+        err: error,
+      },
+      "Failed to create notification",
+    );
     return null;
   }
 }
@@ -639,8 +660,9 @@ exports.getAll = async ({ query, userId }) => {
       where,
       skip: pagination.skip,
       take: pagination.take,
+      userId,
     }),
-    repository.count(where),
+    repository.count(where, userId),
   ]);
 
   return {
@@ -650,8 +672,6 @@ exports.getAll = async ({ query, userId }) => {
 };
 
 exports.getUnreadCount = async ({ userId }) => {
-  await generateDueNotifications(userId);
-
   return {
     unread_count: await repository.countUnread(userId),
   };

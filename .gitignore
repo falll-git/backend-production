@@ -1,7 +1,7 @@
 node_modules/
 
-.env
-.env.example
+.env*
+!.env.example
 
 /storage/
 /uploads/
@@ -15,7 +15,16 @@ pnpm-debug.log*
 scratch_*.sql
 
 coverage/
+playwright-report/
+test-results/
+quality-reports/
+performance-reports/
+release-reports/
 dist/
 build/
+
+# Local review fixtures may reference workstation-only datasets.
+/prisma/seed-review.js
+/scripts/import-local-review-data.js
 
 .DS_Store

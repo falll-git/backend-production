@@ -5,6 +5,10 @@ const validate = require("../../middlewares/validate.middleware");
 const auth = require("../../middlewares/auth.middleware");
 const authorize = require("../../middlewares/authorize.middleware");
 const {
+  expensiveOperationRateLimit,
+  uploadRateLimit,
+} = require("../../middlewares/rate-limit.middleware");
+const {
   uploadWatermarkImage,
 } = require("../../middlewares/watermark-upload.middleware");
 const {
@@ -36,6 +40,7 @@ router.post(
   "/image",
   auth,
   authorize(WATERMARK_SETTINGS_MENU_URL, "update"),
+  uploadRateLimit,
   uploadWatermarkImage("image"),
   controller.updateImage,
 );
@@ -49,6 +54,7 @@ router.post(
   "/apply",
   auth,
   authorize(WATERMARK_SETTINGS_MENU_URL, "update"),
+  expensiveOperationRateLimit,
   controller.applyExistingFiles,
 );
 router.get(

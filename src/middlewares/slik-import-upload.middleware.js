@@ -1,5 +1,6 @@
 const multer = require("multer");
 const {
+  attachUploadTempCleanup,
   buildDiskUploadStorage,
   cleanupUploadTempFileSync,
 } = require("../utils/upload-temp-files");
@@ -120,6 +121,10 @@ function uploadSlikImportFiles(fieldName = "files", maxCount = 20) {
       }
 
       if (uploadedFiles.length > 0) {
+        attachUploadTempCleanup(
+          res,
+          uploadedFiles.map((file) => file.path),
+        );
         req.body.files = uploadedFiles.map((file) => ({
           temp_path: file.path,
           name: file.originalname,

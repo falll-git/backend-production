@@ -14,6 +14,15 @@ const MAIN_REPORT_DASHBOARD_WIDGET_MENU = {
 
 const menuTree = [
   {
+    name: "Keamanan Akun",
+    url: "/dashboard/account/security",
+    icon: "lucide lucide-shield-check",
+    menu_type: "ACCOUNT",
+    placement: "ACCOUNT",
+    render_in_sidebar: false,
+    order: 1,
+  },
+  {
     name: "Dashboard",
     url: "/dashboard",
     icon: "lucide lucide-layout-dashboard",
@@ -52,7 +61,7 @@ const menuTree = [
             order: 1,
           },
           {
-            name: "List Dokumen",
+            name: "Daftar Dokumen",
             url: "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
             icon: "lucide lucide-list",
             order: 2,
@@ -96,13 +105,13 @@ const menuTree = [
         order: 4,
         children: [
           {
-            name: "Request Peminjaman",
+            name: "Permintaan Peminjaman",
             url: "/dashboard/arsip-digital/peminjaman/request",
             icon: "lucide lucide-send",
             order: 1,
           },
           {
-            name: "Accept Peminjaman",
+            name: "Proses Peminjaman",
             url: "/dashboard/arsip-digital/peminjaman/accept",
             icon: "lucide lucide-check-square",
             order: 2,
@@ -201,7 +210,7 @@ const menuTree = [
         order: 1,
         children: [
           {
-            name: "List Debitur",
+            name: "Daftar Debitur",
             url: "/dashboard/informasi-debitur",
             icon: "lucide lucide-list",
             order: 1,
@@ -326,7 +335,7 @@ const menuTree = [
             order: 3,
           },
           {
-            name: "Tracking Claim Asuransi",
+            name: "Klaim Asuransi",
             url: "/dashboard/legal/progress/klaim",
             icon: "lucide lucide-alert-circle",
             order: 4,
@@ -391,9 +400,15 @@ const menuTree = [
     ],
   },
   {
+    name: "Pusat Log Aktivitas",
+    url: "/dashboard/activity-centre",
+    icon: "lucide lucide-activity",
+    order: 6,
+  },
+  {
     name: "Parameter",
     icon: "lucide lucide-settings",
-    order: 6,
+    order: 7,
     children: [
       {
         name: "Admin Sistem",
@@ -401,31 +416,31 @@ const menuTree = [
         order: 1,
         children: [
           {
-            name: "Manajemen User",
+            name: "Manajemen Pengguna",
             url: "/dashboard/users",
             icon: "lucide lucide-user-cog",
             order: 1,
           },
           {
-            name: "Setup Role",
+            name: "Master Peran",
             url: "/dashboard/parameter/role",
             icon: "lucide lucide-shield",
             order: 2,
           },
           {
-            name: "Setup Role Per Menu",
+            name: "Akses Menu per Peran",
             url: "/dashboard/parameter/role-menu",
             icon: "lucide lucide-key",
             order: 3,
           },
           {
-            name: "Setup Divisi",
+            name: "Master Divisi",
             url: "/dashboard/parameter/divisi",
             icon: "lucide lucide-briefcase",
             order: 4,
           },
           {
-            name: "Setup Cabang",
+            name: "Master Cabang",
             url: "/dashboard/parameter/cabang",
             icon: "lucide lucide-building",
             order: 5,
@@ -438,19 +453,19 @@ const menuTree = [
         order: 2,
         children: [
           {
-            name: "Setup Jenis Dokumen",
+            name: "Master Jenis Dokumen",
             url: "/dashboard/parameter/jenis-dokumen",
             icon: "lucide lucide-file-type",
             order: 1,
           },
           {
-            name: "Setup Lokasi Arsip",
+            name: "Master Tempat Penyimpanan",
             url: "/dashboard/parameter/tempat-penyimpanan",
             icon: "lucide lucide-archive",
             order: 2,
           },
           {
-            name: "Setup Watermark Dokumen",
+            name: "Pengaturan Watermark Dokumen",
             url: "/dashboard/parameter/watermark-dokumen",
             icon: "lucide lucide-stamp",
             order: 3,
@@ -463,13 +478,13 @@ const menuTree = [
         order: 3,
         children: [
           {
-            name: "Setup Prioritas Surat",
+            name: "Master Prioritas Surat",
             url: "/dashboard/parameter/prioritas-surat",
             icon: "lucide lucide-flag",
             order: 1,
           },
           {
-            name: "Setup Media Pengiriman Surat",
+            name: "Master Media Pengiriman Surat",
             url: "/dashboard/parameter/media-pengiriman-surat",
             icon: "lucide lucide-send",
             order: 2,
@@ -482,25 +497,25 @@ const menuTree = [
         order: 4,
         children: [
           {
-            name: "Setup Produk Pembiayaan",
+            name: "Master Produk Pembiayaan",
             url: "/dashboard/parameter/produk-pembiayaan",
             icon: "lucide lucide-package",
             order: 1,
           },
           {
-            name: "Setup Jenis Akad",
+            name: "Master Jenis Akad",
             url: "/dashboard/parameter/jenis-akad",
             icon: "lucide lucide-file-signature",
             order: 2,
           },
           {
-            name: "Setup Checklist Dokumen",
+            name: "Master Checklist Dokumen",
             url: "/dashboard/parameter/checklist-dokumen",
             icon: "lucide lucide-list-checks",
             order: 3,
           },
           {
-            name: "Setup Jenis Agunan",
+            name: "Master Jenis Agunan",
             url: "/dashboard/parameter/jenis-agunan",
             icon: "lucide lucide-landmark",
             order: 4,
@@ -513,31 +528,31 @@ const menuTree = [
         order: 5,
         children: [
           {
-            name: "Setup Notaris",
+            name: "Master Notaris",
             url: "/dashboard/parameter/pihak-ketiga/notaris",
             icon: "lucide lucide-scale",
             order: 1,
           },
           {
-            name: "Setup Perusahaan Asuransi",
+            name: "Master Perusahaan Asuransi",
             url: "/dashboard/parameter/pihak-ketiga/perusahaan-asuransi",
             icon: "lucide lucide-shield",
             order: 2,
           },
           {
-            name: "Setup KJPP",
+            name: "Master KJPP",
             url: "/dashboard/parameter/pihak-ketiga/kjpp",
             icon: "lucide lucide-building-2",
             order: 3,
           },
           {
-            name: "Setup Jenis Proses Legal",
+            name: "Master Jenis Proses Legal",
             url: "/dashboard/parameter/jenis-proses-legal",
             icon: "lucide lucide-workflow",
             order: 4,
           },
           {
-            name: "Setup Jenis Titipan",
+            name: "Master Jenis Titipan",
             url: "/dashboard/parameter/jenis-titipan",
             icon: "lucide lucide-wallet",
             order: 5,

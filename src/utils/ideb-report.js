@@ -135,29 +135,57 @@ function facilityCondition(facility) {
   return normalizeText(recordValue(facility, ["condition", "condition_code", "status"]));
 }
 
+const IDEB_PAID_OFF_CONDITION_CODES = new Set(["02", "05", "06", "12", "17"]);
+const IDEB_WRITE_OFF_CONDITION_CODES = new Set(["03", "04"]);
+
+function facilityConditionCode(facility) {
+  const explicitCode = normalizeText(
+    recordValue(facility, ["condition_code", "kode_kondisi"]),
+  ).toUpperCase();
+  if (explicitCode) {
+    if (/^\d$/.test(explicitCode)) return `0${explicitCode}`;
+    const explicitMatch = /^(\d{2})(?:\D|$)/.exec(explicitCode);
+    if (explicitMatch) return explicitMatch[1];
+  }
+
+  const match = /^(\d{2})(?:\D|$)/.exec(facilityCondition(facility));
+  return match ? match[1] : "";
+}
+
 function isPaidOffFacility(facility) {
-  const code = normalizeText(recordValue(facility, ["condition_code"])).toUpperCase();
+  const code = facilityConditionCode(facility);
   const condition = facilityCondition(facility).toUpperCase();
-  return code === "02" || condition === "02" || condition.startsWith("02 ") || condition.includes("LUNAS");
+  return IDEB_PAID_OFF_CONDITION_CODES.has(code) || condition.includes("LUNAS");
 }
 
 function isWriteOffFacility(facility) {
-  const code = normalizeText(recordValue(facility, ["condition_code"])).toUpperCase();
+  const code = facilityConditionCode(facility);
   const condition = facilityCondition(facility).toUpperCase();
   const compact = condition.replace(/[^A-Z0-9]/g, "");
   return (
-    code === "03" ||
-    condition === "03" ||
-    condition.startsWith("03 ") ||
+    IDEB_WRITE_OFF_CONDITION_CODES.has(code) ||
     compact.includes("HAPUSBUKU") ||
-    compact.includes("DIHAPUSBUKUKAN")
+    compact.includes("DIHAPUSBUKUKAN") ||
+    compact.includes("HAPUSTAGIH")
   );
 }
 
 function classifyFacility(facility) {
   if (isWriteOffFacility(facility)) return "WRITE_OFF";
   if (isPaidOffFacility(facility)) return "PAID_OFF";
-  return "ACTIVE";
+  const code = facilityConditionCode(facility);
+  if (code) return code === "00" ? "ACTIVE" : "INACTIVE";
+  const compactCondition = facilityCondition(facility)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (
+    compactCondition === "AKTIF" ||
+    compactCondition === "ACTIVE" ||
+    compactCondition.includes("FASILITASAKTIF")
+  ) {
+    return "ACTIVE";
+  }
+  return "INACTIVE";
 }
 
 function facilityRisk(facility) {
@@ -170,8 +198,7 @@ function facilityRisk(facility) {
   };
 }
 
-function sortFacilitiesByRisk(facilities) {
-  return [...facilities].sort((left, right) => {
+function compareFacilitiesByRisk(left, right) {
     const a = facilityRisk(left);
     const b = facilityRisk(right);
     return (
@@ -184,6 +211,32 @@ function sortFacilitiesByRisk(facilities) {
         normalizeText(recordValue(right, ["reporter_name", "reporter_code"])),
       )
     );
+}
+
+function sortFacilitiesByRisk(facilities) {
+  return [...facilities].sort(compareFacilitiesByRisk);
+}
+
+function facilityLifecycleRank(facility) {
+  switch (classifyFacility(facility)) {
+    case "ACTIVE":
+      return 0;
+    case "WRITE_OFF":
+      return 1;
+    case "INACTIVE":
+      return 2;
+    case "PAID_OFF":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function sortFacilitiesForAll(facilities) {
+  return [...facilities].sort((left, right) => {
+    const lifecycleDifference = facilityLifecycleRank(left) - facilityLifecycleRank(right);
+    if (lifecycleDifference !== 0) return lifecycleDifference;
+    return compareFacilitiesByRisk(left, right);
   });
 }
 
@@ -219,7 +272,7 @@ function filterIdebFacilities(facilities, filter = "ALL") {
       source.filter((facility) => facilityArrears(facility) > 0),
     );
   }
-  return sortFacilitiesByRisk(source);
+  return sortFacilitiesForAll(source);
 }
 
 function historyPeriodKey(entry, fallbackIndex) {
@@ -340,6 +393,366 @@ function aggregateMonthlyCollectibilityHistory(history = []) {
     }));
 }
 
+const IDEB_CONCLUSION_MATRIX = Object.freeze({
+  GREEN: Object.freeze({
+    rule_number: 1,
+    rule_code: "ALL_KOL_1_LAST_12_MONTHS",
+    indicator: "GREEN",
+    indicator_label: "Hijau",
+    condition: "Seluruh fasilitas berstatus KOL 1 (Lancar) dalam 12 bulan terakhir.",
+    conclusion: "Riwayat pembayaran sangat baik. Lanjutkan ke analisis kapasitas.",
+  }),
+  YELLOW: Object.freeze({
+    rule_number: 2,
+    rule_code: "KOL_2_DPD_UNDER_90",
+    indicator: "YELLOW",
+    indicator_label: "Kuning",
+    condition:
+      "Terdapat fasilitas KOL 2 (Dalam Perhatian Khusus) dengan akumulasi hari tunggakan (DPD) < 90 hari.",
+    conclusion:
+      "Butuh klarifikasi/analisis penyebab tunggakan (apakah karena teknis atau finansial).",
+  }),
+  RED_KOL: Object.freeze({
+    rule_number: 3,
+    rule_code: "KOL_3_TO_5_LAST_24_MONTHS",
+    indicator: "RED",
+    indicator_label: "Merah",
+    condition:
+      "Terdapat fasilitas KOL 3, 4, atau 5 (Macet/Non-Performing Loan) dalam 12-24 bulan terakhir.",
+    conclusion:
+      "Risiko tinggi. Umumnya ditolak, kecuali ada kebijakan khusus penyelesaian utang.",
+  }),
+  RED_LEGAL: Object.freeze({
+    rule_number: 4,
+    rule_code: "WRITE_OFF_OR_LEGAL_DISPUTE",
+    indicator: "RED",
+    indicator_label: "Merah",
+    condition:
+      'Terdeteksi status "Hapus Buku" (Write-off) atau sedang dalam proses hukum/sengketa.',
+    conclusion: "Debitur memiliki catatan gagal bayar permanen.",
+  }),
+  UNDETERMINED: Object.freeze({
+    rule_number: null,
+    rule_code: "UNDETERMINED",
+    indicator: "GRAY",
+    indicator_label: "Belum Dapat Ditentukan",
+    condition: "Belum ada kondisi matrix yang terpenuhi dari data IDEB yang tersedia.",
+    conclusion:
+      "Data belum cukup atau tidak memenuhi parameter Hijau, Kuning, maupun Merah. Lakukan pemeriksaan manual terhadap data sumber.",
+  }),
+});
+
+function normalizeIdebPeriodMonth(value) {
+  const text = normalizeText(value);
+  const match = /^(\d{4})[-/]?(0[1-9]|1[0-2])(?:\D|$)/.exec(text);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function idebMonthSerial(periodMonth) {
+  const normalized = normalizeIdebPeriodMonth(periodMonth);
+  if (!normalized) return null;
+  const [year, month] = normalized.split("-").map(Number);
+  return year * 12 + month - 1;
+}
+
+function idebMonthsAgo(periodMonth, referencePeriod) {
+  const periodSerial = idebMonthSerial(periodMonth);
+  const referenceSerial = idebMonthSerial(referencePeriod);
+  if (periodSerial === null || referenceSerial === null) return null;
+  return referenceSerial - periodSerial;
+}
+
+function facilityReporterName(facility) {
+  return normalizeText(recordValue(facility, ["reporter_name", "reporter_code", "ljk"]));
+}
+
+function facilityAccountNumber(facility) {
+  return normalizeText(
+    recordValue(facility, ["account_number", "facility_number", "no_rekening"]),
+  );
+}
+
+function createIdebObservation(entry, fallback = {}) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const collectibility = recordValue(entry, ["collectibility", "collectibility_code", "kol"]);
+  const level = collectibilityLevel(collectibility);
+  if (level === null) return null;
+  return {
+    period_month:
+      normalizeIdebPeriodMonth(
+        recordValue(entry, ["period_month", "period", "month_label"]),
+      ) || normalizeIdebPeriodMonth(fallback.period_month),
+    collectibility,
+    level,
+    days_past_due: parseIdebNumber(
+      recordValue(entry, ["days_past_due", "dpd", "jumlah_hari_tunggakan"]),
+    ),
+    reporter_name:
+      facilityReporterName(entry) || normalizeText(fallback.reporter_name),
+    account_number:
+      facilityAccountNumber(entry) || normalizeText(fallback.account_number),
+    source: normalizeText(fallback.source) || "IDEB",
+  };
+}
+
+function collectIdebConclusionObservations(summary, facilities) {
+  const observations = [];
+  const summaryReference =
+    normalizeIdebPeriodMonth(summary.period_month) ||
+    normalizeIdebPeriodMonth(summary.result_date) ||
+    normalizeIdebPeriodMonth(summary.processed_at);
+
+  facilities.forEach((facility) => {
+    const fallback = {
+      period_month:
+        normalizeIdebPeriodMonth(recordValue(facility, ["period_month", "period"])) ||
+        summaryReference,
+      reporter_name: facilityReporterName(facility),
+      account_number: facilityAccountNumber(facility),
+      source: "FACILITY",
+    };
+    const current = createIdebObservation(facility, fallback);
+    if (current) observations.push(current);
+
+    const history = Array.isArray(facility.monthly_collectibility_history)
+      ? facility.monthly_collectibility_history
+      : [];
+    history.forEach((entry) => {
+      const observation = createIdebObservation(entry, {
+        ...fallback,
+        source: "FACILITY_HISTORY",
+      });
+      if (observation) observations.push(observation);
+    });
+  });
+
+  if (!observations.some((observation) => observation.source === "FACILITY_HISTORY")) {
+    const summaryHistory = Array.isArray(summary.monthly_collectibility_history)
+      ? summary.monthly_collectibility_history
+      : [];
+    summaryHistory.forEach((entry) => {
+      const observation = createIdebObservation(entry, {
+        period_month: summaryReference,
+        source: "SUMMARY_HISTORY",
+      });
+      if (observation) observations.push(observation);
+    });
+  }
+
+  const unique = new Map();
+  observations.forEach((observation) => {
+    const key = [
+      observation.period_month || "NO_PERIOD",
+      observation.reporter_name.toUpperCase(),
+      observation.account_number.toUpperCase(),
+      observation.level,
+      observation.days_past_due ?? "NO_DPD",
+    ].join("::");
+    if (!unique.has(key)) unique.set(key, observation);
+  });
+  return [...unique.values()];
+}
+
+function resolveIdebConclusionReferencePeriod(summary, observations) {
+  const explicit =
+    normalizeIdebPeriodMonth(summary.period_month) ||
+    normalizeIdebPeriodMonth(summary.result_date) ||
+    normalizeIdebPeriodMonth(summary.processed_at);
+  if (explicit) return explicit;
+  return observations
+    .map((entry) => entry.period_month)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+}
+
+function hasPositiveLegalValue(value) {
+  if (value === true || value === 1) return true;
+  const normalized = normalizeText(value).toUpperCase();
+  if (!normalized) return false;
+  if (/\b(TIDAK|BUKAN|TANPA|BEBAS)\b|\bBELUM\s+ADA\b/.test(normalized)) return false;
+  return (
+    [
+      "YA",
+      "YES",
+      "TRUE",
+      "AKTIF",
+      "ACTIVE",
+      "SEDANG PROSES",
+      "SENGKETA",
+      "LITIGASI",
+      "PROSES HUKUM",
+      "PERKARA HUKUM",
+    ].includes(normalized) ||
+    /\b(PROSES HUKUM|PERKARA HUKUM|DALAM SENGKETA|SEDANG BERSENGKETA|ADA SENGKETA|SENGKETA AKTIF|LITIGASI AKTIF)\b/.test(
+      normalized,
+    ) ||
+    /\b(SENGKETA|LITIGASI)\b.{0,20}\b(AKTIF|BERJALAN|PROSES)\b/.test(normalized)
+  );
+}
+
+function facilityHasLegalDispute(facility) {
+  const explicitFields = [
+    "is_in_legal_process",
+    "isInLegalProcess",
+    "is_disputed",
+    "isDisputed",
+    "legal_status",
+    "legalStatus",
+    "legal_process_status",
+    "legalProcessStatus",
+    "dispute_status",
+    "disputeStatus",
+  ];
+  if (explicitFields.some((key) => hasPositiveLegalValue(facility?.[key]))) return true;
+  return ["condition", "problem_reason", "description"]
+    .map((key) => facility?.[key])
+    .some(hasPositiveLegalValue);
+}
+
+function uniqueEvidenceValues(items, key) {
+  return [...new Set(items.map((item) => normalizeText(item[key])).filter(Boolean))].slice(0, 10);
+}
+
+function conclusionResult(rule, {
+  referencePeriod = null,
+  matchedFacilities = [],
+  matchedObservations = [],
+  evidenceText,
+  legalProcessDetected = false,
+  writeOffDetected = false,
+} = {}) {
+  const evidenceItems = [...matchedFacilities, ...matchedObservations];
+  const dpdValues = evidenceItems
+    .map(
+      (item) =>
+        parseIdebNumber(item.days_past_due) ??
+        parseIdebNumber(item.dpd) ??
+        facilityDaysPastDue(item),
+    )
+    .filter((value) => Number.isFinite(value));
+  return {
+    ...rule,
+    reference_period: referencePeriod,
+    evidence_text: evidenceText,
+    evidence: {
+      matched_facility_count: matchedFacilities.length,
+      matched_observation_count: matchedObservations.length,
+      reporters: uniqueEvidenceValues(
+        evidenceItems.map((item) => ({
+          reporter_name: item.reporter_name || facilityReporterName(item),
+        })),
+        "reporter_name",
+      ),
+      account_numbers: uniqueEvidenceValues(
+        evidenceItems.map((item) => ({
+          account_number: item.account_number || facilityAccountNumber(item),
+        })),
+        "account_number",
+      ),
+      collectibility_levels: [
+        ...new Set(
+          evidenceItems
+            .map(
+              (item) =>
+                item.level ?? collectibilityLevel(facilityCollectibility(item)),
+            )
+            .filter(Number.isInteger),
+        ),
+      ].sort((left, right) => left - right),
+      highest_days_past_due: dpdValues.length > 0 ? Math.max(...dpdValues) : null,
+      legal_process_detected: legalProcessDetected,
+      write_off_detected: writeOffDetected,
+    },
+  };
+}
+
+function buildIdebParameterizedConclusion(summary = {}) {
+  const facilities = Array.isArray(summary.facilities)
+    ? summary.facilities.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+  const observations = collectIdebConclusionObservations(summary, facilities);
+  const referencePeriod = resolveIdebConclusionReferencePeriod(summary, observations);
+  const writeOffFacilities = facilities.filter(isWriteOffFacility);
+  const legalFacilities = facilities.filter(facilityHasLegalDispute);
+
+  if (writeOffFacilities.length > 0 || legalFacilities.length > 0) {
+    const matchedFacilities = [...new Map(
+      [...writeOffFacilities, ...legalFacilities].map((facility, index) => [
+        facilityAccountNumber(facility) || `FACILITY:${index}`,
+        facility,
+      ]),
+    ).values()];
+    return conclusionResult(IDEB_CONCLUSION_MATRIX.RED_LEGAL, {
+      referencePeriod,
+      matchedFacilities,
+      legalProcessDetected: legalFacilities.length > 0,
+      writeOffDetected: writeOffFacilities.length > 0,
+      evidenceText: `${writeOffFacilities.length} fasilitas berstatus Hapus Buku/Tagih dan ${legalFacilities.length} fasilitas terindikasi proses hukum/sengketa.`,
+    });
+  }
+
+  const observationsLast24Months = referencePeriod
+    ? observations.filter((observation) => {
+        const monthsAgo = idebMonthsAgo(observation.period_month, referencePeriod);
+        return monthsAgo !== null && monthsAgo >= 0 && monthsAgo < 24;
+      })
+    : [];
+  const redObservations = observationsLast24Months.filter(
+    (observation) => observation.level >= 3 && observation.level <= 5,
+  );
+  if (redObservations.length > 0) {
+    return conclusionResult(IDEB_CONCLUSION_MATRIX.RED_KOL, {
+      referencePeriod,
+      matchedObservations: redObservations,
+      evidenceText: `Ditemukan ${redObservations.length} catatan KOL 3-5 dalam 24 bulan acuan terakhir.`,
+    });
+  }
+
+  const yellowFacilities = facilities.filter((facility) => {
+    const level = collectibilityLevel(facilityCollectibility(facility));
+    const dpd = facilityDaysPastDue(facility);
+    return level === 2 && dpd !== null && dpd >= 0 && dpd < 90;
+  });
+  if (yellowFacilities.length > 0) {
+    return conclusionResult(IDEB_CONCLUSION_MATRIX.YELLOW, {
+      referencePeriod,
+      matchedFacilities: yellowFacilities,
+      evidenceText: `Ditemukan ${yellowFacilities.length} fasilitas KOL 2 dengan DPD di bawah 90 hari.`,
+    });
+  }
+
+  const observationsLast12Months = referencePeriod
+    ? observations.filter((observation) => {
+        const monthsAgo = idebMonthsAgo(observation.period_month, referencePeriod);
+        return monthsAgo !== null && monthsAgo >= 0 && monthsAgo < 12;
+      })
+    : [];
+  if (
+    observationsLast12Months.length > 0 &&
+    observationsLast12Months.every((observation) => observation.level === 1)
+  ) {
+    const coveredPeriods = new Set(
+      observationsLast12Months.map((observation) => observation.period_month).filter(Boolean),
+    );
+    return conclusionResult(IDEB_CONCLUSION_MATRIX.GREEN, {
+      referencePeriod,
+      matchedObservations: observationsLast12Months,
+      evidenceText: `${observationsLast12Months.length} catatan KOL pada ${coveredPeriods.size} periode dalam 12 bulan acuan seluruhnya KOL 1.`,
+    });
+  }
+
+  return conclusionResult(IDEB_CONCLUSION_MATRIX.UNDETERMINED, {
+    referencePeriod,
+    evidenceText:
+      referencePeriod === null
+        ? "Periode acuan IDEB tidak tersedia."
+        : "Tidak ada kondisi Hijau, Kuning, atau Merah yang terpenuhi secara lengkap.",
+  });
+}
+
 function reporterIdentity(facility) {
   const code = normalizeText(recordValue(facility, ["reporter_code", "ljk"]));
   const name = normalizeText(recordValue(facility, ["reporter_name", "bank"]));
@@ -359,10 +772,12 @@ function emptyReporterGroup(identity) {
     activeFacilityCount: 0,
     paidOffFacilityCount: 0,
     writeOffFacilityCount: 0,
+    inactiveFacilityCount: 0,
     worstCollectibility: null,
     worstCollectibilityLevel: null,
     activeWorstCollectibility: null,
     activeWorstCollectibilityLevel: null,
+    activeHighestDaysPastDue: 0,
     highestDaysPastDue: 0,
     totalPlafond: 0,
     totalOutstanding: 0,
@@ -420,14 +835,17 @@ function aggregateReporters(facilities) {
       group.activeFacilityCount += 1;
       group.activeOutstanding += outstanding;
       group.activeArrears += arrears;
+      group.activeHighestDaysPastDue = Math.max(group.activeHighestDaysPastDue, dpd);
     } else if (classification === "PAID_OFF") {
       group.paidOffFacilityCount += 1;
       group.paidOffPlafond += plafond;
-    } else {
+    } else if (classification === "WRITE_OFF") {
       group.writeOffFacilityCount += 1;
       group.writeOffPlafond += plafond;
       group.writeOffOutstanding += outstanding;
       group.writeOffArrears += arrears;
+    } else {
+      group.inactiveFacilityCount += 1;
     }
 
     updateWorstCollectibility(group, facility, classification === "ACTIVE");
@@ -438,6 +856,12 @@ function aggregateReporters(facilities) {
     .map((group) => ({ ...group, facilities: sortFacilitiesByRisk(group.facilities) }))
     .sort(
       (left, right) =>
+        Number(right.activeFacilityCount > 0) - Number(left.activeFacilityCount > 0) ||
+        (right.activeWorstCollectibilityLevel || 0) -
+          (left.activeWorstCollectibilityLevel || 0) ||
+        right.activeHighestDaysPastDue - left.activeHighestDaysPastDue ||
+        right.activeArrears - left.activeArrears ||
+        right.activeOutstanding - left.activeOutstanding ||
         (right.worstCollectibilityLevel || 0) - (left.worstCollectibilityLevel || 0) ||
         right.highestDaysPastDue - left.highestDaysPastDue ||
         right.totalArrears - left.totalArrears ||
@@ -503,6 +927,9 @@ function buildIdebReportMetrics(summary = {}) {
   const writeOffFacilities = facilities.filter(
     (facility) => classifyFacility(facility) === "WRITE_OFF",
   );
+  const inactiveFacilities = facilities.filter(
+    (facility) => classifyFacility(facility) === "INACTIVE",
+  );
   const reporterGroups = aggregateReporters(facilities);
   const reportedReporterCount =
     (parseIdebNumber(stats.bank_creditor_count) || 0) +
@@ -529,6 +956,7 @@ function buildIdebReportMetrics(summary = {}) {
     parseIdebNumber(summary.outstanding_pokok);
   const overallWorstCollectibility = maxCollectibility(facilities);
   const activeWorstCollectibility = maxCollectibility(activeFacilities);
+  const parameterizedConclusion = buildIdebParameterizedConclusion(summary);
   const dataQualityWarnings = collectNumericWarnings(summary, facilities);
   const reportedLevel = collectibilityLevel(reportedWorstCollectibility);
   const calculatedLevel = collectibilityLevel(overallWorstCollectibility);
@@ -566,10 +994,11 @@ function buildIdebReportMetrics(summary = {}) {
       : reportedWorstCollectibility || overallWorstCollectibility || null;
 
   return {
-    facilities: sortFacilitiesByRisk(facilities),
+    facilities: sortFacilitiesForAll(facilities),
     activeFacilities: sortFacilitiesByRisk(activeFacilities),
     paidOffFacilities: sortFacilitiesByRisk(paidOffFacilities),
     writeOffFacilities: sortFacilitiesByRisk(writeOffFacilities),
+    inactiveFacilities: sortFacilitiesByRisk(inactiveFacilities),
     reporterGroups,
     priorityReporters: reporterGroups.slice(0, 10),
     reporterCount: Math.max(reportedReporterCount, reporterGroups.length),
@@ -579,6 +1008,7 @@ function buildIdebReportMetrics(summary = {}) {
     reportedWorstCollectibility,
     overallWorstCollectibility,
     activeWorstCollectibility,
+    parameterizedConclusion,
     worstCollectibility,
     totalPlafond: reportedTotalPlafond ?? calculatedTotalPlafond,
     calculatedTotalPlafond,
@@ -626,6 +1056,7 @@ function serializeReporterGroup(group) {
     active_facility_count: group.activeFacilityCount,
     paid_off_facility_count: group.paidOffFacilityCount,
     write_off_facility_count: group.writeOffFacilityCount,
+    inactive_facility_count: group.inactiveFacilityCount,
     worst_collectibility: group.worstCollectibility,
     active_worst_collectibility: group.activeWorstCollectibility,
     highest_days_past_due: group.highestDaysPastDue,
@@ -672,6 +1103,7 @@ function buildIdebReportSummary(metrics, { fallbackCollaterals = [] } = {}) {
     active_facilities_count: metrics.activeFacilities.length,
     paid_off_facilities_count: metrics.paidOffFacilities.length,
     write_off_facilities_count: metrics.writeOffFacilities.length,
+    inactive_facilities_count: metrics.inactiveFacilities.length,
     reported_worst_collectibility: metrics.reportedWorstCollectibility,
     overall_worst_collectibility: metrics.overallWorstCollectibility,
     active_worst_collectibility: metrics.activeWorstCollectibility,
@@ -688,6 +1120,7 @@ function buildIdebReportSummary(metrics, { fallbackCollaterals = [] } = {}) {
     write_off_plafond: metrics.writeOffPlafond,
     write_off_outstanding: metrics.writeOffOutstanding,
     write_off_arrears: metrics.writeOffArrears,
+    parameterized_conclusion: metrics.parameterizedConclusion,
     reporter_groups: metrics.reporterGroups.map(serializeReporterGroup),
     priority_reporters: metrics.priorityReporters.map(serializeReporterGroup),
     collateral_source: sourceCollaterals.length > 0 ? "IDEB" : collaterals.length > 0 ? "A01" : null,
@@ -700,6 +1133,7 @@ module.exports = {
   IDEB_FACILITY_FILTERS,
   aggregateReporters,
   aggregateMonthlyCollectibilityHistory,
+  buildIdebParameterizedConclusion,
   buildIdebReportMetrics,
   buildIdebReportSummary,
   classifyFacility,

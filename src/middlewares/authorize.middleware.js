@@ -1,5 +1,6 @@
 const { asArray, capabilityField, resolveRequestUser } = require("../utils/rbac");
 const prisma = require("../config/prisma");
+const { logErrorOnce } = require("../system/error-observability");
 
 function authorize(menuUrls, capability = "read", options = {}) {
   const urls = asArray(menuUrls).filter(Boolean);
@@ -50,9 +51,17 @@ function authorize(menuUrls, capability = "read", options = {}) {
 
       return next();
     } catch (error) {
+      logErrorOnce(error, {
+        event: "authorization_check_failed",
+        message: "Authorization check failed",
+        fields: {
+          capability,
+          required_feature: requiredFeature || null,
+        },
+      });
       return res.status(500).json({
         status: false,
-        message: error.message,
+        message: "Gagal memverifikasi izin akses.",
       });
     }
   };

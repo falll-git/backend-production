@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "financing_products",
+  cacheNamespace: "parameter:financing-products",
   repository,
   label: "Produk pembiayaan",
   searchFields: ["code", "name", "description"],

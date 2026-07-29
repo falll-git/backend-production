@@ -476,6 +476,9 @@ exports.findCollateralRows = ({ where, skip, take, orderBy }) =>
     take,
     orderBy,
     include: {
+      expiry_updater: {
+        select: USER_SELECT,
+      },
       debtor: {
         include: {
           branch: true,
@@ -560,6 +563,9 @@ exports.findUnlinkedCollaterals = (where = {}) =>
       created_at: "desc",
     },
     include: {
+      expiry_updater: {
+        select: USER_SELECT,
+      },
       debtor: {
         include: {
           branch: true,
@@ -681,5 +687,6 @@ exports.findRecentMarketingActivities = (params = {}) =>
           status: true,
         },
       },
+      files: true,
     },
   });

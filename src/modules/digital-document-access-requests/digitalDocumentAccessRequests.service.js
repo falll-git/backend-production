@@ -23,6 +23,9 @@ const {
   buildPaginationMeta,
   resolvePagination,
 } = require("../../utils/pagination");
+const {
+  runWithDatabaseAccessPurpose,
+} = require("../../config/database-context");
 
 const ACCESS_REQUEST_ACTION_URL =
   "/dashboard/arsip-digital/disposisi/permintaan";
@@ -393,78 +396,80 @@ exports.create = async ({ req, payload, userId }) => {
     );
   }
 
-  await repository.withTransaction(async (client) => {
-    for (const documentId of documentIds) {
-      const document = await digitalDocumentRepository.findById(documentId, {
-        deleted_at: null,
-      });
+  await runWithDatabaseAccessPurpose("digital_document_requestable", () =>
+    repository.withTransaction(async (client) => {
+      for (const documentId of documentIds) {
+        const document = await digitalDocumentRepository.findById(documentId, {
+          deleted_at: null,
+        });
 
-      if (!document) {
-        throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
-      }
+        if (!document) {
+          throw new AppError("Dokumen yang diajukan tidak ditemukan", 404);
+        }
 
-      if (canScopeAccessDocument(document, requesterScope)) {
-        throw new AppError(
-          "Anda sudah memiliki akses ke dokumen yang diajukan",
-          409,
-        );
-      }
+        if (canScopeAccessDocument(document, requesterScope)) {
+          throw new AppError(
+            "Anda sudah memiliki akses ke dokumen yang diajukan",
+            409,
+          );
+        }
 
-      const existingPending =
-        await repository.findPendingByDocumentAndRequester(
-          document.id,
-          userId,
+        const existingPending =
+          await repository.findPendingByDocumentAndRequester(
+            document.id,
+            userId,
+            client,
+          );
+
+        if (existingPending) {
+          throw new AppError(
+            `Masih ada pengajuan akses yang menunggu untuk dokumen ${document.document_number}`,
+            409,
+          );
+        }
+
+        const existingActiveAccess =
+          await repository.findActiveApprovedByDocumentAndRequester(
+            document.id,
+            userId,
+            client,
+          );
+
+        if (existingActiveAccess) {
+          throw new AppError(
+            `Akses untuk dokumen ${document.document_number} masih aktif`,
+            409,
+          );
+        }
+
+        const created = await repository.create(
+          {
+            document_id: document.id,
+            requester_id: userId,
+            owner_id: document.owner_user_id || document.created_by,
+            request_reason: normalizeText(payload.request_reason),
+            expires_at: expiresAt,
+          },
           client,
         );
 
-      if (existingPending) {
-        throw new AppError(
-          `Masih ada pengajuan akses yang menunggu untuk dokumen ${document.document_number}`,
-          409,
-        );
-      }
-
-      const existingActiveAccess =
-        await repository.findActiveApprovedByDocumentAndRequester(
-          document.id,
-          userId,
+        await digitalDocumentRepository.createActivityLog(
+          {
+            document_id: document.id,
+            actor_id: userId,
+            action: "ACCESS_REQUESTED",
+            to_storage_id: document.storage_id,
+            reference_type: "ACCESS_REQUEST",
+            reference_id: created.id,
+            description: "Pengajuan akses dokumen dibuat",
+          },
           client,
         );
 
-      if (existingActiveAccess) {
-        throw new AppError(
-          `Akses untuk dokumen ${document.document_number} masih aktif`,
-          409,
-        );
+        createdIds.push(created.id);
       }
-
-      const created = await repository.create(
-        {
-          document_id: document.id,
-          requester_id: userId,
-          owner_id: document.owner_user_id || document.created_by,
-          request_reason: normalizeText(payload.request_reason),
-          expires_at: expiresAt,
-        },
-        client,
-      );
-
-      await digitalDocumentRepository.createActivityLog(
-        {
-          document_id: document.id,
-          actor_id: userId,
-          action: "ACCESS_REQUESTED",
-          to_storage_id: document.storage_id,
-          reference_type: "ACCESS_REQUEST",
-          reference_id: created.id,
-          description: "Pengajuan akses dokumen dibuat",
-        },
-        client,
-      );
-
-      createdIds.push(created.id);
-    }
-  });
+    }),
+  );
 
   const items = await repository.findManyByIds(createdIds);
   for (const item of items) {

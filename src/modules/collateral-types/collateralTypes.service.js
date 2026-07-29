@@ -5,6 +5,7 @@ const {
 
 module.exports = createParameterService({
   modelName: "collateral_types",
+  cacheNamespace: "parameter:collateral-types",
   repository,
   label: "Jenis agunan",
   searchFields: ["code", "name", "description"],

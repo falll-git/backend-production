@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 const {
   USER_SUMMARY_SELECT,
   getDocumentInclude,
@@ -8,7 +9,7 @@ const {
 } = require("../../utils/digital-archive-access");
 
 function withTransaction(callback) {
-  return prisma.$transaction(callback);
+  return withDatabaseTransaction(callback);
 }
 
 function getAccessRequestInclude() {

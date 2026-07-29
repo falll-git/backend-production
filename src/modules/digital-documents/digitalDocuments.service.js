@@ -26,8 +26,15 @@ const {
   toSizeBytesBigInt,
   toSizeBytesNumber,
 } = require("../../utils/size-bytes");
+const { logger } = require("../../system/logger");
+const {
+  runWithDatabaseAccessPurpose,
+} = require("../../config/database-context");
 
 const DOCUMENT_NUMBER_GENERATION_ATTEMPTS = 25;
+const digitalDocumentLogger = logger.child({
+  component: "digital_documents",
+});
 const DIGITAL_DOCUMENT_READ_URLS = [
   "/dashboard/arsip-digital/ruang-arsip/list-dokumen",
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
@@ -48,7 +55,15 @@ async function queueDigitalDocumentWatermark(documentId) {
       entityId: documentId,
     });
   } catch (error) {
-    console.error("Failed to queue digital archive watermark:", error);
+    digitalDocumentLogger.error(
+      {
+        event: "watermark_enqueue_failed",
+        watermark_module: "digital_archive",
+        entity_id: documentId,
+        err: error,
+      },
+      "Failed to queue digital archive watermark",
+    );
   }
 }
 
@@ -708,10 +723,11 @@ function canAccessRestrictedDocuments(scope) {
 }
 
 function assertCanManageVisibleDocument(document, scope, userId, actionLabel) {
-  if (
-    !canScopeAccessDocument(document, scope) ||
-    !canManageDocument(document, scope, userId)
-  ) {
+  if (!canScopeAccessDocument(document, scope)) {
+    throw new AppError("Dokumen tidak ditemukan", 404);
+  }
+
+  if (!canManageDocument(document, scope, userId)) {
     throw new AppError(
       `Anda tidak memiliki akses untuk ${actionLabel} dokumen ini`,
       403,
@@ -879,33 +895,34 @@ exports.getAll = async ({ req, query, userId, scopeOverride = null }) => {
   };
 };
 
-exports.getRequestable = async ({ req, query, userId }) => {
-  const scope = await getDigitalArchiveAccessScope(userId);
-  const where = buildRequestableDocumentWhere(query, scope);
-  const pagination = resolvePagination(query, {
-    ...PAGINATION_PROFILES.TABLE,
-    allowAll: true,
-  });
+exports.getRequestable = async ({ req, query, userId }) =>
+  runWithDatabaseAccessPurpose("digital_document_requestable", async () => {
+    const scope = await getDigitalArchiveAccessScope(userId);
+    const where = buildRequestableDocumentWhere(query, scope);
+    const pagination = resolvePagination(query, {
+      ...PAGINATION_PROFILES.TABLE,
+      allowAll: true,
+    });
 
-  if (pagination.all) {
-    const data = await repository.findMany({ where });
+    if (pagination.all) {
+      const data = await repository.findMany({ where });
+      return {
+        data: data.map((item) => serializeRequestableDocument(req, item)),
+      };
+    }
+
+    const data = await repository.findMany({
+      where,
+      skip: pagination.skip,
+      take: pagination.take,
+    });
+    const total = await repository.count(where);
+
     return {
       data: data.map((item) => serializeRequestableDocument(req, item)),
+      meta: buildPaginationMeta(total, pagination),
     };
-  }
-
-  const data = await repository.findMany({
-    where,
-    skip: pagination.skip,
-    take: pagination.take,
   });
-  const total = await repository.count(where);
-
-  return {
-    data: data.map((item) => serializeRequestableDocument(req, item)),
-    meta: buildPaginationMeta(total, pagination),
-  };
-};
 
 exports.getById = async ({ req, id, userId }) => {
   const scope = await getDigitalArchiveAccessScope(
@@ -1054,9 +1071,13 @@ exports.create = async ({ req, payload, userId }) => {
           continue;
         }
         if (isDocumentNumberUniqueError(error)) {
-          console.error(
-            "Digital document number generation failed after retries:",
-            error,
+          digitalDocumentLogger.error(
+            {
+              event: "document_number_generation_exhausted",
+              retry_count: DOCUMENT_NUMBER_GENERATION_ATTEMPTS,
+              err: error,
+            },
+            "Digital document number generation failed after retries",
           );
           throw new AppError(
             "Nomor dokumen otomatis bentrok. Silakan coba simpan ulang.",

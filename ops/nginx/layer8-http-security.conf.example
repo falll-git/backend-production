@@ -1,0 +1,4 @@
+# Include hanya di blok `http {}` Nginx setelah modul WAF tersedia.
+server_tokens off;
+limit_req_zone $binary_remote_addr zone=ruwang_api:10m rate=20r/s;
+limit_conn_zone $binary_remote_addr zone=ruwang_conn:10m;

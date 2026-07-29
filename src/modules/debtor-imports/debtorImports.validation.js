@@ -61,7 +61,16 @@ exports.idebResumePdfQuerySchema = Joi.object({
 exports.slikImportJobSchema = Joi.object({
   file: fileSchema.optional(),
   files: Joi.array().items(fileSchema).min(1).max(20).optional(),
-  import_segment: Joi.string().trim().uppercase().valid("D01", "D02", "F01", "A01").required(),
+  import_segment: Joi.string()
+    .trim()
+    .uppercase()
+    .valid("D01", "D02", "F01", "A01")
+    .required()
+    .messages({
+      "any.required": "Segmen import wajib dipilih.",
+      "any.only": "Segmen import harus D01, D02, F01, atau A01.",
+      "string.empty": "Segmen import wajib dipilih.",
+    }),
   cif_status: Joi.string().trim().uppercase().valid("I", "B").allow("", null).optional(),
   period_month: Joi.string()
     .trim()

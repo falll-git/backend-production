@@ -9,6 +9,21 @@ const {
   getWatermarkQueueSummary,
   scheduleExistingWatermarkJobs,
 } = require("./watermarkProcessor.service");
+const { logger } = require("../../system/logger");
+
+const watermarkSettingsLogger = logger.child({
+  component: "watermark_settings",
+});
+
+function logScheduleFailure(error) {
+  watermarkSettingsLogger.error(
+    {
+      event: "watermark_bulk_schedule_failed",
+      err: error,
+    },
+    "Failed to schedule watermark jobs",
+  );
+}
 
 const WATERMARK_TYPES = ["TEXT", "IMAGE", "TEXT_IMAGE"];
 const WATERMARK_POSITIONS = [
@@ -190,7 +205,7 @@ exports.updateSettings = async (payload, requestUser, req) => {
   }
 
   scheduleExistingWatermarkJobs().catch((error) => {
-    console.error("Failed to schedule watermark jobs:", error);
+    logScheduleFailure(error);
   });
 
   return serializeSettings(updated, req);
@@ -207,22 +222,28 @@ exports.updateImage = async (file, requestUser, req) => {
     throw new AppError("Gambar watermark tidak valid.", 422);
   }
 
-  const updated = await repository.update(settings.id, {
-    image_path: stored.storedPath,
-    image_original_name: stored.fileName,
-    image_mime_type: stored.mimeType,
-    image_size_bytes: stored.sizeBytes,
-    watermark_type:
-      settings.watermark_type === "TEXT" ? "TEXT_IMAGE" : settings.watermark_type,
-    updated_by: requestUser?.id || null,
-  });
+  let updated;
+  try {
+    updated = await repository.update(settings.id, {
+      image_path: stored.storedPath,
+      image_original_name: stored.fileName,
+      image_mime_type: stored.mimeType,
+      image_size_bytes: stored.sizeBytes,
+      watermark_type:
+        settings.watermark_type === "TEXT" ? "TEXT_IMAGE" : settings.watermark_type,
+      updated_by: requestUser?.id || null,
+    });
+  } catch (error) {
+    deleteWatermarkAsset(stored.storedPath);
+    throw error;
+  }
 
   if (settings.image_path && settings.image_path !== stored.storedPath) {
     deleteWatermarkAsset(settings.image_path);
   }
 
   scheduleExistingWatermarkJobs().catch((error) => {
-    console.error("Failed to schedule watermark jobs:", error);
+    logScheduleFailure(error);
   });
 
   return serializeSettings(updated, req);
@@ -243,7 +264,7 @@ exports.deleteImage = async (requestUser, req) => {
   }
 
   scheduleExistingWatermarkJobs().catch((error) => {
-    console.error("Failed to schedule watermark jobs:", error);
+    logScheduleFailure(error);
   });
 
   return serializeSettings(updated, req);
