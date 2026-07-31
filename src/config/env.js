@@ -20,6 +20,57 @@ const FILE_BACKED_ENV_KEYS = Object.freeze([
   "RATE_LIMIT_KEY_SECRET",
   "RESEND_API_KEY",
 ]);
+const MAX_FILE_BACKED_ENV_BYTES = 64 * 1024;
+
+function readFileBackedEnvValue(fileKey, filePath) {
+  let descriptor;
+  try {
+    descriptor = fs.openSync(filePath, "r");
+  } catch {
+    throw new Error(`${fileKey} tidak dapat dibaca.`);
+  }
+
+  try {
+    const stats = fs.fstatSync(descriptor);
+    if (!stats.isFile()) {
+      throw new Error(`${fileKey} harus menunjuk ke file biasa.`);
+    }
+    if (stats.size < 1 || stats.size > MAX_FILE_BACKED_ENV_BYTES) {
+      throw new Error(`${fileKey} harus berukuran 1 byte sampai 64 KiB.`);
+    }
+
+    const buffer = Buffer.alloc(MAX_FILE_BACKED_ENV_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const chunkSize = fs.readSync(
+        descriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (chunkSize === 0) break;
+      bytesRead += chunkSize;
+    }
+
+    if (bytesRead < 1 || bytesRead > MAX_FILE_BACKED_ENV_BYTES) {
+      throw new Error(`${fileKey} harus berukuran 1 byte sampai 64 KiB.`);
+    }
+
+    const value = buffer.subarray(0, bytesRead).toString("utf8").trim();
+    if (!value) {
+      throw new Error(`${fileKey} tidak boleh menunjuk ke file kosong.`);
+    }
+    return value;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(fileKey)) {
+      throw error;
+    }
+    throw new Error(`${fileKey} tidak dapat dibaca.`);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
 
 function hydrateFileBackedEnv(env = process.env) {
   for (const key of FILE_BACKED_ENV_KEYS) {
@@ -35,25 +86,7 @@ function hydrateFileBackedEnv(env = process.env) {
       throw new Error(`${fileKey} wajib memakai absolute path di production.`);
     }
 
-    let stats;
-    let value;
-    try {
-      stats = fs.statSync(filePath);
-      value = fs.readFileSync(filePath, "utf8").trim();
-    } catch {
-      throw new Error(`${fileKey} tidak dapat dibaca.`);
-    }
-    if (!stats.isFile()) {
-      throw new Error(`${fileKey} harus menunjuk ke file biasa.`);
-    }
-    if (stats.size < 1 || stats.size > 64 * 1024) {
-      throw new Error(`${fileKey} harus berukuran 1 byte sampai 64 KiB.`);
-    }
-
-    if (!value) {
-      throw new Error(`${fileKey} tidak boleh menunjuk ke file kosong.`);
-    }
-    env[key] = value;
+    env[key] = readFileBackedEnvValue(fileKey, filePath);
   }
 
   return env;

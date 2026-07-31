@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { normalizeUploadTempPath } = require("./upload-temp-files");
 
 const DOCUMENT_MIME_TYPES_BY_EXTENSION = {
   pdf: ["application/pdf"],
@@ -76,13 +77,12 @@ function readSignatureSample(file) {
     return file.buffer.subarray(0, MAX_SIGNATURE_SAMPLE_BYTES);
   }
 
-  if (typeof file?.path !== "string" || !file.path.trim()) {
-    return null;
-  }
+  const filePath = normalizeUploadTempPath(file?.path);
+  if (!filePath) return null;
 
   let descriptor;
   try {
-    descriptor = fs.openSync(file.path, "r");
+    descriptor = fs.openSync(filePath, "r");
     const sample = Buffer.alloc(MAX_SIGNATURE_SAMPLE_BYTES);
     const bytesRead = fs.readSync(
       descriptor,

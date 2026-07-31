@@ -11,6 +11,10 @@ const {
   summarizeImportErrors,
   validateExpiryImportRow,
 } = require("./collateral-expiry-import");
+const {
+  cleanupUploadTempFileSync,
+  ensureUploadTempDir,
+} = require("./upload-temp-files");
 
 function plainCell(value) {
   return { formula: false, value };
@@ -74,14 +78,21 @@ test("parser tanggal hanya menerima tanggal yang nyata dan tidak ambigu", () => 
   assert.match(parseExpiryImportDate("31/12/2027").error, /YYYY-MM-DD/);
 });
 
-test("template final memiliki sheet dan header resmi tanpa data contoh di sheet upload", async () => {
+test("template final memiliki sheet dan header resmi tanpa data contoh di sheet upload", async (t) => {
   const templatePath = path.resolve(
     __dirname,
     "../assets/templates/template-update-expired-agunan.xlsx",
   );
   const stat = await fs.stat(templatePath);
+  const uploadPath = path.join(
+    ensureUploadTempDir(),
+    `template-expiry-test-${Date.now()}.xlsx`,
+  );
+  await fs.copyFile(templatePath, uploadPath);
+  t.after(() => cleanupUploadTempFileSync(uploadPath));
+
   const result = await parseCollateralExpiryWorkbook({
-    temp_path: templatePath,
+    temp_path: uploadPath,
     size_bytes: stat.size,
   });
 
@@ -90,6 +101,22 @@ test("template final memiliki sheet dan header resmi tanpa data contoh di sheet 
   assert.equal(result.rows.length, 0);
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0].messages[0], /Tidak ada baris data/);
+});
+
+test("parser menolak file di luar direktori upload yang dikelola", async () => {
+  const templatePath = path.resolve(
+    __dirname,
+    "../assets/templates/template-update-expired-agunan.xlsx",
+  );
+  const stat = await fs.stat(templatePath);
+
+  await assert.rejects(
+    parseCollateralExpiryWorkbook({
+      temp_path: templatePath,
+      size_bytes: stat.size,
+    }),
+    /Lokasi file Excel tidak valid/,
+  );
 });
 
 test("ringkasan kesalahan menegaskan rollback seluruh upload", () => {
