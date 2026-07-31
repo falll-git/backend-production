@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const test = require("node:test");
 const jwt = require("jsonwebtoken");
 
@@ -82,7 +83,7 @@ test("logout menolak token bertanda tangan asing tanpa mencabut sesi", async () 
   try {
     const forgedToken = jwt.sign(
       { id: "user-test", session_id: "session-test" },
-      "secret-asing-yang-tidak-dipercaya",
+      crypto.randomBytes(32).toString("hex"),
       {
         algorithm: "HS256",
         issuer: "ruwang-arsip-api",
