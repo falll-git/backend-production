@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { buildPublicUrl } = require("./public-url");
+const { resolvePathInsideRoot } = require("./safe-file-path");
 
 const UPLOAD_ROOT = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -58,14 +59,7 @@ function resolveWatermarkAssetPath(storedPath) {
 
   if (relativePath.length === 0) return null;
 
-  const resolvedPath = path.resolve(STORAGE_ROOT, ...relativePath);
-  const rootWithSeparator = `${STORAGE_ROOT}${path.sep}`;
-
-  if (resolvedPath !== STORAGE_ROOT && !resolvedPath.startsWith(rootWithSeparator)) {
-    return null;
-  }
-
-  return resolvedPath;
+  return resolvePathInsideRoot(STORAGE_ROOT, ...relativePath);
 }
 
 function deleteWatermarkAsset(storedPath) {
@@ -83,7 +77,10 @@ function persistWatermarkImage(file) {
   const now = new Date();
   const year = String(now.getFullYear());
   const month = String(now.getMonth() + 1).padStart(2, "0");
-  const targetDirectory = path.join(STORAGE_ROOT, year, month);
+  const targetDirectory = resolvePathInsideRoot(STORAGE_ROOT, year, month);
+  if (!targetDirectory) {
+    throw new Error("Lokasi penyimpanan watermark tidak valid.");
+  }
   ensureDirectory(targetDirectory);
 
   const originalBaseName =
@@ -93,7 +90,10 @@ function persistWatermarkImage(file) {
   const storedFileName = `${Date.now()}-${crypto
     .randomBytes(8)
     .toString("hex")}-${originalBaseName}.${extension}`;
-  const absolutePath = path.join(targetDirectory, storedFileName);
+  const absolutePath = resolvePathInsideRoot(targetDirectory, storedFileName);
+  if (!absolutePath) {
+    throw new Error("Nama file watermark tidak valid.");
+  }
 
   fs.writeFileSync(absolutePath, file.buffer);
 

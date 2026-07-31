@@ -1,6 +1,7 @@
 const fs = require("fs/promises");
 const ExcelJS = require("exceljs");
 const JSZip = require("jszip");
+const { normalizeUploadTempPath } = require("./upload-temp-files");
 
 const EXPIRY_IMPORT_SHEET = "Update Expired";
 const EXPIRY_IMPORT_HEADERS = [
@@ -312,7 +313,12 @@ async function parseCollateralExpiryWorkbook(file) {
     throw new Error("Ukuran file Excel maksimal 5 MB.");
   }
 
-  const buffer = await fs.readFile(file.temp_path);
+  const tempPath = normalizeUploadTempPath(file.temp_path);
+  if (!tempPath) {
+    throw new Error("Lokasi file Excel tidak valid.");
+  }
+
+  const buffer = await fs.readFile(tempPath);
   const zip = await validateZipEnvelope(buffer);
   const parserBuffer = await normalizeWorkbookForExcelJs(zip, buffer);
 

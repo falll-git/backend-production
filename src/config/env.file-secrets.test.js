@@ -29,3 +29,35 @@ test("nilai langsung dan file untuk secret yang sama ditolak", () => {
     /tidak boleh diisi bersamaan/,
   );
 });
+
+test("file-backed secret menolak directory, file kosong, dan file terlalu besar", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ruwang-arsip-secret-"));
+  t.after(() => fs.rmSync(directory, { force: true, recursive: true }));
+
+  const emptyFile = path.join(directory, "empty");
+  const oversizedFile = path.join(directory, "oversized");
+  fs.writeFileSync(emptyFile, "");
+  fs.writeFileSync(oversizedFile, Buffer.alloc(64 * 1024 + 1, 0x61));
+
+  assert.throws(
+    () =>
+      hydrateFileBackedEnv({
+        JWT_SECRET_FILE: directory,
+      }),
+    /harus menunjuk ke file biasa/,
+  );
+  assert.throws(
+    () =>
+      hydrateFileBackedEnv({
+        JWT_SECRET_FILE: emptyFile,
+      }),
+    /harus berukuran 1 byte sampai 64 KiB/,
+  );
+  assert.throws(
+    () =>
+      hydrateFileBackedEnv({
+        JWT_SECRET_FILE: oversizedFile,
+      }),
+    /harus berukuran 1 byte sampai 64 KiB/,
+  );
+});

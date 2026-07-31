@@ -8,6 +8,7 @@ const {
 } = require("./digital-archive-files");
 const { appendFileAccessToken } = require("./file-access-token");
 const { normalizeDownloadFileName } = require("./file-names");
+const { normalizeUploadTempPath } = require("./upload-temp-files");
 
 const NEW_UPLOAD = Symbol("domain-file-new-upload");
 
@@ -30,8 +31,8 @@ function getInputChecksum(input) {
     return hash.update(input.buffer).digest("hex");
   }
 
-  const tempPath = input.temp_path || input.tempPath;
-  if (typeof tempPath !== "string" || !tempPath.trim()) return null;
+  const tempPath = normalizeUploadTempPath(input.temp_path || input.tempPath);
+  if (!tempPath) return null;
 
   let descriptor;
   try {

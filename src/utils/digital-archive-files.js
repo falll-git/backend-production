@@ -3,10 +3,14 @@ const fs = require("fs");
 const path = require("path");
 const {
   cleanupUploadTempFileSync,
-  isUploadTempPath,
+  normalizeUploadTempPath,
 } = require("./upload-temp-files");
 const { buildPublicUrl } = require("./public-url");
 const { normalizeDownloadFileName } = require("./file-names");
+const {
+  normalizeStorageEntity,
+  resolvePathInsideRoot,
+} = require("./safe-file-path");
 
 const UPLOAD_ROOT = process.env.UPLOAD_DIR
   ? path.resolve(process.env.UPLOAD_DIR)
@@ -87,18 +91,24 @@ function inferMimeType({ fileName, mimeType }) {
 }
 
 function inferExtension({ fileName, mimeType }) {
-  return (
+  const inferred =
     inferExtensionFromFileName(fileName) ||
     (mimeType ? MIME_TO_EXTENSION[mimeType] : null) ||
-    "bin"
-  );
+    "bin";
+
+  return /^[a-z0-9]{1,10}$/.test(inferred) ? inferred : "bin";
 }
 
 function normalizeStoredPath(value) {
   if (typeof value !== "string" || !value.trim()) return null;
 
   const trimmed = value.trim();
-  if (trimmed.startsWith(PUBLIC_PREFIX)) return trimmed;
+  if (
+    trimmed.startsWith(`${PUBLIC_PREFIX}/`) &&
+    resolveStoredFilePath(trimmed)
+  ) {
+    return trimmed;
+  }
 
   if (/^https?:\/\//i.test(trimmed)) {
     return null;
@@ -122,14 +132,7 @@ function resolveStoredFilePath(storedPath) {
 
   if (relativePath.length === 0) return null;
 
-  const resolvedPath = path.resolve(STORAGE_ROOT, ...relativePath);
-  const rootWithSeparator = `${STORAGE_ROOT}${path.sep}`;
-
-  if (resolvedPath !== STORAGE_ROOT && !resolvedPath.startsWith(rootWithSeparator)) {
-    return null;
-  }
-
-  return resolvedPath;
+  return resolvePathInsideRoot(STORAGE_ROOT, ...relativePath);
 }
 
 function deleteStoredFile(storedPath) {
@@ -221,10 +224,11 @@ function parseRequestFileInput(input) {
   }
 
   if (typeof input === "object" && input !== null && !Array.isArray(input)) {
-    const tempPath =
+    const requestedTempPath =
       input.temp_path || input.tempPath || input.local_path || input.localPath;
+    const tempPath = normalizeUploadTempPath(requestedTempPath);
 
-    if (typeof tempPath === "string" && isUploadTempPath(tempPath)) {
+    if (tempPath) {
       return {
         storedPath: null,
         buffer: null,
@@ -310,17 +314,36 @@ function persistFile({
   const now = new Date();
   const year = String(now.getFullYear());
   const month = String(now.getMonth() + 1).padStart(2, "0");
-  const targetDirectory = path.join(STORAGE_ROOT, entity, year, month);
+  const entitySegments = normalizeStorageEntity(entity);
+  if (!entitySegments) {
+    throw new Error("Kategori penyimpanan arsip digital tidak valid.");
+  }
+
+  const targetDirectory = resolvePathInsideRoot(
+    STORAGE_ROOT,
+    ...entitySegments,
+    year,
+    month,
+  );
+  if (!targetDirectory) {
+    throw new Error("Lokasi penyimpanan arsip digital tidak valid.");
+  }
 
   ensureDirectory(targetDirectory);
 
   const resolvedMimeType = inferMimeType({ fileName, mimeType });
   const extension = inferExtension({ fileName, mimeType: resolvedMimeType });
-  const safeBaseName = sanitizeFileNameBase(fallbackBaseName) || entity;
+  const entityPath = entitySegments.join("/");
+  const safeBaseName =
+    sanitizeFileNameBase(String(fallbackBaseName || "")) ||
+    entitySegments.at(-1);
   const storedFileName = `${Date.now()}-${crypto
     .randomBytes(8)
     .toString("hex")}-${safeBaseName}.${extension}`;
-  const absolutePath = path.join(targetDirectory, storedFileName);
+  const absolutePath = resolvePathInsideRoot(targetDirectory, storedFileName);
+  if (!absolutePath) {
+    throw new Error("Nama file arsip digital tidak valid.");
+  }
 
   if (sourcePath) {
     moveUploadedFile(sourcePath, absolutePath);
@@ -339,7 +362,7 @@ function persistFile({
     })();
 
   return {
-    storedPath: `${PUBLIC_PREFIX}/${entity}/${year}/${month}/${storedFileName}`,
+    storedPath: `${PUBLIC_PREFIX}/${entityPath}/${year}/${month}/${storedFileName}`,
     fileName:
       typeof fileName === "string" && fileName.trim()
         ? fileName.trim()

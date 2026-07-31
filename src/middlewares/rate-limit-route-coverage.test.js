@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { createApiV1Router } = require("../routes/api-v1.router");
+const apiModules = require("../routes/api-modules");
 const activityCentreRouter = require("../modules/activity-centre/activityCentre.route");
 const app = require("../app");
 const correspondenceRouter = require("../modules/correspondence/correspondence.route");
@@ -56,6 +57,16 @@ test("router API menerapkan limiter umum setelah endpoint health", () => {
 
   assert.ok(generalLayerIndex > healthLayerIndex);
   assert.ok(generalLayerIndex > readyLayerIndex);
+
+  for (const apiModule of apiModules) {
+    const moduleLayerIndex = router.stack.findIndex(
+      (layer) => layer.handle === apiModule.router,
+    );
+    assert.ok(
+      moduleLayerIndex > generalLayerIndex,
+      `Module ${apiModule.path} wajib dipasang setelah limiter umum.`,
+    );
+  }
 });
 
 test("seluruh endpoint impor dan export eksplisit memiliki profile khusus", () => {

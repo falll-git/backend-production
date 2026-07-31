@@ -147,5 +147,6 @@ module.exports = {
   getActiveUploadTempPaths,
   isUploadTempPath,
   markUploadTempPathActive,
+  normalizeUploadTempPath,
   releaseUploadTempPath,
 };

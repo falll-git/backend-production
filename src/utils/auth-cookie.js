@@ -8,7 +8,7 @@ function getRefreshTokenCookieName() {
 }
 
 function parseCookieHeader(header) {
-  if (!header || typeof header !== "string") return {};
+  if (!header || typeof header !== "string") return new Map();
 
   return header.split(";").reduce((cookies, item) => {
     const separatorIndex = item.indexOf("=");
@@ -19,16 +19,19 @@ function parseCookieHeader(header) {
     if (!key) return cookies;
 
     try {
-      cookies[key] = decodeURIComponent(value);
+      cookies.set(key, decodeURIComponent(value));
     } catch {
-      cookies[key] = value;
+      cookies.set(key, value);
     }
     return cookies;
-  }, {});
+  }, new Map());
 }
 
 function readRefreshTokenCookie(req) {
-  return parseCookieHeader(req.headers.cookie)[getRefreshTokenCookieName()] || null;
+  return (
+    parseCookieHeader(req?.headers?.cookie).get(getRefreshTokenCookieName()) ||
+    null
+  );
 }
 
 function getSameSite() {

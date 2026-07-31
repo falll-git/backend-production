@@ -80,3 +80,15 @@ test("file lama baru dihapus eksplisit setelah penggantinya siap", () => {
   assert.equal(fs.existsSync(resolveStoredFilePath(previous.storedPath)), false);
   assert.equal(fs.existsSync(resolveStoredFilePath(replacement.storedPath)), true);
 });
+
+test("kategori storage yang mencoba keluar dari root ditolak", () => {
+  assert.throws(
+    () =>
+      persistDigitalArchiveFile({
+        entity: "../outside",
+        input: fileInput("tidak-boleh-ditulis"),
+        fallbackBaseName: "outside",
+      }),
+    /Kategori penyimpanan arsip digital tidak valid/,
+  );
+});

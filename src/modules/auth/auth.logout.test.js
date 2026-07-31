@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const jwt = require("jsonwebtoken");
 
 const repository = require("./auth.repository");
 const service = require("./auth.service");
@@ -62,6 +63,36 @@ test("logout tetap idempoten untuk access token tidak valid", async () => {
   try {
     await assert.doesNotReject(() =>
       service.logout({ accessToken: "access-token-tidak-valid" }),
+    );
+    assert.equal(callCount, 0);
+  } finally {
+    repository.revokeActiveRefreshTokenByIdAndUserId = originalRevoke;
+  }
+});
+
+test("logout menolak token bertanda tangan asing tanpa mencabut sesi", async () => {
+  const originalRevoke = repository.revokeActiveRefreshTokenByIdAndUserId;
+  let callCount = 0;
+
+  repository.revokeActiveRefreshTokenByIdAndUserId = async () => {
+    callCount += 1;
+    return { count: 1 };
+  };
+
+  try {
+    const forgedToken = jwt.sign(
+      { id: "user-test", session_id: "session-test" },
+      "secret-asing-yang-tidak-dipercaya",
+      {
+        algorithm: "HS256",
+        issuer: "ruwang-arsip-api",
+        audience: "ruwang-arsip-access",
+        expiresIn: "5m",
+      },
+    );
+
+    await assert.doesNotReject(() =>
+      service.logout({ accessToken: forgedToken }),
     );
     assert.equal(callCount, 0);
   } finally {
