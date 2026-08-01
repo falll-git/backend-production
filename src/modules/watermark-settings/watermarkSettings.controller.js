@@ -28,6 +28,20 @@ exports.getOptions = async (req, res) => {
   }
 };
 
+exports.getImagePreview = async (req, res) => {
+  try {
+    const storedPath = await service.getImagePreviewPath();
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.redirect(302, storedPath);
+  } catch (error) {
+    return res.status(resolveStatusCode(error, 404)).json({
+      status: false,
+      message: error.message,
+    });
+  }
+};
+
 exports.updateSettings = async (req, res) => {
   try {
     const result = await service.updateSettings(req.body, req.user, req);

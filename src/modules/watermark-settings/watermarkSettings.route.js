@@ -17,6 +17,8 @@ const {
 
 const WATERMARK_SETTINGS_MENU_URL = "/dashboard/parameter/watermark-dokumen";
 
+router.get("/image-preview", controller.getImagePreview);
+
 router.get(
   "/",
   auth,
