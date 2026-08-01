@@ -460,20 +460,18 @@ exports.logout = async ({ refreshToken = null, accessToken = null } = {}) => {
     await repository.revokeActiveRefreshTokenByHash(refreshTokenHash, now);
   }
 
-  if (accessToken) {
-    try {
-      const decoded = verifyAccessToken(accessToken);
-      if (decoded.session_id && decoded.id) {
-        actorId = decoded.id;
-        await repository.revokeActiveRefreshTokenByIdAndUserId(
-          decoded.session_id,
-          decoded.id,
-          now,
-        );
-      }
-    } catch {
-      // Logout tetap idempoten saat access token sudah tidak valid/kedaluwarsa.
+  try {
+    const decoded = verifyAccessToken(String(accessToken || ""));
+    if (decoded.session_id && decoded.id) {
+      actorId = decoded.id;
+      await repository.revokeActiveRefreshTokenByIdAndUserId(
+        decoded.session_id,
+        decoded.id,
+        now,
+      );
     }
+  } catch {
+    // Logout tetap idempoten saat access token tidak tersedia/tidak valid/kedaluwarsa.
   }
 
   return { actor_id: actorId };
