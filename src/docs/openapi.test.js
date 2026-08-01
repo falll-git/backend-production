@@ -72,6 +72,13 @@ test("OpenAPI mendokumentasikan endpoint error frontend sebagai public JSON-only
   );
 });
 
+test("OpenAPI mendokumentasikan preview gambar watermark sebagai endpoint publik", () => {
+  const operation =
+    buildOpenApiSpec().paths["/watermark-settings/image-preview"].get;
+
+  assert.deepEqual(operation.security, []);
+});
+
 test("OpenAPI mendokumentasikan respons rate limit dan store unavailable", () => {
   const spec = buildOpenApiSpec();
   assert.ok(spec.components.responses.RateLimited.headers["Retry-After"]);

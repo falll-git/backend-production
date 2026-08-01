@@ -11,6 +11,7 @@ const PUBLIC_AUTH_OPERATIONS = new Set([
   "post /auth/reset-password/verify",
   "post /auth/reset-password",
   "post /client-errors",
+  "get /watermark-settings/image-preview",
 ]);
 
 function toOpenApiPath(expressPath) {

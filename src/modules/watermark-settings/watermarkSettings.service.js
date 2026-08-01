@@ -4,6 +4,7 @@ const {
   buildWatermarkAssetUrl,
   deleteWatermarkAsset,
   persistWatermarkImage,
+  resolveWatermarkAssetPath,
 } = require("../../utils/watermark-files");
 const {
   getWatermarkQueueSummary,
@@ -153,6 +154,18 @@ exports.getOptions = getOptions;
 exports.getSettings = async (req) => {
   const settings = await getOrCreateSettings();
   return serializeSettings(settings, req);
+};
+
+exports.getImagePreviewPath = async () => {
+  const settings = await getOrCreateSettings();
+  if (
+    !settings.image_path ||
+    !resolveWatermarkAssetPath(settings.image_path)
+  ) {
+    throw new AppError("Gambar watermark belum tersedia.", 404);
+  }
+
+  return settings.image_path;
 };
 
 exports.updateSettings = async (payload, requestUser, req) => {

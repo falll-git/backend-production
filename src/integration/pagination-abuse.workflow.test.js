@@ -14,7 +14,7 @@ const {
 } = require("./support/integration-test-helpers");
 
 const SAFE_UUID = "00000000-0000-4000-8000-000000000001";
-const EXPECTED_GET_ROUTE_COUNT = 116;
+const EXPECTED_GET_ROUTE_COUNT = 117;
 
 function concretePath(modulePath, routePath) {
   return `${modulePath}${routePath}`
