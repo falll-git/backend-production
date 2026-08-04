@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "node": {
-    "supported_major_versions": [24]
+    "supported_major_versions": [22, 24],
+    "supported_engine_range": "^22.12 || 24.x"
   },
   "orchestration": {
     "managed_on_vps": true,

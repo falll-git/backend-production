@@ -73,6 +73,8 @@ const EXPECTED_RELEASE_SEQUENCE = Object.freeze([
   ["post-deploy-verification", "backend", "release:verify", null],
 ]);
 const MAX_PROBE_BODY_BYTES = 1024 * 1024;
+const NODE_ENGINE_RANGE_PATTERN =
+  /^(?:\^?\d+\.\d+(?:\.\d+)?|\d+\.x|>=\d+(?:\.\d+)?(?:\.\d+)?)(?:\s*\|\|\s*(?:\^?\d+\.\d+(?:\.\d+)?|\d+\.x|>=\d+(?:\.\d+)?(?:\.\d+)?))*$/;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -102,6 +104,27 @@ function parseEnvExampleKeys(source) {
   return keys;
 }
 
+function resolveExpectedNodeEngine(topology) {
+  const configured = String(topology.node?.supported_engine_range || "").trim();
+  if (configured) {
+    if (!NODE_ENGINE_RANGE_PATTERN.test(configured)) {
+      return {
+        valid: false,
+        value: null,
+        error: "Range engine Node.js topologi tidak valid.",
+      };
+    }
+    return { valid: true, value: configured, error: null };
+  }
+  return {
+    valid: true,
+    value: topology.node.supported_major_versions
+      .map((major) => `${major}.x`)
+      .join(" || "),
+    error: null,
+  };
+}
+
 function validateRuntimeTopology({
   topology,
   backendPackage,
@@ -126,16 +149,20 @@ function validateRuntimeTopology({
   ) {
     errors.push("Versi mayor Node.js yang didukung wajib dinyatakan eksplisit.");
   } else {
-    const expectedNodeEngine = supportedNodeMajors
-      .map((major) => `${major}.x`)
-      .join(" || ");
+    const expectedNodeEngine = resolveExpectedNodeEngine(topology);
+    if (!expectedNodeEngine.valid) {
+      errors.push(expectedNodeEngine.error);
+    }
     for (const [repository, packageJson] of [
       ["backend", backendPackage],
       ["frontend", frontendPackage],
     ]) {
-      if (String(packageJson?.engines?.node || "").trim() !== expectedNodeEngine) {
+      if (
+        expectedNodeEngine.valid &&
+        String(packageJson?.engines?.node || "").trim() !== expectedNodeEngine.value
+      ) {
         errors.push(
-          `Engine Node.js ${repository} wajib ${expectedNodeEngine} sesuai topologi runtime.`,
+          `Engine Node.js ${repository} wajib ${expectedNodeEngine.value} sesuai topologi runtime.`,
         );
       }
     }

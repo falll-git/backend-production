@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/server.js",
   "engines": {
-    "node": "24.x"
+    "node": "^22.12 || 24.x"
   },
   "scripts": {
     "start": "node src/server.js",
@@ -18,7 +18,7 @@
     "performance:baseline": "node scripts/run-performance.js --profile=baseline",
     "audit:dependencies": "npm audit --audit-level=high",
     "ci:verify-workflow": "node scripts/verify-ci-workflow.mjs",
-    "quality": "npm run ci:verify-workflow && npm run release:contract && npm run build && npm test && npm run test:integration && npm run database:rls-verify && npm run audit:dependencies",
+    "quality": "npm run ci:verify-workflow && npm run release:contract && npm run prisma:generate && npm run build && npm test && npm run test:integration && npm run database:rls-verify && npm run audit:dependencies",
     "quality:fullstack": "npm run quality && npm run test:fullstack",
     "quality:release": "node scripts/release-quality-gate.js",
     "test:ideb-report": "node --test src/utils/ideb-report.test.js",
@@ -81,6 +81,8 @@
       "archiver": "8.0.0",
       "unzipper": "0.12.5"
     },
+    "brace-expansion": "5.0.9",
+    "fast-uri": "3.1.5",
     "find-my-way": "9.7.0",
     "uuid": "11.1.1"
   },
