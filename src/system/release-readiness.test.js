@@ -174,7 +174,7 @@ test("topologi menolak auto-deploy, backup otomatis, dan runtime development", (
   assert.match(result.errors.join(" "), /Backup dan restore data/i);
   assert.match(result.errors.join(" "), /RPO dan RTO/i);
   assert.match(result.errors.join(" "), /runtime development/i);
-  assert.match(result.errors.join(" "), /Engine Node.js backend wajib 24\.x/i);
+  assert.match(result.errors.join(" "), /Engine Node.js backend wajib \^22\.12 \|\| 24\.x/i);
 });
 
 test("seluruh environment topologi wajib terdokumentasi", () => {
