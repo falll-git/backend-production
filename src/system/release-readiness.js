@@ -73,8 +73,9 @@ const EXPECTED_RELEASE_SEQUENCE = Object.freeze([
   ["post-deploy-verification", "backend", "release:verify", null],
 ]);
 const MAX_PROBE_BODY_BYTES = 1024 * 1024;
-const NODE_ENGINE_RANGE_PATTERN =
-  /^(?:\^?\d+\.\d+(?:\.\d+)?|\d+\.x|>=\d+(?:\.\d+)?(?:\.\d+)?)(?:\s*\|\|\s*(?:\^?\d+\.\d+(?:\.\d+)?|\d+\.x|>=\d+(?:\.\d+)?(?:\.\d+)?))*$/;
+const NODE_ENGINE_RANGE_ALLOWED_CHARS = new Set(
+  "^0123456789.xX>=< ".split(""),
+);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -104,10 +105,28 @@ function parseEnvExampleKeys(source) {
   return keys;
 }
 
+function isValidNodeEngineSegment(segment) {
+  const value = String(segment || "").trim();
+  if (!value || value.length > 32) return false;
+  let hasDigit = false;
+  for (const char of value) {
+    if (!NODE_ENGINE_RANGE_ALLOWED_CHARS.has(char)) return false;
+    if (char >= "0" && char <= "9") hasDigit = true;
+  }
+  return hasDigit && !value.includes("..");
+}
+
+function isValidNodeEngineRange(value) {
+  const configured = String(value || "").trim();
+  if (!configured || configured.length > 128) return false;
+  const segments = configured.split("||").map((segment) => segment.trim());
+  return segments.every(isValidNodeEngineSegment);
+}
+
 function resolveExpectedNodeEngine(topology) {
   const configured = String(topology.node?.supported_engine_range || "").trim();
   if (configured) {
-    if (!NODE_ENGINE_RANGE_PATTERN.test(configured)) {
+    if (!isValidNodeEngineRange(configured)) {
       return {
         valid: false,
         value: null,

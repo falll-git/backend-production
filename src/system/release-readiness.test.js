@@ -177,6 +177,33 @@ test("topologi menolak auto-deploy, backup otomatis, dan runtime development", (
   assert.match(result.errors.join(" "), /Engine Node.js backend wajib \^22\.12 \|\| 24\.x/i);
 });
 
+test("topologi menolak range engine Node.js yang tidak valid", () => {
+  const topology = JSON.parse(fs.readFileSync(TOPOLOGY_PATH, "utf8"));
+  const backendPackage = JSON.parse(
+    fs.readFileSync(path.join(REPOSITORY_DIRECTORY, "package.json"), "utf8"),
+  );
+  const frontendPackage = JSON.parse(
+    fs.readFileSync(
+      path.resolve(REPOSITORY_DIRECTORY, "..", "frontend-production", "package.json"),
+      "utf8",
+    ),
+  );
+  const changed = structuredClone(topology);
+  changed.node.supported_engine_range = "^22.12 || (a+)+";
+
+  const result = validateRuntimeTopology({
+    topology: changed,
+    backendPackage,
+    frontendPackage,
+    envExampleKeys: parseEnvExampleKeys(
+      fs.readFileSync(path.join(REPOSITORY_DIRECTORY, ".env.example"), "utf8"),
+    ),
+  });
+
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join(" "), /Range engine Node\.js topologi tidak valid/i);
+});
+
 test("seluruh environment topologi wajib terdokumentasi", () => {
   const topology = JSON.parse(fs.readFileSync(TOPOLOGY_PATH, "utf8"));
   const backendPackage = JSON.parse(
