@@ -2993,7 +2993,7 @@ async function renderIdebResumePdf(upload, { facilityFilter = "ALL" } = {}) {
   const conclusionTitle = parameterizedConclusion
     ? `Indikator ${parameterizedConclusion.indicator_label} | ${
         parameterizedConclusion.rule_number
-          ? `Aturan Matrix ${parameterizedConclusion.rule_number}`
+          ? `Aturan Matriks ${parameterizedConclusion.rule_number}`
           : "Belum Ada Aturan yang Terpenuhi"
       }`
     : "Kesimpulan Terparameter Belum Tersedia";
@@ -3001,29 +3001,13 @@ async function renderIdebResumePdf(upload, { facilityFilter = "ALL" } = {}) {
     ? [
         parameterizedConclusion.conclusion,
         `Kondisi: ${parameterizedConclusion.condition}`,
-        `Bukti: ${parameterizedConclusion.evidence_text}`,
         `Posisi data: ${valueOrDash(parameterizedConclusion.reference_period)}`,
-        parameterizedConclusion.evidence?.reporters?.length > 0
-          ? `Pelapor terkait: ${parameterizedConclusion.evidence.reporters.join(", ")}`
-          : null,
-        "Catatan: hasil matrix merupakan ringkasan otomatis dan wajib diverifikasi terhadap data IDEB sumber sebelum keputusan pembiayaan dibuat.",
+        "Catatan: hasil matriks merupakan ringkasan otomatis dan wajib diverifikasi terhadap data IDEB sumber sebelum keputusan pembiayaan dibuat.",
       ]
         .filter(Boolean)
         .join("\n")
     : "Data sumber perlu diperiksa sebelum keputusan dibuat.";
   drawNoteBox(conclusionTitle, conclusionBody, conclusionColors);
-
-  const sourceConclusion = normalizeText(summary.conclusion);
-  if (
-    sourceConclusion &&
-    sourceConclusion !== normalizeText(parameterizedConclusion?.conclusion)
-  ) {
-    drawNoteBox(
-      "CATATAN KESIMPULAN DARI FILE SUMBER (INFORMASI)",
-      `${sourceConclusion}\nCatatan ini tidak menggantikan hasil matrix terparameter di atas.`,
-      { color: colors.softGray, borderColor: colors.border },
-    );
-  }
 
   drawDocumentFooter();
 
