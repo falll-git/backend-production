@@ -9,7 +9,7 @@ const {
   latestAppraisal,
 } = require("./collateral-monitoring");
 
-test("monitoring hanya memakai tanggal penilaian pelapor", () => {
+test("monitoring memakai tanggal penilaian pelapor saat belum ada tinjauan expired", () => {
   const result = latestAppraisal({
     reporter_appraisal_date: "2026-01-15",
     independent_appraisal_date: "2026-03-20",
@@ -17,6 +17,32 @@ test("monitoring hanya memakai tanggal penilaian pelapor", () => {
 
   assert.equal(result.source, "REPORTER");
   assert.equal(result.date.toISOString(), "2026-01-15T00:00:00.000Z");
+});
+
+test("tinjauan expired terbaru memperbarui acuan tinjauan agunan", () => {
+  const result = latestAppraisal({
+    reporter_appraisal_date: "2019-12-31",
+    expiry_updated_at: "2026-08-06T10:15:00.000Z",
+  });
+
+  assert.equal(result.source, "EXPIRY_UPDATE");
+  assert.equal(result.date.toISOString(), "2026-08-06T00:00:00.000Z");
+
+  const monitoring = buildCollateralMonitoring(
+    {
+      reporter_appraisal_date: "2019-12-31",
+      expiry_updated_at: "2026-08-06T10:15:00.000Z",
+      has_expiry_date: true,
+      expiry_date: "2027-12-31",
+    },
+    new Date("2026-08-06T12:00:00.000Z"),
+  );
+  assert.equal(monitoring.appraisal_status, "CURRENT");
+  assert.equal(monitoring.appraisal_status_label, "Aman");
+  assert.equal(
+    monitoring.next_appraisal_due_date.toISOString(),
+    "2027-08-06T00:00:00.000Z",
+  );
 });
 
 test("tanggal independen tidak menggantikan tanggal pelapor yang kosong", () => {
@@ -50,7 +76,7 @@ test("warning penilaian dimulai tepat dua bulan kalender sebelum kewajiban", () 
   assert.equal(warning.next_appraisal_due_date.toISOString(), "2026-08-31T00:00:00.000Z");
   assert.equal(warning.appraisal_warning_start_date.toISOString(), "2026-06-30T00:00:00.000Z");
   assert.equal(warning.appraisal_status, "DUE_SOON");
-  assert.equal(warning.appraisal_status_label, "Segera Dinilai Ulang");
+  assert.equal(warning.appraisal_status_label, "Segera Ditinjau Ulang");
 });
 
 test("penilaian menjadi merah tepat pada tanggal kewajiban", () => {
