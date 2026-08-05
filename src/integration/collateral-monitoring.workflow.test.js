@@ -153,12 +153,13 @@ test(
     assert.equal(updatedResponse.body.data.has_expiry_date, true);
     assert.equal(updatedResponse.body.data.expiry_status, "DUE_SOON");
     assert.equal(updatedResponse.body.data.expiry_status_label, "Segera Berakhir");
-    assert.equal(updatedResponse.body.data.appraisal_status, "DUE_SOON");
+    assert.equal(updatedResponse.body.data.appraisal_status, "CURRENT");
+    assert.equal(updatedResponse.body.data.appraisal_status_label, "Aman");
+    assert.equal(updatedResponse.body.data.latest_appraisal_source, "EXPIRY_UPDATE");
     assert.equal(
-      updatedResponse.body.data.appraisal_status_label,
-      "Segera Dinilai Ulang",
+      updatedResponse.body.data.latest_appraisal_date.slice(0, 10),
+      updatedResponse.body.data.expiry_updated_at.slice(0, 10),
     );
-    assert.equal(updatedResponse.body.data.latest_appraisal_source, "REPORTER");
 
     const storedManual = await prisma.debtor_collaterals.findUnique({
       where: { id: collateral.id },

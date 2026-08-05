@@ -98,6 +98,8 @@ test("Admin mengatur expired agunan dari UI dan status tersimpan di PostgreSQL",
 
     row = page.getByRole("row").filter({ hasText: collateralNumber });
     await expect(row.getByText("Segera Berakhir", { exact: true })).toBeVisible();
+    await expect(row).toContainText("Update expired");
+    await expect(row).toContainText("Aman");
     let stored = await prisma.debtor_collaterals.findUnique({
       where: { id: collateral.id },
     });
@@ -119,6 +121,8 @@ test("Admin mengatur expired agunan dari UI dan status tersimpan di PostgreSQL",
 
     row = page.getByRole("row").filter({ hasText: collateralNumber });
     await expect(row.getByText("Tidak Berlaku", { exact: true })).toBeVisible();
+    await expect(row).toContainText("Update expired");
+    await expect(row).toContainText("Aman");
     stored = await prisma.debtor_collaterals.findUnique({
       where: { id: collateral.id },
     });

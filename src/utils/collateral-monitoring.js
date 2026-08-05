@@ -42,10 +42,22 @@ function daysUntil(target, now = new Date()) {
 }
 
 function latestAppraisal(record = {}) {
-  const date = toUtcDateOnly(record.reporter_appraisal_date);
+  const reporterDate = toUtcDateOnly(record.reporter_appraisal_date);
+  const expiryReviewDate = toUtcDateOnly(record.expiry_updated_at);
+
+  if (
+    expiryReviewDate &&
+    (!reporterDate || expiryReviewDate.getTime() >= reporterDate.getTime())
+  ) {
+    return {
+      source: "EXPIRY_UPDATE",
+      date: expiryReviewDate,
+    };
+  }
+
   return {
-    source: date ? "REPORTER" : null,
-    date,
+    source: reporterDate ? "REPORTER" : null,
+    date: reporterDate,
   };
 }
 
@@ -82,11 +94,11 @@ function buildCollateralMonitoring(record = {}, now = new Date()) {
     now,
     missing: {
       status: "NOT_AVAILABLE",
-      label: "Tanggal Penilaian Belum Tersedia",
+      label: "Belum Ada Tinjauan",
     },
     current: { status: "CURRENT", label: "Aman" },
-    dueSoon: { status: "DUE_SOON", label: "Segera Dinilai Ulang" },
-    overdue: { status: "OVERDUE", label: "Wajib Dinilai Ulang" },
+    dueSoon: { status: "DUE_SOON", label: "Segera Ditinjau Ulang" },
+    overdue: { status: "OVERDUE", label: "Wajib Ditinjau Ulang" },
   });
 
   const hasExpiryDate = record.has_expiry_date === true;
