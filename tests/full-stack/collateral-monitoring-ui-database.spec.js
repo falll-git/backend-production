@@ -97,9 +97,13 @@ test("Admin mengatur expired agunan dari UI dan status tersimpan di PostgreSQL",
     await expect(page.getByText("Monitoring expired agunan diperbarui")).toBeVisible();
 
     row = page.getByRole("row").filter({ hasText: collateralNumber });
-    await expect(row.getByText("Segera Berakhir", { exact: true })).toBeVisible();
-    await expect(row).toContainText("Tanggal expired");
-    await expect(row).toContainText("Segera Ditinjau Ulang");
+    const activeExpiryCell = row.getByRole("cell").nth(5);
+    const activeReviewCell = row.getByRole("cell").nth(10);
+    await expect(
+      activeExpiryCell.getByText("Segera Berakhir", { exact: true }),
+    ).toBeVisible();
+    await expect(activeReviewCell).toContainText("Tanggal expired");
+    await expect(activeReviewCell).toContainText("Segera Ditinjau Ulang");
     let stored = await prisma.debtor_collaterals.findUnique({
       where: { id: collateral.id },
     });
@@ -120,8 +124,15 @@ test("Admin mengatur expired agunan dari UI dan status tersimpan di PostgreSQL",
     await dialog.getByRole("button", { name: "Simpan", exact: true }).click();
 
     row = page.getByRole("row").filter({ hasText: collateralNumber });
-    await expect(row.getByText("Tidak Berlaku", { exact: true })).toBeVisible();
-    await expect(row).toContainText("Belum ada sumber");
+    const inactiveExpiryCell = row.getByRole("cell").nth(5);
+    const inactiveReviewCell = row.getByRole("cell").nth(10);
+    await expect(
+      inactiveExpiryCell.getByText("Tidak Berlaku", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      inactiveReviewCell.getByText("Tidak Berlaku", { exact: true }),
+    ).toBeVisible();
+    await expect(inactiveReviewCell).toContainText("Belum ada sumber");
     stored = await prisma.debtor_collaterals.findUnique({
       where: { id: collateral.id },
     });
