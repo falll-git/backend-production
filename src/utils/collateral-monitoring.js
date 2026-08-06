@@ -42,22 +42,19 @@ function daysUntil(target, now = new Date()) {
 }
 
 function latestAppraisal(record = {}) {
-  const reporterDate = toUtcDateOnly(record.reporter_appraisal_date);
-  const expiryReviewDate = toUtcDateOnly(record.expiry_updated_at);
+  const hasExpiryDate = record.has_expiry_date === true;
+  const expiryDate = hasExpiryDate ? toUtcDateOnly(record.expiry_date) : null;
 
-  if (
-    expiryReviewDate &&
-    (!reporterDate || expiryReviewDate.getTime() >= reporterDate.getTime())
-  ) {
+  if (expiryDate) {
     return {
-      source: "EXPIRY_UPDATE",
-      date: expiryReviewDate,
+      source: "EXPIRY_DATE",
+      date: expiryDate,
     };
   }
 
   return {
-    source: reporterDate ? "REPORTER" : null,
-    date: reporterDate,
+    source: null,
+    date: null,
   };
 }
 
@@ -81,27 +78,30 @@ function statusByCalendarWindow({
 }
 
 function buildCollateralMonitoring(record = {}, now = new Date()) {
+  const hasExpiryDate = record.has_expiry_date === true;
   const appraisal = latestAppraisal(record);
-  const nextAppraisalDueDate = appraisal.date
-    ? addMonthsClamped(appraisal.date, 12)
-    : null;
+  const nextAppraisalDueDate = appraisal.date;
   const appraisalWarningStartDate = nextAppraisalDueDate
     ? addMonthsClamped(nextAppraisalDueDate, -2)
     : null;
-  const appraisalState = statusByCalendarWindow({
-    dueDate: nextAppraisalDueDate,
-    warningStartDate: appraisalWarningStartDate,
-    now,
-    missing: {
-      status: "NOT_AVAILABLE",
-      label: "Belum Ada Tinjauan",
-    },
-    current: { status: "CURRENT", label: "Aman" },
-    dueSoon: { status: "DUE_SOON", label: "Segera Ditinjau Ulang" },
-    overdue: { status: "OVERDUE", label: "Wajib Ditinjau Ulang" },
-  });
+  const appraisalState = hasExpiryDate
+    ? statusByCalendarWindow({
+        dueDate: nextAppraisalDueDate,
+        warningStartDate: appraisalWarningStartDate,
+        now,
+        missing: {
+          status: "NOT_AVAILABLE",
+          label: "Tanggal Expired Belum Diisi",
+        },
+        current: { status: "CURRENT", label: "Aman" },
+        dueSoon: { status: "DUE_SOON", label: "Segera Ditinjau Ulang" },
+        overdue: { status: "OVERDUE", label: "Wajib Ditinjau Ulang" },
+      })
+    : {
+        status: "NOT_AVAILABLE",
+        label: "Tidak Berlaku",
+      };
 
-  const hasExpiryDate = record.has_expiry_date === true;
   const expiryDate = hasExpiryDate ? toUtcDateOnly(record.expiry_date) : null;
   const expiryWarningStartDate = expiryDate
     ? addMonthsClamped(expiryDate, -3)

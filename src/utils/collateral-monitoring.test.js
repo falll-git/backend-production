@@ -9,31 +9,46 @@ const {
   latestAppraisal,
 } = require("./collateral-monitoring");
 
-test("monitoring memakai tanggal penilaian pelapor saat belum ada tinjauan expired", () => {
+test("tinjauan agunan tidak memakai tanggal penilaian pelapor saat expired belum diset", () => {
   const result = latestAppraisal({
     reporter_appraisal_date: "2026-01-15",
     independent_appraisal_date: "2026-03-20",
   });
 
-  assert.equal(result.source, "REPORTER");
-  assert.equal(result.date.toISOString(), "2026-01-15T00:00:00.000Z");
+  assert.equal(result.source, null);
+  assert.equal(result.date, null);
+
+  const monitoring = buildCollateralMonitoring(
+    {
+      reporter_appraisal_date: "2019-12-31",
+      has_expiry_date: false,
+      expiry_date: null,
+    },
+    new Date("2026-08-06T12:00:00.000Z"),
+  );
+  assert.equal(monitoring.appraisal_status, "NOT_AVAILABLE");
+  assert.equal(monitoring.appraisal_status_label, "Tidak Berlaku");
+  assert.equal(monitoring.latest_appraisal_date, null);
+  assert.equal(monitoring.next_appraisal_due_date, null);
 });
 
-test("tinjauan expired terbaru memperbarui acuan tinjauan agunan", () => {
+test("tanggal expired menjadi acuan tinjauan agunan", () => {
   const result = latestAppraisal({
     reporter_appraisal_date: "2019-12-31",
+    has_expiry_date: true,
+    expiry_date: "2026-10-15",
     expiry_updated_at: "2026-08-06T10:15:00.000Z",
   });
 
-  assert.equal(result.source, "EXPIRY_UPDATE");
-  assert.equal(result.date.toISOString(), "2026-08-06T00:00:00.000Z");
+  assert.equal(result.source, "EXPIRY_DATE");
+  assert.equal(result.date.toISOString(), "2026-10-15T00:00:00.000Z");
 
   const monitoring = buildCollateralMonitoring(
     {
       reporter_appraisal_date: "2019-12-31",
       expiry_updated_at: "2026-08-06T10:15:00.000Z",
       has_expiry_date: true,
-      expiry_date: "2027-12-31",
+      expiry_date: "2026-10-15",
     },
     new Date("2026-08-06T12:00:00.000Z"),
   );
@@ -41,7 +56,7 @@ test("tinjauan expired terbaru memperbarui acuan tinjauan agunan", () => {
   assert.equal(monitoring.appraisal_status_label, "Aman");
   assert.equal(
     monitoring.next_appraisal_due_date.toISOString(),
-    "2027-08-06T00:00:00.000Z",
+    "2026-10-15T00:00:00.000Z",
   );
 });
 
@@ -61,8 +76,11 @@ test("addMonthsClamped menjaga akhir bulan pada tahun non-kabisat", () => {
   );
 });
 
-test("warning penilaian dimulai tepat dua bulan kalender sebelum kewajiban", () => {
-  const record = { reporter_appraisal_date: "2025-08-31" };
+test("warning tinjauan agunan dimulai dua bulan sebelum tanggal expired", () => {
+  const record = {
+    has_expiry_date: true,
+    expiry_date: "2026-08-31",
+  };
 
   assert.equal(
     buildCollateralMonitoring(record, new Date("2026-06-29T12:00:00.000Z"))
@@ -81,7 +99,10 @@ test("warning penilaian dimulai tepat dua bulan kalender sebelum kewajiban", () 
 
 test("penilaian menjadi merah tepat pada tanggal kewajiban", () => {
   const result = buildCollateralMonitoring(
-    { reporter_appraisal_date: "2025-07-15" },
+    {
+      has_expiry_date: true,
+      expiry_date: "2026-07-15",
+    },
     new Date("2026-07-15T12:00:00.000Z"),
   );
 

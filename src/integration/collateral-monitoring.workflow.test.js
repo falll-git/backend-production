@@ -153,12 +153,12 @@ test(
     assert.equal(updatedResponse.body.data.has_expiry_date, true);
     assert.equal(updatedResponse.body.data.expiry_status, "DUE_SOON");
     assert.equal(updatedResponse.body.data.expiry_status_label, "Segera Berakhir");
-    assert.equal(updatedResponse.body.data.appraisal_status, "CURRENT");
-    assert.equal(updatedResponse.body.data.appraisal_status_label, "Aman");
-    assert.equal(updatedResponse.body.data.latest_appraisal_source, "EXPIRY_UPDATE");
+    assert.equal(updatedResponse.body.data.appraisal_status, "DUE_SOON");
+    assert.equal(updatedResponse.body.data.appraisal_status_label, "Segera Ditinjau Ulang");
+    assert.equal(updatedResponse.body.data.latest_appraisal_source, "EXPIRY_DATE");
     assert.equal(
       updatedResponse.body.data.latest_appraisal_date.slice(0, 10),
-      updatedResponse.body.data.expiry_updated_at.slice(0, 10),
+      expiryDateOnly,
     );
 
     const storedManual = await prisma.debtor_collaterals.findUnique({
@@ -224,6 +224,8 @@ test(
     assert.equal(disabledResponse.body.data.expiry_date, null);
     assert.equal(disabledResponse.body.data.expiry_status, "NOT_APPLICABLE");
     assert.equal(disabledResponse.body.data.expiry_status_label, "Tidak Berlaku");
+    assert.equal(disabledResponse.body.data.latest_appraisal_date, null);
+    assert.equal(disabledResponse.body.data.appraisal_status_label, "Tidak Berlaku");
 
     const auditRows = await prisma.debtor_activity_logs.findMany({
       where: {
