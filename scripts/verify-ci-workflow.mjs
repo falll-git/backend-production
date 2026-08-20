@@ -16,6 +16,7 @@ const REQUIRED_PATTERNS = Object.freeze([
   [/postgresql:\/\/postgres:postgres@postgres:5432\/ruwang_arsip_ci\?schema=public/, "database PostgreSQL service khusus CI"],
   [/^\s+persist-credentials:\s*false\s*$/m, "checkout tanpa menyimpan credential Git"],
   [/npm run prisma:generate/, "Prisma Client generation"],
+  [/npm run ci:provision-runtime-role/, "provisioning runtime role khusus CI"],
   [/npm run quality:release/, "quality gate release"],
   [/^\s+if:\s*\$\{\{\s*failure\(\)\s*\}\}\s*$/m, "artefak hanya saat gagal"],
   [/^\s+retention-days:\s*\d+\s*$/m, "retensi artefak terbatas"],
@@ -55,9 +56,20 @@ export function validateQualityWorkflow(source) {
   }
 
   const prismaGenerateIndex = text.indexOf("npm run prisma:generate");
+  const provisionRoleIndex = text.indexOf("npm run ci:provision-runtime-role");
+  const migrateIndex = text.indexOf("npm run migrate:deploy");
   const seedIndex = text.indexOf("npm run seed");
   if (prismaGenerateIndex < 0 || seedIndex < 0 || prismaGenerateIndex > seedIndex) {
     errors.push("Prisma Client wajib dibuat sebelum database CI di-seed.");
+  }
+  if (
+    provisionRoleIndex < 0 ||
+    migrateIndex < 0 ||
+    provisionRoleIndex > migrateIndex
+  ) {
+    errors.push(
+      "Runtime role CI wajib diprovisikan sebelum migration database dijalankan.",
+    );
   }
 
   const unpinnedActions = text

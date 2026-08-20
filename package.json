@@ -40,6 +40,7 @@
     "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
     "seed:system": "node prisma/seed-system.js",
     "seed:ci-test-data": "node scripts/seed-ci-test-data.js",
+    "ci:provision-runtime-role": "node scripts/provision-ci-runtime-role.js",
     "fixture:modal-workflows": "node scripts/modal-workflow-fixtures.js",
     "seed": "prisma db seed"
   },

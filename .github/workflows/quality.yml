@@ -170,6 +170,10 @@ jobs:
         shell: bash
         run: mkdir -p "$UPLOAD_DIR" "$UPLOAD_TEMP_DIR"
 
+      - name: Provision least-privilege runtime role for CI migrations
+        working-directory: backend-production
+        run: npm run ci:provision-runtime-role
+
       - name: Apply migrations to ephemeral CI database
         working-directory: backend-production
         run: npm run migrate:deploy

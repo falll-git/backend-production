@@ -51,6 +51,19 @@ test("workflow Quality mewajibkan Prisma Client dibuat sebelum seed", () => {
   );
 });
 
+test("workflow Quality mewajibkan runtime role CI sebelum migration", () => {
+  assert.throws(
+    () =>
+      validateQualityWorkflow(
+        workflow.replace(
+          /\n\s+- name: Provision least-privilege runtime role for CI migrations[\s\S]*?run: npm run ci:provision-runtime-role\n/,
+          "\n",
+        ),
+      ),
+    /provisioning runtime role|Runtime role CI/i,
+  );
+});
+
 test("workflow Quality menolak pull_request_target", () => {
   assert.throws(
     () => validateQualityWorkflow(`${workflow}\npull_request_target:\n`),

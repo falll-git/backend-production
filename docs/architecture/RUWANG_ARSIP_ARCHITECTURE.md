@@ -120,6 +120,7 @@ Prisma schema mencakup user/role/menu/division; action token dan refresh session
 - Source kebenaran perubahan schema adalah direktori `prisma/migrations` yang immutable setelah diterapkan.
 - Production memakai `prisma migrate deploy`, bukan `db push` dan bukan reset.
 - Kandidat rilis diuji pada database kosong dan jalur upgrade database lama disposable.
+- Database CI kosong memprovisikan role aplikasi `NOLOGIN` least-privilege sebelum `migrate deploy`, sehingga migration yang memberi grant ke role runtime dapat diuji tanpa credential production.
 - Pemeriksaan release mencakup migration status, schema diff, checksum/status, RLS, public grants, serta transaction rollback.
 
 ## 5. Aliran data utama
