@@ -19,6 +19,8 @@ const migrationNames = [
   "20260726130000_protect_system_activity_logs",
   "20260726140000_harden_rls_helper_privileges",
   "20260726150000_require_contract_read_permission_rls",
+  "20260820100000_cache_debtor_read_scope_context",
+  "20260820101000_grant_debtor_read_scope_helpers",
 ];
 
 const migrationSql = migrationNames
@@ -89,6 +91,50 @@ test("helper rekursif memakai owner NOLOGIN terpisah dan search_path tetap", () 
   assert.match(migrationSql, /OWNER TO ruwang_arsip_policy/i);
   assert.match(migrationSql, /REVOKE ALL ON FUNCTION[\s\S]*?FROM PUBLIC/i);
   assert.doesNotMatch(helperMigrations, /\bEXECUTE\s+format\s*\(/i);
+});
+
+test("scope baca debitur dihitung sekali per transaksi tanpa melonggarkan RLS", () => {
+  const cacheMigration = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "../../prisma/migrations/20260820100000_cache_debtor_read_scope_context/migration.sql",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    cacheMigration,
+    /ruwang_arsip_prepare_read_context[\s\S]*?set_config\('app\.debtor_read_scope_mode'/i,
+  );
+  assert.match(
+    cacheMigration,
+    /ruwang_arsip_compute_debtor_read_scope_mode[\s\S]*?'manage_all'[\s\S]*?'report_all'[\s\S]*?'view_division'/i,
+  );
+  assert.match(
+    cacheMigration,
+    /ruwang_arsip_can_read_debtor[\s\S]*?created_by[\s\S]*?marketing_user_id[\s\S]*?division_id/i,
+  );
+  assert.match(
+    cacheMigration,
+    /ruwang_arsip_can_read_contract[\s\S]*?created_by[\s\S]*?marketing_user_id[\s\S]*?division_id/i,
+  );
+  assert.match(
+    cacheMigration,
+    /REVOKE ALL ON FUNCTION public\.ruwang_arsip_prepare_read_context\(\) FROM PUBLIC/i,
+  );
+
+  const grantMigration = fs.readFileSync(
+    path.resolve(
+      __dirname,
+      "../../prisma/migrations/20260820101000_grant_debtor_read_scope_helpers/migration.sql",
+    ),
+    "utf8",
+  );
+  assert.match(
+    grantMigration,
+    /GRANT EXECUTE ON FUNCTION public\.ruwang_arsip_prepare_read_context\(\)[\s\S]*?TO ruwang_arsip_app/i,
+  );
+  assert.doesNotMatch(grantMigration, /TO PUBLIC/i);
 });
 
 test("role policy tidak dapat login dan hanya mendapat akses baca tabel", () => {

@@ -6,6 +6,7 @@ const {
   runWithDatabaseContext,
   runWithDatabaseTransactionClient,
 } = require("./database-context");
+const { getRequestContext } = require("../utils/request-context");
 
 function requireUserId(userId) {
   try {
@@ -17,10 +18,18 @@ function requireUserId(userId) {
 
 async function setRlsContext(client, userId, accessPurpose = "") {
   const normalizedUserId = requireUserId(userId);
+  const request = getRequestContext();
   await client.$executeRaw`
     SELECT
       set_config('app.current_user_id', ${normalizedUserId}, true),
-      set_config('app.access_purpose', ${String(accessPurpose || "")}, true)
+      set_config('app.access_purpose', ${String(accessPurpose || "")}, true),
+      set_config('app.request_id', ${String(request.request_id || "")}, true),
+      set_config('app.request_method', ${String(request.request_method || "")}, true),
+      set_config('app.request_path', ${String(request.request_path || "")}, true),
+      set_config('app.user_agent', ${String(request.user_agent || "")}, true)
+  `;
+  await client.$executeRaw`
+    SELECT public.ruwang_arsip_prepare_read_context()
   `;
 }
 

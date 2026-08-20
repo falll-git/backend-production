@@ -23,6 +23,28 @@ const {
 const { sendMail } = require("../../utils/mailer");
 const { AppError } = require("../../utils/errors");
 
+const DEFAULT_REFRESH_REUSE_GRACE_MS = 5000;
+const MAX_REFRESH_REUSE_GRACE_MS = 15000;
+const MAX_REFRESH_REPLACEMENT_HOPS = 32;
+
+function refreshReuseGraceMs() {
+  const configured = Number(process.env.AUTH_REFRESH_REUSE_GRACE_MS);
+  if (!Number.isInteger(configured) || configured < 1) {
+    return DEFAULT_REFRESH_REUSE_GRACE_MS;
+  }
+
+  return Math.min(configured, MAX_REFRESH_REUSE_GRACE_MS);
+}
+
+function timingSafeTextEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
 function normalizeUsername(username) {
   return username.trim().toLowerCase();
 }
@@ -156,13 +178,16 @@ async function issueRefreshToken(
     sessionContext = {},
   } = {},
 ) {
-  const refreshTokenId = crypto.randomUUID();
-  const refreshToken = generateRefreshToken({
-    ...buildJwtPayload(user),
-    jti: refreshTokenId,
-  });
-  const expiresAt = getRefreshTokenExpiryDate(refreshToken);
   const now = new Date();
+  const refreshTokenId = crypto.randomUUID();
+  const refreshToken = generateRefreshToken(
+    {
+      ...buildJwtPayload(user),
+      jti: refreshTokenId,
+    },
+    { issuedAt: now },
+  );
+  const expiresAt = getRefreshTokenExpiryDate(refreshToken);
 
   const { user: updatedUser, refreshTokenId: sessionId } =
     await repository.rotateRefreshToken({
@@ -181,6 +206,100 @@ async function issueRefreshToken(
     expiresAt,
     sessionId,
     user: updatedUser,
+  };
+}
+
+function sessionContextMatches(tokenRecord, sessionContext) {
+  const storedIpAddress = String(tokenRecord.ip_address || "");
+  const storedUserAgent = String(tokenRecord.user_agent || "");
+  const currentIpAddress = String(sessionContext.ipAddress || "");
+  const currentUserAgent = String(sessionContext.userAgent || "");
+
+  return (
+    storedIpAddress.length > 0 &&
+    storedUserAgent.length > 0 &&
+    timingSafeTextEqual(storedIpAddress, currentIpAddress) &&
+    timingSafeTextEqual(storedUserAgent, currentUserAgent)
+  );
+}
+
+async function recoverRecentlyRotatedRefreshToken({
+  decoded,
+  sessionContext,
+  tokenHash,
+}) {
+  const revokedAfter = new Date(Date.now() - refreshReuseGraceMs());
+  const replacedToken =
+    await repository.findRecentlyReplacedRefreshTokenByHash({
+      tokenHash,
+      revokedAfter,
+    });
+
+  if (
+    !replacedToken?.user ||
+    replacedToken.user.id !== decoded.id ||
+    replacedToken.id !== decoded.jti ||
+    !replacedToken.replaced_by_token_id ||
+    !sessionContextMatches(replacedToken, sessionContext)
+  ) {
+    return null;
+  }
+
+  ensureUserCanAuthenticate(replacedToken.user);
+
+  let activeToken = null;
+  let replacementTokenId = replacedToken.replaced_by_token_id;
+  let replacedAt = replacedToken.revoked_at;
+
+  for (let hop = 0; hop < MAX_REFRESH_REPLACEMENT_HOPS; hop += 1) {
+    const candidate = await repository.findRefreshTokenByIdAndUserId({
+      id: replacementTokenId,
+      userId: replacedToken.user.id,
+    });
+    if (
+      !candidate ||
+      candidate.created_at < replacedAt ||
+      !sessionContextMatches(candidate, sessionContext)
+    ) {
+      return null;
+    }
+
+    if (!candidate.revoked_at) {
+      activeToken = candidate;
+      break;
+    }
+
+    if (
+      candidate.revoked_at < revokedAfter ||
+      !candidate.replaced_by_token_id
+    ) {
+      return null;
+    }
+
+    replacementTokenId = candidate.replaced_by_token_id;
+    replacedAt = candidate.revoked_at;
+  }
+
+  if (!activeToken) return null;
+
+  const refreshToken = generateRefreshToken(
+    {
+      ...buildJwtPayload(replacedToken.user),
+      jti: activeToken.id,
+    },
+    { issuedAt: activeToken.created_at },
+  );
+  if (!timingSafeTextEqual(hashToken(refreshToken), activeToken.token_hash)) {
+    return null;
+  }
+
+  return {
+    token: generateAccessToken(
+      buildJwtPayload(replacedToken.user, activeToken.id),
+    ),
+    refreshToken,
+    refreshTokenExpiresAt: activeToken.expires_at,
+    user: buildAuthUserPayload(replacedToken.user),
   };
 }
 
@@ -256,13 +375,19 @@ exports.refreshToken = async (token, sessionContext = {}) => {
     throw new AppError("Sesi login tidak valid.", 401);
   }
 
-  const tokenRecord = await repository.findActiveRefreshTokenByHash(
-    hashToken(token),
-  );
+  const tokenHash = hashToken(token);
+  const tokenRecord = await repository.findActiveRefreshTokenByHash(tokenHash);
   const user = tokenRecord?.user || null;
   const oldRefreshTokenId = tokenRecord?.id || null;
 
   if (!user) {
+    const recovered = await recoverRecentlyRotatedRefreshToken({
+      decoded,
+      sessionContext,
+      tokenHash,
+    });
+    if (recovered) return recovered;
+
     throw new AppError("Sesi login tidak valid.", 401);
   }
 
@@ -276,10 +401,23 @@ exports.refreshToken = async (token, sessionContext = {}) => {
 
   ensureUserCanAuthenticate(user);
 
-  const refresh = await issueRefreshToken(user, {
-    oldRefreshTokenId,
-    sessionContext,
-  });
+  let refresh;
+  try {
+    refresh = await issueRefreshToken(user, {
+      oldRefreshTokenId,
+      sessionContext,
+    });
+  } catch (error) {
+    if (error?.statusCode === 401) {
+      const recovered = await recoverRecentlyRotatedRefreshToken({
+        decoded,
+        sessionContext,
+        tokenHash,
+      });
+      if (recovered) return recovered;
+    }
+    throw error;
+  }
   const newAccessToken = generateAccessToken(buildJwtPayload(refresh.user, refresh.sessionId));
 
   return {

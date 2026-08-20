@@ -1,14 +1,9 @@
-const {
-  buildFileUrl,
-  normalizeStoredPath,
-} = require("./persuratan-files");
+const { buildFileUrl, normalizeStoredPath } = require("./persuratan-files");
 const {
   buildWatermarkMeta,
   resolveEffectiveFileUrl,
 } = require("../modules/watermark-settings/watermarkProcessor.service");
-const {
-  appendFileAccessToken,
-} = require("./file-access-token");
+const { appendFileAccessToken } = require("./file-access-token");
 const { normalizeDownloadFileName } = require("./file-names");
 const { toSizeBytesNumber } = require("./size-bytes");
 const {
@@ -18,6 +13,7 @@ const {
   normalizeOutgoingStatus,
 } = require("./persuratan-status");
 const { serializeRole } = require("./role-types");
+const { getDispositionCapabilities } = require("./persuratan-workflow");
 
 const IMAGE_PREVIEW_EXTENSIONS = new Set(["jpg", "jpeg", "png"]);
 const OFFICE_PREVIEW_EXTENSIONS = new Set([
@@ -105,7 +101,7 @@ const ACTIVE_DISPOSITION_STATUSES = new Set(["NEW", "IN_PROGRESS"]);
 
 const DISPOSITION_STATUS_LABELS = {
   NEW: "Baru",
-  IN_PROGRESS: "Diproses",
+  IN_PROGRESS: "Dalam Proses",
   COMPLETED: "Selesai",
   FORWARDED: "Diteruskan",
 };
@@ -155,6 +151,25 @@ function normalizeDispositionSerializeOptions(indexOrOptions) {
 function buildDispositionWorkflowMeta(dispositions) {
   const currentHolders = [];
   const seenHolderIds = new Set();
+  const initialRecipients = [];
+  const seenInitialRecipientIds = new Set();
+
+  for (const item of dispositions.filter(
+    (entry) => !entry.parent_disposition_id,
+  )) {
+    if (!item.receiver_id || seenInitialRecipientIds.has(item.receiver_id)) {
+      continue;
+    }
+
+    seenInitialRecipientIds.add(item.receiver_id);
+    initialRecipients.push({
+      id: item.receiver_id,
+      name: item.receiver_name ?? "-",
+      email: item.receiver?.email ?? null,
+      status_key: item.status_key,
+      status_label: item.status_label,
+    });
+  }
 
   for (const item of dispositions.filter((entry) => entry.is_current)) {
     if (!item.receiver_id || seenHolderIds.has(item.receiver_id)) continue;
@@ -173,6 +188,8 @@ function buildDispositionWorkflowMeta(dispositions) {
     dispositions.length > 0 ? dispositions[dispositions.length - 1] : null;
 
   return {
+    initial_recipients: initialRecipients,
+    initial_recipient_names: initialRecipients.map((item) => item.name),
     current_holders: currentHolders,
     current_holder_names: currentHolders.map((item) => item.name),
     active_dispositions_count: currentHolders.length,
@@ -313,10 +330,12 @@ function mapInitialDispositionManagersByDivision(dispositions) {
 }
 
 function attachTargetDivisionManagers(targetDivisions, dispositions) {
-  const managersByDivision = mapInitialDispositionManagersByDivision(dispositions);
+  const managersByDivision =
+    mapInitialDispositionManagersByDivision(dispositions);
 
   return targetDivisions.map((target) => {
-    const dispositionManagers = managersByDivision.get(target.division_id) ?? [];
+    const dispositionManagers =
+      managersByDivision.get(target.division_id) ?? [];
     const managers = uniqueUsersById([
       ...(target.manager ? [target.manager] : []),
       ...dispositionManagers,
@@ -325,9 +344,11 @@ function attachTargetDivisionManagers(targetDivisions, dispositions) {
     return {
       ...target,
       manager: target.manager ?? managers[0] ?? null,
-      manager_id: target.manager_id ?? (managers.length === 1 ? managers[0].id : null),
+      manager_id:
+        target.manager_id ?? (managers.length === 1 ? managers[0].id : null),
       manager_name:
-        target.manager_name ?? (managers.length === 1 ? managers[0].name : null),
+        target.manager_name ??
+        (managers.length === 1 ? managers[0].name : null),
       managers,
       manager_ids: managers.map((manager) => manager.id),
       manager_names: managers.map((manager) => manager.name).filter(Boolean),
@@ -387,12 +408,18 @@ function buildDispositionDeadlineMeta(dispositions) {
   const items = Array.isArray(dispositions) ? dispositions : [];
   const activeDueItems = items
     .filter((item) => item.is_current && item.due_date)
-    .sort((left, right) => getTimeValue(left.due_date) - getTimeValue(right.due_date));
+    .sort(
+      (left, right) =>
+        getTimeValue(left.due_date) - getTimeValue(right.due_date),
+    );
   const dueItem =
     activeDueItems[0] ??
     [...items]
       .filter((item) => item.due_date)
-      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+      .sort(
+        (left, right) =>
+          getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at),
+      )[0] ??
     null;
   const noteItem =
     items
@@ -402,10 +429,16 @@ function buildDispositionDeadlineMeta(dispositions) {
           item.note.trim() &&
           (dueItem ? item.due_date === dueItem.due_date : true),
       )
-      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+      .sort(
+        (left, right) =>
+          getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at),
+      )[0] ??
     items
       .filter((item) => typeof item.note === "string" && item.note.trim())
-      .sort((left, right) => getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at))[0] ??
+      .sort(
+        (left, right) =>
+          getTimeValue(right.disposed_at) - getTimeValue(left.disposed_at),
+      )[0] ??
     null;
   const dueDate = dueItem?.due_date ?? null;
   const hasActiveDueDate = activeDueItems.length > 0;
@@ -553,6 +586,7 @@ function serializeIncomingDisposition(item, indexOrOptions = 0) {
   const receiver = serializeUser(item.receiver);
   const senderName = sender?.name ?? null;
   const receiverName = receiver?.name ?? null;
+  const capabilities = getDispositionCapabilities(normalizedStatus);
 
   return {
     ...item,
@@ -576,9 +610,7 @@ function serializeIncomingDisposition(item, indexOrOptions = 0) {
     is_disposisi_ulang:
       Boolean(item.parent_disposition_id) ||
       Boolean((options.sequence ?? 1) > 1),
-    can_start: normalizedStatus === "NEW",
-    can_complete: ["NEW", "IN_PROGRESS"].includes(normalizedStatus),
-    can_redispose: isActiveDispositionStatus(normalizedStatus),
+    ...capabilities,
   };
 }
 
@@ -592,6 +624,7 @@ function serializeMemorandumDisposition(item, indexOrOptions = 0) {
   const receiver = serializeUser(item.receiver);
   const senderName = sender?.name ?? null;
   const receiverName = receiver?.name ?? null;
+  const capabilities = getDispositionCapabilities(normalizedStatus);
 
   return {
     ...item,
@@ -615,9 +648,7 @@ function serializeMemorandumDisposition(item, indexOrOptions = 0) {
     is_disposisi_ulang:
       Boolean(item.parent_disposition_id) ||
       Boolean((options.sequence ?? 1) > 1),
-    can_start: normalizedStatus === "NEW",
-    can_complete: ["NEW", "IN_PROGRESS"].includes(normalizedStatus),
-    can_redispose: isActiveDispositionStatus(normalizedStatus),
+    ...capabilities,
   };
 }
 
@@ -700,7 +731,11 @@ async function serializeIncomingMail({ req, record }) {
   };
 }
 
-async function serializeOutgoingMail({ req, record, deliveryMediaNames = null }) {
+async function serializeOutgoingMail({
+  req,
+  record,
+  deliveryMediaNames = null,
+}) {
   const fallbackBaseName = record.mail_number || record.name || record.id;
   const fileData = await serializePersuratanFile({
     req,

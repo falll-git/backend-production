@@ -62,7 +62,7 @@ test(
     process.env.SLIK_IMPORT_LOCAL_FALLBACK_ENABLED = "true";
 
     const app = require("../app");
-    const prisma = require("../config/prisma");
+    const prisma = require("../config/prisma-system");
     const fixture = createIntegrationFixture(prisma, "Import upload workflow");
     const agent = request.agent(app);
     const credentials = readAdminCredentials();
@@ -191,7 +191,13 @@ test(
         filename: "0104.620005.2026.07.A01.1.txt",
         contentType: "text/plain",
       })
-      .expect(201);
+      .expect((response) => {
+        assert.equal(
+          response.status,
+          201,
+          `Upload SLIK gagal: ${JSON.stringify(response.body)}`,
+        );
+      });
     fixture.track("importJob", slikResponse.body.data.id);
 
     const completedSlik = await waitFor(

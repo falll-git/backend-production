@@ -39,6 +39,13 @@ async function main() {
     actionTwo: crypto.randomUUID(),
     accessRequest: crypto.randomUUID(),
     relatedUser: crypto.randomUUID(),
+    relatedUserNoMenu: crypto.randomUUID(),
+    debtorActivityOne: crypto.randomUUID(),
+    debtorActivityTwo: crypto.randomUUID(),
+    debtorIdebOne: crypto.randomUUID(),
+    debtorIdebTwo: crypto.randomUUID(),
+    legalActivityOne: crypto.randomUUID(),
+    legalActivityTwo: crypto.randomUUID(),
     debtorOne: crypto.randomUUID(),
     debtorTwo: crypto.randomUUID(),
     contractOne: crypto.randomUUID(),
@@ -298,6 +305,46 @@ async function main() {
               ($2, 'LAINNYA', $5, $6, now(), now())`,
       [ids.legalDepositOne, ids.legalDepositTwo, ids.contractOne, firstUser, ids.contractTwo, secondUser],
     );
+    await client.query(
+      `INSERT INTO digital_document_related_users
+        (id, document_id, user_id, created_at, updated_at)
+       VALUES ($1, $2, $3, now(), now())`,
+      [ids.relatedUserNoMenu, ids.documentOne, secondUser],
+    );
+    await client.query(
+      `INSERT INTO debtor_activity_logs
+        (id, actor_id, action, source, entity_type, entity_id, title, created_at)
+       VALUES
+        ($1, $3, 'RLS_VERIFY', 'MANUAL', 'RLS_TEST', $1, 'RLS debtor activity one', now()),
+        ($2, $4, 'RLS_VERIFY', 'MANUAL', 'RLS_TEST', $2, 'RLS debtor activity two', now())`,
+      [ids.debtorActivityOne, ids.debtorActivityTwo, firstUser, secondUser],
+    );
+    await client.query(
+      `INSERT INTO debtor_ideb_uploads
+        (id, source_fingerprint, month, year, status, file_path, uploaded_by,
+         created_by, created_at, updated_at)
+       VALUES
+        ($1, $3, 7, 2026, 'COMPLETED', $4, $5, $5, now(), now()),
+        ($2, $6, 7, 2026, 'COMPLETED', $7, $8, $8, now(), now())`,
+      [
+        ids.debtorIdebOne,
+        ids.debtorIdebTwo,
+        `rls-ideb-one-${suffix}`,
+        `rls/ideb-one-${suffix}.json`,
+        firstUser,
+        `rls-ideb-two-${suffix}`,
+        `rls/ideb-two-${suffix}.json`,
+        secondUser,
+      ],
+    );
+    await client.query(
+      `INSERT INTO legal_activity_logs
+        (id, actor_id, action, source, entity_type, entity_id, title, created_at)
+       VALUES
+        ($1, $3, 'RLS_VERIFY', 'MANUAL', 'RLS_TEST', $1, 'RLS legal activity one', now()),
+        ($2, $4, 'RLS_VERIFY', 'MANUAL', 'RLS_TEST', $2, 'RLS legal activity two', now())`,
+      [ids.legalActivityOne, ids.legalActivityTwo, firstUser, secondUser],
+    );
 
     await client.query(
       `INSERT INTO notifications
@@ -360,6 +407,9 @@ async function main() {
       ["outgoing_mails", "id", [ids.outgoingOne, ids.outgoingTwo]],
       ["memorandums", "id", [ids.memorandumOne, ids.memorandumTwo]],
       ["legal_deposits", "id", [ids.legalDepositOne, ids.legalDepositTwo]],
+      ["debtor_activity_logs", "id", [ids.debtorActivityOne, ids.debtorActivityTwo]],
+      ["debtor_ideb_uploads", "id", [ids.debtorIdebOne, ids.debtorIdebTwo]],
+      ["legal_activity_logs", "id", [ids.legalActivityOne, ids.legalActivityTwo]],
     ];
     for (const [tableName, columnName, recordIds] of checks) {
       const result = await client.query(
@@ -407,10 +457,17 @@ async function main() {
       [secondUser],
     );
     for (const [tableName, id] of [
+      ["digital_documents", ids.documentTwo],
       ["digital_debtors", ids.debtorTwo],
       ["debtor_contracts", ids.contractTwo],
       ["incoming_mails", ids.incomingTwo],
+      ["outgoing_mails", ids.outgoingTwo],
+      ["memorandums", ids.memorandumTwo],
       ["legal_deposits", ids.legalDepositTwo],
+      ["digital_document_related_users", ids.relatedUserNoMenu],
+      ["debtor_activity_logs", ids.debtorActivityTwo],
+      ["debtor_ideb_uploads", ids.debtorIdebTwo],
+      ["legal_activity_logs", ids.legalActivityTwo],
     ]) {
       const noMenuRead = await client.query(
         `SELECT COUNT(*)::int AS count FROM "${tableName}" WHERE id = $1`,

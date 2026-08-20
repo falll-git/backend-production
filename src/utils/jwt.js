@@ -28,18 +28,27 @@ exports.generateAccessToken = (payload) => {
   });
 };
 
-exports.generateRefreshToken = (payload) => {
+exports.generateRefreshToken = (payload, { issuedAt = null } = {}) => {
   const expiresIn = process.env.JWT_REFRESH_EXPIRES_IN;
   if (!expiresIn) {
     throw new Error("JWT_REFRESH_EXPIRES_IN belum dikonfigurasi.");
   }
 
-  return jwt.sign(payload, requireSecret("JWT_REFRESH_SECRET"), {
+  const issuedAtSeconds =
+    issuedAt instanceof Date && Number.isFinite(issuedAt.getTime())
+      ? Math.floor(issuedAt.getTime() / 1000)
+      : null;
+
+  return jwt.sign(
+    issuedAtSeconds === null ? payload : { ...payload, iat: issuedAtSeconds },
+    requireSecret("JWT_REFRESH_SECRET"),
+    {
     algorithm: JWT_ALGORITHM,
     issuer: JWT_ISSUER,
     audience: REFRESH_TOKEN_AUDIENCE,
     expiresIn,
-  });
+    },
+  );
 };
 
 exports.verifyAccessToken = (token) => {

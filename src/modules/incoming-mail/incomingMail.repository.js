@@ -144,15 +144,15 @@ exports.update = async (id, data) => {
   return loadById(id);
 };
 
-exports.delete = (id, deleted_by) => {
-  return prisma.incoming_mails.update({
-    where: { id },
-    data: {
-      deleted_by,
-      deleted_at: new Date(),
-    },
-    include: baseInclude,
-  });
+exports.delete = async (id, deletedBy) => {
+  const [result] = await prisma.$queryRaw`
+    SELECT public.ruwang_arsip_soft_delete_incoming_mail(
+      ${id},
+      ${deletedBy}
+    ) AS deleted
+  `;
+
+  return result?.deleted === true;
 };
 
 exports.createDisposition = (data) => {
@@ -215,13 +215,14 @@ exports.forwardDispositionToReceivers = async ({
   dueDate,
 }) => {
   const createdDispositionIds = receiverIds.map(() => crypto.randomUUID());
-  const previousDisposition = await prisma.incoming_mail_dispositions.findUnique({
-    where: { id: currentDispositionId },
-    select: {
-      status: true,
-      is_complete: true,
-    },
-  });
+  const previousDisposition =
+    await prisma.incoming_mail_dispositions.findUnique({
+      where: { id: currentDispositionId },
+      select: {
+        status: true,
+        is_complete: true,
+      },
+    });
   let currentDispositionUpdated = false;
   let newDispositionsCreated = false;
 
@@ -250,10 +251,16 @@ exports.forwardDispositionToReceivers = async ({
     });
     newDispositionsCreated = true;
 
-    await prisma.incoming_mails.update({
-      where: { id: incomingMailId },
-      data: { status: "IN_PROGRESS", updated_by: senderId },
-    });
+    const [workflowStatusSynced] = await prisma.$queryRaw`
+      SELECT public.ruwang_arsip_sync_incoming_mail_workflow_status(
+        ${incomingMailId},
+        ${senderId}
+      ) AS synced
+    `;
+
+    if (!workflowStatusSynced?.synced) {
+      throw new Error("Status alur surat masuk tidak dapat diselaraskan.");
+    }
   } catch (error) {
     if (newDispositionsCreated) {
       await prisma.incoming_mail_dispositions
@@ -301,7 +308,7 @@ exports.completeDispositions = (incomingMailId) => {
     where: {
       incoming_mails_id: incomingMailId,
       status: {
-        in: ["NEW", "IN_PROGRESS"],
+        in: ["IN_PROGRESS"],
       },
     },
     data: {
@@ -310,4 +317,15 @@ exports.completeDispositions = (incomingMailId) => {
       completed_at: new Date(),
     },
   });
+};
+
+exports.syncWorkflowStatus = async ({ incomingMailId, actorUserId }) => {
+  const [result] = await prisma.$queryRaw`
+    SELECT public.ruwang_arsip_sync_incoming_mail_workflow_status(
+      ${incomingMailId},
+      ${actorUserId}
+    ) AS synced
+  `;
+
+  return result?.synced === true;
 };

@@ -1,8 +1,23 @@
 const service = require("./incomingMail.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const { logErrorOnce } = require("../../system/error-observability");
 
-function resolveStatusCode(error, fallback = 400) {
-  return error.statusCode || fallback;
+function sendError(res, error, fallbackStatus = 400) {
+  if (error?.statusCode || error?.status) {
+    return res.status(error.statusCode || error.status).json({
+      status: false,
+      message: error.message,
+    });
+  }
+
+  logErrorOnce(error, {
+    event: "incoming_mail_request_failed",
+    message: "Incoming mail request failed",
+  });
+  return res.status(Math.max(500, fallbackStatus)).json({
+    status: false,
+    message: "Gagal memproses surat masuk.",
+  });
 }
 
 exports.getAll = async (req, res) => {
@@ -19,10 +34,7 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -35,10 +47,7 @@ exports.getDispositionRecipients = async (req, res) => {
 
     return successResponse(res, result);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -51,10 +60,7 @@ exports.getById = async (req, res) => {
     });
     return successResponse(res, result);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 404)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error, 404);
   }
 };
 
@@ -73,10 +79,7 @@ exports.createWithDispo = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -95,10 +98,7 @@ exports.update = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -107,10 +107,7 @@ exports.delete = async (req, res) => {
     await service.deleteIncomingMail(req.params.id, req.user.id);
     return successResponse(res, null, "Surat masuk berhasil dihapus");
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -128,10 +125,7 @@ exports.redispose = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -148,10 +142,7 @@ exports.complete = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -171,9 +162,6 @@ exports.updateDispositionStatus = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };

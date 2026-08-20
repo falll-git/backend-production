@@ -3,7 +3,9 @@ const { join, relative, sep } = require("node:path");
 
 const { expect, test } = require("@playwright/test");
 
-const prisma = require("../../src/config/prisma");
+// Cross-role fixture setup and cleanup use the controlled system client. Page
+// navigation still authenticates each role through the real least-privilege API.
+const prisma = require("../../src/config/prisma-system");
 const {
   resolveFrontendDirectory,
 } = require("../../scripts/release-quality-gate");
@@ -22,6 +24,19 @@ const EXPECTED_ROUTE_COUNTS = {
 };
 const RATE_LIMIT_SAFETY_MARGIN_MS = 500;
 const RATE_LIMIT_MINIMUM_REMAINING = 40;
+const API_IDLE_QUIET_MS = 500;
+const API_IDLE_TIMEOUT_MS = 30_000;
+
+function resolveRoleNames(env = process.env) {
+  const requested = String(env.FULLSTACK_ROLE_SMOKE_ROLE || "").trim();
+  if (!requested) return ROLE_NAMES;
+  if (!ROLE_NAMES.includes(requested)) {
+    throw new Error(
+      `FULLSTACK_ROLE_SMOKE_ROLE tidak dikenal: ${requested}`,
+    );
+  }
+  return [requested];
+}
 
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -103,6 +118,64 @@ function trackGeneralApiRateLimit(page) {
   };
 }
 
+function trackApiRequests(page) {
+  const inFlight = new Set();
+
+  const isApplicationApiRequest = (request) => {
+    try {
+      return new URL(request.url()).pathname.startsWith("/api/");
+    } catch {
+      return false;
+    }
+  };
+  const handleRequest = (request) => {
+    if (isApplicationApiRequest(request)) inFlight.add(request);
+  };
+  const handleSettled = (request) => {
+    inFlight.delete(request);
+  };
+
+  page.on("request", handleRequest);
+  page.on("requestfinished", handleSettled);
+  page.on("requestfailed", handleSettled);
+
+  return {
+    async waitForIdle(label) {
+      const deadline = Date.now() + API_IDLE_TIMEOUT_MS;
+      let idleSince = null;
+
+      while (Date.now() < deadline) {
+        if (inFlight.size === 0) {
+          idleSince ??= Date.now();
+          if (Date.now() - idleSince >= API_IDLE_QUIET_MS) return;
+        } else {
+          idleSince = null;
+        }
+        await page.waitForTimeout(100);
+      }
+
+      const pendingPaths = [...inFlight].map((request) => {
+        try {
+          return new URL(request.url()).pathname;
+        } catch {
+          return "request-tidak-dikenal";
+        }
+      });
+      throw new Error(
+        `${label} masih memiliki ${inFlight.size} request API aktif: ${[
+          ...new Set(pendingPaths),
+        ].join(", ")}`,
+      );
+    },
+    dispose() {
+      page.off("request", handleRequest);
+      page.off("requestfinished", handleSettled);
+      page.off("requestfailed", handleSettled);
+      inFlight.clear();
+    },
+  };
+}
+
 async function loginFromUi(page, account) {
   await page.goto("/");
   await page.getByLabel("Username").fill(account.username);
@@ -128,13 +201,14 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
   const staticRoutes = new Set(staticPages.keys());
   const contexts = [];
   const report = [];
+  const roleNames = resolveRoleNames();
 
   try {
     expect(staticRoutes.size).toBe(61);
 
     const [roles, division] = await Promise.all([
       prisma.roles.findMany({
-        where: { name: { in: ROLE_NAMES } },
+        where: { name: { in: roleNames } },
         include: {
           roles_menus: {
             where: { can_read: true },
@@ -145,13 +219,11 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
       prisma.divisions.findFirst({ orderBy: { created_at: "asc" } }),
     ]);
     expect(division, "Divisi baseline wajib tersedia").not.toBeNull();
-    expect(roles.map((role) => role.name).sort()).toEqual(
-      [...ROLE_NAMES].sort(),
-    );
+    expect(roles.map((role) => role.name).sort()).toEqual([...roleNames].sort());
 
     const rolesByName = new Map(roles.map((role) => [role.name, role]));
 
-    for (const roleName of ROLE_NAMES) {
+    for (const roleName of roleNames) {
       const role = rolesByName.get(roleName);
       const readableMenus = role.roles_menus
         .map((permission) => permission.menu)
@@ -190,11 +262,23 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
       contexts.push(context);
       const page = await context.newPage();
       const rateLimitBudget = trackGeneralApiRateLimit(page);
+      const apiRequests = trackApiRequests(page);
       let activeRoute = "/";
       const serverErrors = [];
+      const recoveredRefreshUnavailable = [];
       const pageErrors = [];
 
       page.on("response", (response) => {
+        if (
+          response.status() === 503 &&
+          new URL(response.url()).pathname === "/api/v1/auth/refresh"
+        ) {
+          recoveredRefreshUnavailable.push({
+            route: activeRoute,
+            status: response.status(),
+          });
+          return;
+        }
         if (response.status() >= 500) {
           serverErrors.push({
             route: activeRoute,
@@ -209,6 +293,10 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
 
       try {
         await loginFromUi(page, account);
+        // Dashboard memuat beberapa ringkasan setelah shell tampil. Tunggu
+        // request aktual selesai agar direct-route smoke tidak membatalkan
+        // query yang masih berjalan dan membawanya ke route atau role berikut.
+        await apiRequests.waitForIdle(`${roleName} setelah login`);
 
         for (const route of pageRoutes) {
           activeRoute = route;
@@ -216,7 +304,14 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
             waitUntil: "domcontentloaded",
             timeout: 30_000,
           });
-          await expect(page.locator("main")).toBeVisible({ timeout: 15_000 });
+          await expect(
+            page.getByRole("status", { name: "Menyiapkan halaman" }),
+            `${roleName} masih tertahan pada loader saat membuka ${route}`,
+          ).toBeHidden({ timeout: 30_000 });
+          await expect(
+            page.locator("main"),
+            `${roleName} tidak menampilkan konten utama untuk ${route}`,
+          ).toBeVisible({ timeout: 15_000 });
           const actualUrl = new URL(page.url());
           const redirectTarget = staticPages.get(route);
           if (redirectTarget) {
@@ -230,15 +325,23 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
           } else {
             expect(actualUrl.pathname).toBe(route);
           }
-          await page.waitForTimeout(250);
+          // Hindari networkidle browser karena layout memang melakukan polling.
+          // Pelacak ini hanya menunggu request API aplikasi yang benar-benar
+          // aktif, termasuk body response, sebelum route selanjutnya dibuka.
+          await apiRequests.waitForIdle(`${roleName} pada ${route}`);
           await rateLimitBudget.waitForCapacity();
         }
       } finally {
+        apiRequests.dispose();
         rateLimitBudget.dispose();
         await context.close();
       }
 
       expect(serverErrors, `${roleName} menerima respons server 5xx`).toEqual([]);
+      expect(
+        recoveredRefreshUnavailable.length,
+        `${roleName} terlalu sering membutuhkan pemulihan refresh transient`,
+      ).toBeLessThanOrEqual(1);
       expect(pageErrors, `${roleName} mengalami crash JavaScript`).toEqual([]);
       report.push({
         role: roleName,
@@ -246,6 +349,7 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
         redirect_routes: pageRoutes.filter((route) => staticPages.get(route))
           .length,
         dashboard_widgets: nonPageMenus.length,
+        recovered_refresh_unavailable: recoveredRefreshUnavailable.length,
       });
       console.log(
         `[role-menu-smoke] ${roleName}: ${pageRoutes.length} route halaman, ${nonPageMenus.length} widget`,

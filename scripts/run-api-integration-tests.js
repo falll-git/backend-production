@@ -6,6 +6,7 @@ const result = spawnSync(
     "--test",
     "--test-concurrency=1",
     "src/integration/api-database.workflow.test.js",
+    "src/integration/auth-refresh-rotation.workflow.test.js",
     "src/integration/collateral-monitoring.workflow.test.js",
     "src/integration/correspondence.workflow.test.js",
     "src/integration/debtor-operational-files.workflow.test.js",

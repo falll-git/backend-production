@@ -13,6 +13,30 @@ function resolveStatusCode(error, fallback = 400) {
   return error.statusCode || fallback;
 }
 
+function resolveRefreshFailure(error) {
+  const statusCode = Number(error?.statusCode);
+  if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
+    return {
+      message: error.message,
+      statusCode,
+    };
+  }
+
+  const databaseCode = String(error?.code || error?.cause?.code || "").trim();
+  if (["P1001", "P1002", "P1008", "P2024", "P2028"].includes(databaseCode)) {
+    return {
+      message: "Layanan autentikasi sedang sibuk. Silakan coba lagi.",
+      statusCode: 503,
+    };
+  }
+
+  return {
+    message: "Layanan autentikasi sedang mengalami gangguan. Silakan coba lagi.",
+    statusCode:
+      Number.isInteger(statusCode) && statusCode >= 500 ? statusCode : 500,
+  };
+}
+
 function stripPrivateAuthFields(result) {
   if (!result || typeof result !== "object") return result;
   const { refreshToken, refreshTokenExpiresAt, ...safeResult } = result;
@@ -66,10 +90,13 @@ exports.refresh = async (req, res) => {
     });
     successResponse(res, stripPrivateAuthFields(result));
   } catch (error) {
-    clearRefreshTokenCookie(res);
-    res.status(resolveStatusCode(error, 401)).json({
+    const failure = resolveRefreshFailure(error);
+    // Jangan menghapus cookie pada request refresh yang gagal. Request lama dapat
+    // selesai setelah request baru berhasil dan menghapus cookie sesi pengganti.
+    // Cookie invalid tetap ditolak server dan akan ditimpa saat login berikutnya.
+    res.status(failure.statusCode).json({
       status: false,
-      message: error.message,
+      message: failure.message,
     });
   }
 };

@@ -17,7 +17,7 @@ test(
   { skip: process.env.RUN_CRITICAL_DB_INTEGRATION !== "true" },
   async (t) => {
     const app = require("../app");
-    const prisma = require("../config/prisma");
+    const prisma = require("../config/prisma-system");
     const fixture = createIntegrationFixture(prisma, "RBAC boundary workflow");
     const agent = request.agent(app);
     let accessToken = null;

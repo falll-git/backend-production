@@ -32,6 +32,19 @@ const {
   requestMetadata,
   safeRecordLegalActivity,
 } = require("../../utils/legal-audit-log");
+const {
+  DEPOSIT_TRANSACTION_SOURCES,
+  calculateDepositLedgerTotals,
+  enrichDepositLedgerRecords,
+  normalizeDepositAction,
+} = require("./deposit-ledger");
+const {
+  legalAuditEntityTypeFilter,
+  legalAuditSourceFilter,
+  normalizeLegalAuditEntityType,
+  normalizeLegalAuditSource,
+  sanitizeLegalAuditTitle,
+} = require("./legal-audit-presentation");
 
 const LEGAL_REPORT_URLS = {
   summary: "/dashboard/legal/laporan",
@@ -156,6 +169,7 @@ const LEGAL_AUDIT_FIELDS_BY_MODEL = {
     "transaction_date",
     "action",
     "amount",
+    "source",
     "notes",
     "file_name",
     "file_path",
@@ -240,8 +254,8 @@ function serializeActivityLog(item) {
     actor_id: item.actor_id,
     actor: serializeUser(item.actor),
     action: item.action,
-    source: item.source,
-    entity_type: item.entity_type,
+    source: normalizeLegalAuditSource(item.source),
+    entity_type: normalizeLegalAuditEntityType(item.entity_type),
     entity_id: item.entity_id,
     debtor_id: item.debtor_id,
     contract_id: item.contract_id,
@@ -249,7 +263,7 @@ function serializeActivityLog(item) {
     third_party_id: item.third_party_id,
     deposit_id: item.deposit_id,
     deposit_transaction_id: item.deposit_transaction_id,
-    title: item.title,
+    title: sanitizeLegalAuditTitle(item.title, item.source),
     before_data: toJsonSafe(item.before_data),
     after_data: toJsonSafe(item.after_data),
     metadata: toJsonSafe(item.metadata),
@@ -471,8 +485,13 @@ async function buildActivityLogWhere(query = {}, userId = null) {
   }
 
   if (query.action) clauses.push({ action: normalizeUpper(query.action) });
-  if (query.source) clauses.push({ source: normalizeUpper(query.source) });
-  if (query.entity_type) clauses.push({ entity_type: normalizeUpper(query.entity_type) });
+  if (query.source) {
+    const sourceFilter = legalAuditSourceFilter(query.source);
+    clauses.push(sourceFilter.OR ? sourceFilter : { source: sourceFilter });
+  }
+  if (query.entity_type) {
+    clauses.push({ entity_type: legalAuditEntityTypeFilter(query.entity_type) });
+  }
   if (query.contract_id) clauses.push({ contract_id: query.contract_id });
   if (query.debtor_id) clauses.push({ debtor_id: query.debtor_id });
   if (query.third_party_id) clauses.push({ third_party_id: query.third_party_id });
@@ -512,17 +531,6 @@ function serializeWithFile(req, item, fallbackBaseName = "dokumen") {
       fallbackBaseName,
     }),
   };
-}
-
-function normalizeDepositAction(action) {
-  const normalized = normalizeUpper(action);
-  if (!normalized) return null;
-  if (normalized === "TITIPAN") return "TITIPAN";
-  if (["PEMBAYARAN", "BAYAR", "PAID", "PROSES", "PROCESS", "KOREKSI"].includes(normalized)) {
-    return "PEMBAYARAN";
-  }
-  if (normalized === "REFUND") return "REFUND";
-  return normalized;
 }
 
 function assertDepositType(value) {
@@ -597,6 +605,7 @@ function serializeDepositTransaction(req, item) {
     ...item,
     action,
     raw_action: item.action,
+    source: item.source || DEPOSIT_TRANSACTION_SOURCES.MANUAL_ENTRY,
     amount: number(item.amount),
     file: depositTransactionFile(req, item),
     files: serializeFiles(req, item, {
@@ -604,31 +613,6 @@ function serializeDepositTransaction(req, item) {
       fallbackBaseName: `bukti-${action || "titipan"}`,
     }),
   };
-}
-
-function calculateDepositLedgerTotals(transactions = []) {
-  const totals = {
-    total_deposit_amount: 0,
-    total_payment_amount: 0,
-    total_refund_amount: 0,
-    balance_amount: 0,
-  };
-
-  for (const transaction of transactions) {
-    const action = normalizeDepositAction(transaction.action);
-    const amount = number(transaction.amount);
-    if (action === "TITIPAN") totals.total_deposit_amount += amount;
-    if (action === "PEMBAYARAN") totals.total_payment_amount += amount;
-    if (action === "REFUND") totals.total_refund_amount += amount;
-  }
-
-  totals.balance_amount = Math.max(
-    totals.total_deposit_amount -
-      totals.total_payment_amount -
-      totals.total_refund_amount,
-    0,
-  );
-  return totals;
 }
 
 function resolveDepositStatus(totals) {
@@ -670,6 +654,7 @@ function serializeDeposit(req, item) {
     total_payment_amount: totalPayment,
     total_refund_amount: totalRefund,
     balance_amount: balance,
+    ledger: item.ledger || null,
     transactions: Array.isArray(item.transactions)
       ? item.transactions.map((transaction) => serializeDepositTransaction(req, transaction))
       : [],
@@ -878,9 +863,23 @@ async function recalculateDepositLedger(depositId, userId, tx) {
   return totals;
 }
 
+async function enrichDepositsWithLedger(deposits, tx) {
+  if (!Array.isArray(deposits) || deposits.length === 0) return [];
+  const rows = await repository.aggregateDepositTransactionLedger(
+    { depositIds: deposits.map((deposit) => deposit.id) },
+    tx,
+  );
+  return enrichDepositLedgerRecords(deposits, rows);
+}
+
+async function enrichDepositWithLedger(deposit, tx) {
+  const [enriched] = await enrichDepositsWithLedger([deposit], tx);
+  return enriched || deposit;
+}
+
 function assertDepositCanDecreaseBalance(deposit, action, amount) {
   if (action === "TITIPAN") return;
-  const balance = number(deposit.remaining_amount);
+  const balance = number(deposit.balance_amount ?? deposit.remaining_amount);
   if (amount - balance > 0.000001) {
     throw new AppError(
       "Nominal pembayaran/refund tidak boleh melebihi saldo dana titipan.",
@@ -898,6 +897,7 @@ async function listModel({
   serializer,
   includeSoftDeleteFilter,
   relationSearch,
+  enrichData,
 }) {
   const pagination = paginate(query);
   const where = listWhere(query, extraWhere, searchFields, {
@@ -913,8 +913,9 @@ async function listModel({
     }),
     repository.count(modelName, where),
   ]);
+  const enrichedData = enrichData ? await enrichData(data) : data;
   return {
-    data: data.map((item) => serializer(req, item)),
+    data: enrichedData.map((item) => serializer(req, item)),
     meta: buildPaginationMeta(total, pagination),
   };
 }
@@ -1466,6 +1467,7 @@ exports.listDeposits = async ({ req, query, userId }) => {
     },
     relationSearch: depositSearchClauses,
     serializer: serializeDeposit,
+    enrichData: enrichDepositsWithLedger,
   });
 };
 
@@ -1529,6 +1531,7 @@ exports.createDeposit = async ({ req, payload, userId }) => {
           transaction_date: new Date(openingTransaction.transaction_date),
           action,
           amount: openingTransaction.amount,
+          source: DEPOSIT_TRANSACTION_SOURCES.OPENING_BALANCE,
           notes: normalizeText(openingTransaction.notes),
           ...depositTransactionFileFields(primaryFile),
           ...(openingFileMetas.length > 0
@@ -1577,7 +1580,10 @@ exports.createDeposit = async ({ req, payload, userId }) => {
         },
       });
     }
-      return serializeDeposit(req, finalDeposit);
+      return serializeDeposit(
+        req,
+        await enrichDepositWithLedger(finalDeposit, tx),
+      );
     }),
   );
 };
@@ -1625,7 +1631,7 @@ exports.updateDeposit = async ({ req, id, payload, userId }) => {
       before: current,
       after: saved,
     });
-    return serializeDeposit(req, saved);
+    return serializeDeposit(req, await enrichDepositWithLedger(saved, tx));
   });
 };
 
@@ -1685,14 +1691,22 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
 
   return withDomainFileRollback((persistFiles) =>
     repository.transaction(async (tx) => {
-      const currentDeposit = await repository.findById(
+    const currentDeposit = await repository.findById(
       "legal_deposits",
       payload.deposit_id,
       { deleted_at: null },
       tx,
     );
     if (!currentDeposit) throw new AppError("Dana titipan tidak ditemukan.", 404);
-    assertDepositCanDecreaseBalance(currentDeposit, action, amountValue);
+    const currentTransactions = await repository.findDepositTransactionsByDepositId(
+      payload.deposit_id,
+      tx,
+    );
+    assertDepositCanDecreaseBalance(
+      calculateDepositLedgerTotals(currentTransactions),
+      action,
+      amountValue,
+    );
       const fileMetas = persistFiles({
       entity: "legal/deposit-transactions",
       inputs: normalizeUploadFiles(payload),
@@ -1706,6 +1720,7 @@ exports.createDepositTransaction = async ({ req, payload, userId }) => {
         transaction_date: new Date(payload.transaction_date),
         action,
         amount: payload.amount,
+        source: DEPOSIT_TRANSACTION_SOURCES.MANUAL_ENTRY,
         notes: normalizeText(payload.notes),
         ...depositTransactionFileFields(primaryFile),
         ...(fileMetas.length > 0
@@ -1831,23 +1846,51 @@ exports.getThirdPartyDepositFundsReport = async (_query = {}, userId = null) => 
     LEGAL_REPORT_URLS.thirdPartyDepositFunds,
   );
   const contractAccessWhere = buildContractAccessWhereFromScope(scope);
-  const rows = await repository.aggregateDeposits({
+  const depositWhere = {
     deleted_at: null,
     ...contractAccessWhere,
-  });
+  };
+  const [deposits, ledgerRows] = await Promise.all([
+    repository.findDepositsForLedgerReport(depositWhere),
+    repository.aggregateDepositTransactionLedger({ depositWhere }),
+  ]);
+  const enrichedDeposits = enrichDepositLedgerRecords(deposits, ledgerRows);
+  const grouped = new Map();
+
+  for (const deposit of enrichedDeposits) {
+    const key = `${deposit.type}::${deposit.status}`;
+    const current = grouped.get(key) || {
+      type: deposit.type,
+      status: deposit.status,
+      total_records: 0,
+      total_deposit_amount: 0,
+      total_payment_amount: 0,
+      total_refund_amount: 0,
+      balance_amount: 0,
+      transaction_count: 0,
+      mismatched_records: 0,
+    };
+    current.total_records += 1;
+    current.total_deposit_amount += number(deposit.total_deposit_amount);
+    current.total_payment_amount += number(deposit.total_payment_amount);
+    current.total_refund_amount += number(deposit.total_refund_amount);
+    current.balance_amount += number(deposit.balance_amount);
+    current.transaction_count += number(deposit.ledger?.transaction_count);
+    if (deposit.ledger?.reconciliation?.status === "MISMATCH") {
+      current.mismatched_records += 1;
+    }
+    grouped.set(key, current);
+  }
+
   return {
-    data: rows.map((item) => ({
-      type: item.type,
-      status: item.status,
-      total_records: item._count.id,
-      nominal: number(item._sum.nominal),
-      paid_amount: number(item._sum.paid_amount),
-      processed_amount: number(item._sum.processed_amount),
-      remaining_amount: number(item._sum.remaining_amount),
-      total_deposit_amount: number(item._sum.nominal),
-      total_payment_amount: number(item._sum.paid_amount),
-      total_refund_amount: number(item._sum.processed_amount),
-      balance_amount: number(item._sum.remaining_amount),
+    data: Array.from(grouped.values()).map((item) => ({
+      ...item,
+      nominal: item.total_deposit_amount,
+      paid_amount: item.total_payment_amount,
+      processed_amount: item.total_refund_amount,
+      remaining_amount: item.balance_amount,
+      reconciliation_status:
+        item.mismatched_records > 0 ? "MISMATCH" : "MATCHED",
     })),
     scope: {
       can_report_all: scope.canReportAll,

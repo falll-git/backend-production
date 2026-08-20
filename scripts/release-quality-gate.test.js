@@ -340,6 +340,8 @@ test("quality gate sukses mencatat empat tahap secara berurutan", async () => {
 
 test("manifest release mencakup seluruh gate dengan batas waktu", () => {
   const steps = buildReleaseSteps("C:\\backend", "C:\\frontend", {});
+  assert.equal(DEFAULT_TIMEOUTS.frontend, 45 * 60 * 1000);
+  assert.equal(DEFAULT_TIMEOUTS.fullstack, 20 * 60 * 1000);
   assert.deepEqual(
     steps.map((step) => step.script),
     ["quality", "quality:release", "test:fullstack", "test:load-smoke"],

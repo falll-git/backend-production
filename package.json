@@ -40,6 +40,7 @@
     "sync:role-menu-baseline": "node scripts/sync-role-menu-baseline.js",
     "seed:system": "node prisma/seed-system.js",
     "seed:ci-test-data": "node scripts/seed-ci-test-data.js",
+    "fixture:modal-workflows": "node scripts/modal-workflow-fixtures.js",
     "seed": "prisma db seed"
   },
   "keywords": [],
@@ -82,6 +83,7 @@
       "unzipper": "0.12.5"
     },
     "brace-expansion": "5.0.9",
+    "deepmerge-ts": "8.0.1",
     "fast-uri": "3.1.5",
     "find-my-way": "9.7.0",
     "uuid": "11.1.1"

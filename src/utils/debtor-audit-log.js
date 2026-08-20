@@ -1,5 +1,4 @@
 const prisma = require("../config/prisma");
-const { getRequestContext } = require("./request-context");
 const { logger } = require("../system/logger");
 
 const OMITTED_KEYS = new Set([
@@ -95,29 +94,6 @@ async function recordDebtorActivity(db = prisma, payload = {}) {
       metadata: optionalJson(payload.metadata),
       request_ip: payload.request_ip || null,
       user_agent: payload.user_agent || null,
-    }),
-  });
-
-  const context = getRequestContext();
-  await db.system_activity_logs.create({
-    data: compactUndefined({
-      actor_id: payload.actor_id || null,
-      module: "INFORMASI_DEBITUR",
-      action: payload.action,
-      source: payload.source || "MANUAL",
-      entity_type: payload.entity_type,
-      entity_id: payload.entity_id || null,
-      object_label: payload.title || payload.entity_id || null,
-      title: payload.title || `${payload.action} ${payload.entity_type}`,
-      summary: payload.title || null,
-      request_method: context.request_method || null,
-      request_path: context.request_path || null,
-      request_id: context.request_id || null,
-      before_data: optionalJson(payload.before_data),
-      after_data: optionalJson(payload.after_data),
-      metadata: optionalJson(payload.metadata),
-      user_agent: payload.user_agent || context.user_agent || null,
-      created_at: created.created_at,
     }),
   });
 

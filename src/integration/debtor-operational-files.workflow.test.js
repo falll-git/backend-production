@@ -43,7 +43,7 @@ test(
   { skip: process.env.RUN_CRITICAL_DB_INTEGRATION !== "true" },
   async (t) => {
     const app = require("../app");
-    const prisma = require("../config/prisma");
+    const prisma = require("../config/prisma-system");
     const fixture = createIntegrationFixture(
       prisma,
       "Debtor operational files workflow",
@@ -197,6 +197,30 @@ test(
       .field("action_plan", "Rencana tindak lanjut selesai")
       .expect(200);
     assert.equal(marketingUpdated.body.data.status, "COMPLETED");
+
+    const debtorWorkflow = await agent
+      .get(`/api/v1/debtors/${debtor.id}/workflow`)
+      .set("User-Agent", fixture.userAgent)
+      .set(login.authorization)
+      .expect(200);
+    const workflowEntry = debtorWorkflow.body.data?.marketing?.timeline?.entries?.find(
+      (item) => item.id === marketingId,
+    );
+    assert.ok(workflowEntry, "Aktivitas wajib tersedia pada timeline debitur.");
+    assert.equal(workflowEntry.created_by, admin.id);
+    assert.deepEqual(
+      {
+        id: workflowEntry.creator?.id,
+        name: workflowEntry.creator?.name,
+        username: workflowEntry.creator?.username,
+      },
+      {
+        id: admin.id,
+        name: admin.name,
+        username: admin.username,
+      },
+      "Timeline wajib menyertakan identitas pembuat yang dapat ditampilkan, bukan hanya UUID.",
+    );
 
     const warningCreated = await agent
       .post("/api/v1/debtor-warning-letters")

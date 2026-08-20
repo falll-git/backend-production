@@ -1,5 +1,6 @@
 const prisma = require("../../config/prisma");
 const { withDatabaseTransaction } = require("../../config/database-rls");
+const { enrichDepositLedgerRecords } = require("../legal/deposit-ledger");
 
 const USER_SELECT = {
   id: true,
@@ -913,11 +914,26 @@ async function findWorkflowData(debtorId, contractIds = []) {
       ? marketingCreatorById.get(item.created_by) || null
       : null,
   }));
+  const depositLedgerRows =
+    deposits.length > 0
+      ? await prisma.legal_deposit_transactions.groupBy({
+          by: ["deposit_id", "action", "source"],
+          where: {
+            deposit_id: { in: deposits.map((deposit) => deposit.id) },
+          },
+          _sum: { amount: true },
+          _count: { _all: true },
+        })
+      : [];
+  const depositsWithLedger = enrichDepositLedgerRecords(
+    deposits,
+    depositLedgerRows,
+  );
 
   return {
     claims,
     collaterals,
-    deposits,
+    deposits: depositsWithLedger,
     ideb,
     insuranceProgress,
     kjppProgress,

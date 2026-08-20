@@ -40,8 +40,6 @@ test("detail Pusat Log Aktivitas hanya mengembalikan konteks aman", async () => 
 
   try {
     const result = await service.getById("activity-1");
-    assert.equal(result.entity_label, "Debitur");
-    assert.equal(result.source_label, "Input Manual");
     assert.equal(result.result_label, "Berhasil");
     assert.equal(result.context.kind, "CHANGE");
     assert.equal(
@@ -64,6 +62,11 @@ test("detail Pusat Log Aktivitas hanya mengembalikan konteks aman", async () => 
     assert.equal(Object.hasOwn(result, "metadata"), false);
     assert.equal(Object.hasOwn(result, "request_path"), false);
     assert.equal(Object.hasOwn(result, "user_agent"), false);
+    assert.equal(Object.hasOwn(result, "entity_id"), false);
+    assert.equal(Object.hasOwn(result, "entity_type"), false);
+    assert.equal(Object.hasOwn(result, "source"), false);
+    assert.equal(Object.hasOwn(result, "source_label"), false);
+    assert.equal(Object.hasOwn(result, "response_status"), false);
   } finally {
     repository.findById = originalFindById;
   }
@@ -141,7 +144,7 @@ test("detail export Pusat Log menyebut data yang benar-benar diexport", () => {
   assert.ok(
     result.context.fields.some(
       (field) =>
-        field.label === "Data yang Diexport" &&
+        field.label === "Data yang Diekspor" &&
         field.value === "Pusat Log Aktivitas",
     ),
   );
@@ -160,12 +163,64 @@ test("jenis dokumen pada modul Parameter memakai konteks Parameter", () => {
   );
 
   assert.equal(result.context.kind, "PARAMETER");
-  assert.equal(result.context.title, "Konteks Parameter");
+  assert.equal(result.context.title, "Rincian Pengaturan");
   assert.ok(
     result.context.fields.some(
       (field) => field.label === "Parameter" && field.value === "Jenis Dokumen",
     ),
   );
+});
+
+test("detail login tidak mengirim referensi atau rincian teknis yang berulang", () => {
+  const result = service.serializeDetail(
+    activity({
+      module: "AUTH",
+      action: "LOGIN",
+      source: "API",
+      entity_type: "SESI",
+      entity_id: "session-internal-id",
+      object_label: null,
+      title: "Login Autentikasi",
+      summary: null,
+      before_data: null,
+      after_data: null,
+      response_status: 200,
+    }),
+  );
+
+  assert.equal(result.result_label, "Berhasil");
+  assert.equal(result.context.title, "Informasi Login");
+  assert.deepEqual(result.context.fields, []);
+  assert.deepEqual(result.context.changed_fields, []);
+  assert.equal(Object.hasOwn(result.context, "empty_message"), false);
+  assert.equal(Object.hasOwn(result, "entity_id"), false);
+  assert.equal(Object.hasOwn(result, "response_status"), false);
+});
+
+test("pilihan filter Pusat Log hanya memuat istilah yang dipakai pengguna", async () => {
+  const originalDistinctOptions = repository.distinctOptions;
+  const originalDistinctActors = repository.distinctActors;
+  repository.distinctOptions = async () => [
+    {
+      module: "AUTH",
+      action: "LOGIN",
+      source: "API",
+      entity_type: "SESI",
+    },
+  ];
+  repository.distinctActors = async () => [];
+
+  try {
+    const result = await service.options();
+    assert.ok(Array.isArray(result.modules));
+    assert.ok(Array.isArray(result.actions));
+    assert.ok(Array.isArray(result.actors));
+    assert.equal(Object.hasOwn(result, "sources"), false);
+    assert.equal(Object.hasOwn(result, "entity_types"), false);
+  } finally {
+    repository.distinctOptions = originalDistinctOptions;
+    repository.distinctActors = originalDistinctActors;
+  }
 });
 
 test("export Pusat Log Aktivitas hanya berisi kolom audit ringkas", async () => {

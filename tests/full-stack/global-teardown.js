@@ -1,5 +1,7 @@
 const { loadEnv } = require("../../src/config/env");
-const prisma = require("../../src/config/prisma");
+// Teardown must be able to remove exact tracked fixture rows regardless of the
+// last browser actor's RLS scope.
+const prisma = require("../../src/config/prisma-system");
 const {
   assertSafeIntegrationDatabase,
 } = require("../../src/integration/support/integration-test-helpers");

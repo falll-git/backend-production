@@ -82,7 +82,11 @@ module.exports = defineConfig({
       cwd: backendDirectory,
       url: backendHealthUrl,
       reuseExistingServer: false,
-      timeout: 60_000,
+      // Startup dependency checks normalnya selesai <1 detik, tetapi spawning
+      // proses Node di Windows CI/local dapat tertunda saat artefak browser
+      // sedang difinalisasi. Samakan budget harness dengan frontend agar gate
+      // tidak flaky; ini tidak mengubah timeout runtime production.
+      timeout: 180_000,
       stdout: "pipe",
       stderr: "pipe",
       env: {

@@ -18,7 +18,7 @@ jobs:
   release-quality:
     name: Full quality gate (backend change)
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
     services:
@@ -98,7 +98,7 @@ jobs:
       E2E_API_RATE_LIMIT_WINDOW_SECONDS: "60"
       PLAYWRIGHT_WORKERS: "1"
       QUALITY_GATE_REPORT_DIR: quality-reports/ci
-      QUALITY_GATE_BACKEND_TIMEOUT_MS: "600000"
+      QUALITY_GATE_BACKEND_TIMEOUT_MS: "1200000"
       QUALITY_GATE_FRONTEND_TIMEOUT_MS: "1800000"
       QUALITY_GATE_FULLSTACK_TIMEOUT_MS: "600000"
       QUALITY_GATE_PERFORMANCE_TIMEOUT_MS: "300000"

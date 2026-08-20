@@ -21,6 +21,10 @@ const {
 const { serializeRole } = require("../../utils/role-types");
 const { AppError } = require("../../utils/errors");
 const {
+  assertDispositionCanRedispose,
+  assertDispositionTransition,
+} = require("../../utils/persuratan-workflow");
+const {
   buildMemorandumVisibilityWhere,
   canManageMemorandum,
   canViewMemorandum,
@@ -32,9 +36,7 @@ const {
   paginateArray,
   resolvePagination,
 } = require("../../utils/pagination");
-const {
-  resolveActiveStorageId,
-} = require("../../utils/persuratan-storage");
+const { resolveActiveStorageId } = require("../../utils/persuratan-storage");
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
@@ -132,8 +134,7 @@ function normalizeDivisionIdsInput(value) {
         normalized.push(...normalizeDivisionIdsInput(parsed));
         continue;
       }
-    } catch {
-    }
+    } catch {}
 
     normalized.push(
       ...trimmed
@@ -173,29 +174,6 @@ function normalizeReceiverIdsInput(payload) {
 function appendAndFilter(where, condition) {
   where.AND = Array.isArray(where.AND) ? where.AND : [];
   where.AND.push(condition);
-}
-
-function isActiveDispositionStatus(status) {
-  return ACTIVE_DISPOSITION_STATUSES.has(String(status || "").toUpperCase());
-}
-
-function resolveDocumentStatusFromDispositions(dispositions) {
-  const activeDispositions = dispositions.filter((item) =>
-    isActiveDispositionStatus(item.status),
-  );
-
-  if (activeDispositions.length === 0) {
-    return "COMPLETED";
-  }
-
-  const hasOverdue = activeDispositions.some((item) => {
-    if (!item.due_date) return false;
-
-    const dueDate = new Date(item.due_date);
-    return !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now();
-  });
-
-  return hasOverdue ? "OVERDUE" : "IN_PROGRESS";
 }
 
 function buildWhere({
@@ -413,7 +391,7 @@ exports.getMemorandumById = async ({ req, id, userId }) => {
   const memorandum = await repository.findById(id);
 
   if (!memorandum) {
-    throw new Error("Memorandum tidak ditemukan.");
+    throw new AppError("Memorandum tidak ditemukan.", 404);
   }
 
   const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
@@ -524,7 +502,9 @@ exports.redispose = async ({ id, payload, senderId }) => {
   }
 
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
-    throw new Error("Memorandum yang sudah selesai tidak dapat didisposisikan.");
+    throw new Error(
+      "Memorandum yang sudah selesai tidak dapat didisposisikan.",
+    );
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -539,6 +519,8 @@ exports.redispose = async ({ id, payload, senderId }) => {
       "Hanya pemegang disposisi aktif yang dapat meneruskan disposisi.",
     );
   }
+
+  assertDispositionCanRedispose(currentDisposition.status);
 
   const receiverIds = normalizeReceiverIdsInput(payload);
 
@@ -591,10 +573,12 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
     throw new Error("Memorandum tidak ditemukan.");
   }
 
-  const currentDisposition = await repository.findCurrentDispositionForReceiver({
-    memorandumId: memoId,
-    receiverId: userId,
-  });
+  const currentDisposition = await repository.findCurrentDispositionForReceiver(
+    {
+      memorandumId: memoId,
+      receiverId: userId,
+    },
+  );
 
   if (!currentDisposition) {
     throw new AppError(
@@ -603,6 +587,8 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
     );
   }
 
+  assertDispositionTransition(currentDisposition.status, "COMPLETED");
+
   await repository.updateDisposition(currentDisposition.id, {
     status: "COMPLETED",
     is_complete: true,
@@ -610,13 +596,14 @@ exports.completeMemorandum = async ({ req, memoId, userId }) => {
     start_date: currentDisposition.start_date || new Date(),
   });
 
-  const refreshedMemorandum = await repository.findById(memoId);
-  const updated = await repository.update(memoId, {
-    status: resolveDocumentStatusFromDispositions(
-      refreshedMemorandum?.dispositions || [],
-    ),
-    updated_by: userId,
+  const workflowStatusSynced = await repository.syncWorkflowStatus({
+    memorandumId: memoId,
+    actorUserId: userId,
   });
+  if (!workflowStatusSynced) {
+    throw new Error("Status alur memorandum tidak dapat diselaraskan.");
+  }
+  const updated = await repository.findById(memoId);
 
   await notificationService.notifyMemorandumDispositionCompleted({
     memorandum: updated,
@@ -666,28 +653,7 @@ exports.updateDispositionStatus = async ({
     .trim()
     .toUpperCase();
 
-  if (!["IN_PROGRESS", "COMPLETED"].includes(normalizedStatus)) {
-    throw new Error("Status disposisi tidak valid.");
-  }
-
-  if (currentStatus === "FORWARDED") {
-    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui.");
-  }
-
-  if (currentStatus === "COMPLETED") {
-    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui.");
-  }
-
-  if (normalizedStatus === "IN_PROGRESS" && currentStatus !== "NEW") {
-    throw new Error("Hanya disposisi baru yang dapat diproses.");
-  }
-
-  if (
-    normalizedStatus === "COMPLETED" &&
-    !["NEW", "IN_PROGRESS"].includes(currentStatus)
-  ) {
-    throw new Error("Disposisi tidak dapat ditandai selesai.");
-  }
+  assertDispositionTransition(currentStatus, normalizedStatus);
 
   const updateData = {
     status: normalizedStatus,
@@ -707,13 +673,13 @@ exports.updateDispositionStatus = async ({
 
   await repository.updateDisposition(dispositionId, updateData);
 
-  const refreshedMemorandum = await repository.findById(memorandumId);
-  await repository.update(memorandumId, {
-    status: resolveDocumentStatusFromDispositions(
-      refreshedMemorandum?.dispositions || [],
-    ),
-    updated_by: userId,
+  const workflowStatusSynced = await repository.syncWorkflowStatus({
+    memorandumId,
+    actorUserId: userId,
   });
+  if (!workflowStatusSynced) {
+    throw new Error("Status alur memorandum tidak dapat diselaraskan.");
+  }
 
   const updatedMemorandum = await repository.findById(memorandumId);
 
@@ -740,7 +706,10 @@ exports.updateMemorandum = async ({ req, id, payload, userId }) => {
 
   const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
   if (!canManageMemorandum(memorandum, scope)) {
-    throw new AppError("Anda tidak memiliki akses untuk mengubah memorandum ini.", 403);
+    throw new AppError(
+      "Anda tidak memiliki akses untuk mengubah memorandum ini.",
+      403,
+    );
   }
 
   if (normalizeMailWorkflowStatus(memorandum.status) === "COMPLETED") {
@@ -841,10 +810,16 @@ exports.deleteMemorandum = async (id, userId) => {
 
   const scope = await getPersuratanAccessScope(userId, MEMORANDUM_MENU_URL);
   if (!canManageMemorandum(memorandum, scope)) {
-    throw new AppError("Anda tidak memiliki akses untuk menghapus memorandum ini.", 403);
+    throw new AppError(
+      "Anda tidak memiliki akses untuk menghapus memorandum ini.",
+      403,
+    );
   }
 
   const deleted = await repository.delete(id, userId);
+  if (!deleted) {
+    throw new Error("Memorandum tidak dapat dihapus.");
+  }
   deleteStoredFile(memorandum.file);
 
   return deleted;

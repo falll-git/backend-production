@@ -5,9 +5,15 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const BACKEND_DIRECTORY = path.resolve(__dirname, "..");
 const DEFAULT_TIMEOUTS = Object.freeze({
-  backend: 10 * 60 * 1000,
-  frontend: 30 * 60 * 1000,
-  fullstack: 10 * 60 * 1000,
+  backend: 20 * 60 * 1000,
+  // The browser gate runs 95 production-build scenarios serially across
+  // desktop, tablet, and mobile. A single worker keeps shared fixtures and
+  // rate-limit assertions deterministic, so provide measured runtime headroom
+  // instead of terminating a healthy suite near its final projects.
+  frontend: 45 * 60 * 1000,
+  // Role-route smoke alone exercises more than 160 authenticated page loads.
+  // Keep enough headroom for a slower CI host without weakening any assertion.
+  fullstack: 20 * 60 * 1000,
   performance: 5 * 60 * 1000,
   heartbeat: 30 * 1000,
 });

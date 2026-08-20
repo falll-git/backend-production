@@ -7,6 +7,7 @@ function requestContext(req, res, next) {
     request_id: req.requestId || null,
     request_method: req.method || null,
     request_path: String(req.originalUrl || req.url || "").split("?")[0] || null,
+    user_agent: req.headers?.["user-agent"] || null,
   };
 
   return requestContextStorage.run(context, next);

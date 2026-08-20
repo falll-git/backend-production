@@ -305,7 +305,7 @@ exports.getById = async ({ req, id, userId }) => {
   const outgoingMail = await repository.findById(id);
 
   if (!outgoingMail) {
-    throw new Error("Surat keluar tidak ditemukan.");
+    throw new AppError("Surat keluar tidak ditemukan.", 404);
   }
 
   const scope = await getPersuratanAccessScope(userId, OUTGOING_MAIL_MENU_URL);
@@ -488,6 +488,9 @@ exports.delete = async (id, userId) => {
   }
 
   const deleted = await repository.delete(id, userId);
+  if (!deleted) {
+    throw new Error("Surat keluar tidak dapat dihapus.");
+  }
   deleteStoredFile(outgoingMail.file);
 
   return deleted;

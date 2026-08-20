@@ -1351,15 +1351,6 @@ exports.delete = async ({ id, userId }) => {
   }
 
   await repository.withTransaction(async (client) => {
-    await repository.update(
-      id,
-      {
-        deleted_by: userId,
-        deleted_at: new Date(),
-      },
-      client,
-    );
-
     await repository.createActivityLog(
       {
         document_id: id,
@@ -1370,5 +1361,10 @@ exports.delete = async ({ id, userId }) => {
       },
       client,
     );
+
+    const deleted = await repository.softDelete(id, userId, client);
+    if (!deleted) {
+      throw new AppError("Dokumen tidak ditemukan", 404);
+    }
   });
 };

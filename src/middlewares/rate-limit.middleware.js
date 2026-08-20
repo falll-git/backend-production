@@ -26,6 +26,24 @@ function apiGeneralKeyGenerator(req) {
   return `ip:${clientIp(req)}`;
 }
 
+function isAuthRefreshRequest(req) {
+  if (String(req.method || "").toUpperCase() !== "POST") return false;
+
+  const requestPath = String(req.path || req.originalUrl || req.url || "")
+    .split("?")[0]
+    .replace(/\/+$/, "");
+
+  return (
+    requestPath === "/auth/refresh" ||
+    requestPath.endsWith("/api/v1/auth/refresh") ||
+    requestPath.endsWith("/api/auth/refresh")
+  );
+}
+
+function shouldSkipApiGeneralRateLimit(req) {
+  return req.method === "OPTIONS" || isAuthRefreshRequest(req);
+}
+
 function fileDownloadKeyGenerator(req) {
   const access = req.fileAccess || req.res?.locals?.fileAccess || null;
   const userId = String(access?.user_id || "anonymous").slice(0, 128);
@@ -97,6 +115,7 @@ function createRateLimiter({
       return res.status(503).json({
         status: false,
         success: false,
+        code: "RATE_LIMIT_STORE_UNAVAILABLE",
         request_id: req.requestId || null,
         message:
           "Layanan pembatasan permintaan sedang tidak tersedia. Silakan coba lagi.",
@@ -115,7 +134,9 @@ function createRateLimiter({
       return res.status(429).json({
         status: false,
         success: false,
+        code: "RATE_LIMITED",
         request_id: req.requestId || null,
+        retry_after_seconds: retryAfterSeconds,
         message,
       });
     }
@@ -136,7 +157,9 @@ const apiGeneralRateLimit = createRateLimiter({
   max: readPositiveIntEnv("API_RATE_LIMIT_MAX", 300),
   keyGenerator: apiGeneralKeyGenerator,
   profile: "api-general",
-  skip: (req) => req.method === "OPTIONS",
+  // Refresh sesi memiliki limiter khusus. Menghitungnya lagi pada limiter umum
+  // dapat menjatuhkan sesi pengguna ketika trafik API lain sedang tinggi.
+  skip: shouldSkipApiGeneralRateLimit,
 });
 
 const uploadRateLimit = createRateLimiter({
@@ -256,6 +279,8 @@ module.exports = {
   fileAccessAttemptRateLimit,
   fileDownloadKeyGenerator,
   importRateLimit,
+  isAuthRefreshRequest,
   reportRateLimit,
+  shouldSkipApiGeneralRateLimit,
   uploadRateLimit,
 };

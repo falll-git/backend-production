@@ -21,6 +21,10 @@ const {
 const { serializeRole } = require("../../utils/role-types");
 const { AppError } = require("../../utils/errors");
 const {
+  assertDispositionCanRedispose,
+  assertDispositionTransition,
+} = require("../../utils/persuratan-workflow");
+const {
   buildIncomingMailVisibilityWhere,
   canManageIncomingMail,
   canViewIncomingMail,
@@ -32,9 +36,7 @@ const {
   paginateArray,
   resolvePagination,
 } = require("../../utils/pagination");
-const {
-  resolveActiveStorageId,
-} = require("../../utils/persuratan-storage");
+const { resolveActiveStorageId } = require("../../utils/persuratan-storage");
 const {
   enqueueRecordWatermark,
 } = require("../watermark-settings/watermarkProcessor.service");
@@ -132,8 +134,7 @@ function normalizeDivisionIdsInput(value) {
         normalized.push(...normalizeDivisionIdsInput(parsed));
         continue;
       }
-    } catch {
-    }
+    } catch {}
 
     normalized.push(
       ...trimmed
@@ -173,29 +174,6 @@ function normalizeReceiverIdsInput(payload) {
 function appendAndFilter(where, condition) {
   where.AND = Array.isArray(where.AND) ? where.AND : [];
   where.AND.push(condition);
-}
-
-function isActiveDispositionStatus(status) {
-  return ACTIVE_DISPOSITION_STATUSES.has(String(status || "").toUpperCase());
-}
-
-function resolveDocumentStatusFromDispositions(dispositions) {
-  const activeDispositions = dispositions.filter((item) =>
-    isActiveDispositionStatus(item.status),
-  );
-
-  if (activeDispositions.length === 0) {
-    return "COMPLETED";
-  }
-
-  const hasOverdue = activeDispositions.some((item) => {
-    if (!item.due_date) return false;
-
-    const dueDate = new Date(item.due_date);
-    return !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now();
-  });
-
-  return hasOverdue ? "OVERDUE" : "IN_PROGRESS";
 }
 
 function buildWhere({
@@ -332,7 +310,13 @@ function hasSpecificStatusFilter(status) {
   return Boolean(normalized && !["ALL", "SEMUA"].includes(normalized));
 }
 
-function buildIncomingMailData(payload, filePath, fileName, fileSizeBytes, status) {
+function buildIncomingMailData(
+  payload,
+  filePath,
+  fileName,
+  fileSizeBytes,
+  status,
+) {
   return {
     letter_prioritie_id: payload.letter_prioritie_id,
     storage_id: payload.storage_id,
@@ -369,7 +353,9 @@ exports.getIncomingMails = async ({
         dateFrom: query.date_from,
         dateTo: query.date_to,
         letterPrioritieId: normalizeText(query.letter_prioritie_id),
-        divisionId: normalizeText(query.target_division_id ?? query.division_id),
+        divisionId: normalizeText(
+          query.target_division_id ?? query.division_id,
+        ),
         receiverId,
       }),
       buildIncomingMailVisibilityWhere(scope),
@@ -406,7 +392,7 @@ exports.getIncomingMailsById = async ({ req, id, userId }) => {
   const incomingMail = await repository.findById(id);
 
   if (!incomingMail) {
-    throw new Error("Surat masuk tidak ditemukan.");
+    throw new AppError("Surat masuk tidak ditemukan.", 404);
   }
 
   const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
@@ -516,7 +502,9 @@ exports.redispose = async ({ id, payload, senderId }) => {
   }
 
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
-    throw new Error("Surat masuk yang sudah selesai tidak dapat didisposisikan.");
+    throw new Error(
+      "Surat masuk yang sudah selesai tidak dapat didisposisikan.",
+    );
   }
 
   const currentDisposition = await repository.findCurrentDispositionForReceiver(
@@ -531,6 +519,8 @@ exports.redispose = async ({ id, payload, senderId }) => {
       "Hanya pemegang disposisi aktif yang dapat meneruskan disposisi.",
     );
   }
+
+  assertDispositionCanRedispose(currentDisposition.status);
 
   const receiverIds = normalizeReceiverIdsInput(payload);
 
@@ -583,10 +573,12 @@ exports.completeIncomingMail = async ({ req, id, userId }) => {
     throw new Error("Surat masuk tidak ditemukan.");
   }
 
-  const currentDisposition = await repository.findCurrentDispositionForReceiver({
-    incomingMailId: id,
-    receiverId: userId,
-  });
+  const currentDisposition = await repository.findCurrentDispositionForReceiver(
+    {
+      incomingMailId: id,
+      receiverId: userId,
+    },
+  );
 
   if (!currentDisposition) {
     throw new AppError(
@@ -595,6 +587,8 @@ exports.completeIncomingMail = async ({ req, id, userId }) => {
     );
   }
 
+  assertDispositionTransition(currentDisposition.status, "COMPLETED");
+
   await repository.updateDisposition(currentDisposition.id, {
     status: "COMPLETED",
     is_complete: true,
@@ -602,13 +596,14 @@ exports.completeIncomingMail = async ({ req, id, userId }) => {
     start_date: currentDisposition.start_date || new Date(),
   });
 
-  const refreshedMail = await repository.findById(id);
-  const updated = await repository.update(id, {
-    status: resolveDocumentStatusFromDispositions(
-      refreshedMail?.disposition_mails || [],
-    ),
-    updated_by: userId,
+  const workflowStatusSynced = await repository.syncWorkflowStatus({
+    incomingMailId: id,
+    actorUserId: userId,
   });
+  if (!workflowStatusSynced) {
+    throw new Error("Status alur surat masuk tidak dapat diselaraskan.");
+  }
+  const updated = await repository.findById(id);
 
   await notificationService.notifyIncomingMailDispositionCompleted({
     incomingMail: updated,
@@ -658,28 +653,7 @@ exports.updateDispositionStatus = async ({
     .trim()
     .toUpperCase();
 
-  if (!["IN_PROGRESS", "COMPLETED"].includes(normalizedStatus)) {
-    throw new Error("Status disposisi tidak valid.");
-  }
-
-  if (currentStatus === "FORWARDED") {
-    throw new Error("Disposisi yang sudah diteruskan tidak dapat diperbarui.");
-  }
-
-  if (currentStatus === "COMPLETED") {
-    throw new Error("Disposisi yang sudah selesai tidak dapat diperbarui.");
-  }
-
-  if (normalizedStatus === "IN_PROGRESS" && currentStatus !== "NEW") {
-    throw new Error("Hanya disposisi baru yang dapat diproses.");
-  }
-
-  if (
-    normalizedStatus === "COMPLETED" &&
-    !["NEW", "IN_PROGRESS"].includes(currentStatus)
-  ) {
-    throw new Error("Disposisi tidak dapat ditandai selesai.");
-  }
+  assertDispositionTransition(currentStatus, normalizedStatus);
 
   const updateData = {
     status: normalizedStatus,
@@ -699,13 +673,13 @@ exports.updateDispositionStatus = async ({
 
   await repository.updateDisposition(dispositionId, updateData);
 
-  const refreshedMail = await repository.findById(incomingMailId);
-  await repository.update(incomingMailId, {
-    status: resolveDocumentStatusFromDispositions(
-      refreshedMail?.disposition_mails || [],
-    ),
-    updated_by: userId,
+  const workflowStatusSynced = await repository.syncWorkflowStatus({
+    incomingMailId,
+    actorUserId: userId,
   });
+  if (!workflowStatusSynced) {
+    throw new Error("Status alur surat masuk tidak dapat diselaraskan.");
+  }
 
   const updatedMail = await repository.findById(incomingMailId);
 
@@ -732,7 +706,10 @@ exports.updateIncomingMail = async ({ req, id, payload, userId }) => {
 
   const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
   if (!canManageIncomingMail(incomingMail, scope)) {
-    throw new AppError("Anda tidak memiliki akses untuk mengubah surat masuk ini.", 403);
+    throw new AppError(
+      "Anda tidak memiliki akses untuk mengubah surat masuk ini.",
+      403,
+    );
   }
 
   if (normalizeMailWorkflowStatus(incomingMail.status) === "COMPLETED") {
@@ -838,10 +815,16 @@ exports.deleteIncomingMail = async (id, userId) => {
 
   const scope = await getPersuratanAccessScope(userId, INCOMING_MAIL_MENU_URL);
   if (!canManageIncomingMail(incomingMail, scope)) {
-    throw new AppError("Anda tidak memiliki akses untuk menghapus surat masuk ini.", 403);
+    throw new AppError(
+      "Anda tidak memiliki akses untuk menghapus surat masuk ini.",
+      403,
+    );
   }
 
   const deleted = await repository.delete(id, userId);
+  if (!deleted) {
+    throw new Error("Surat masuk tidak dapat dihapus.");
+  }
   deleteStoredFile(incomingMail.file);
 
   return deleted;

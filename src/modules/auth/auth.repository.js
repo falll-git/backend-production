@@ -162,6 +162,46 @@ exports.findActiveRefreshTokenByHash = (tokenHash) => {
   }));
 };
 
+exports.findRecentlyReplacedRefreshTokenByHash = ({
+  tokenHash,
+  revokedAfter,
+}) => {
+  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+    where: {
+      token_hash: tokenHash,
+      revoked_at: { gte: revokedAfter },
+      replaced_by_token_id: { not: null },
+      expires_at: { gt: new Date() },
+    },
+    include: {
+      user: {
+        select: authUserSelect,
+      },
+    },
+  }));
+};
+
+exports.findActiveRefreshTokenByIdAndUserId = ({ id, userId }) => {
+  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+    where: {
+      id,
+      user_id: userId,
+      revoked_at: null,
+      expires_at: { gt: new Date() },
+    },
+  }));
+};
+
+exports.findRefreshTokenByIdAndUserId = ({ id, userId }) => {
+  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+    where: {
+      id,
+      user_id: userId,
+      expires_at: { gt: new Date() },
+    },
+  }));
+};
+
 exports.revokeRefreshToken = (id, revokedAt, client = prisma) => {
   return client.refresh_tokens.update({
     where: { id },
@@ -245,7 +285,10 @@ exports.rotateRefreshToken = async ({
           revoked_at: null,
           expires_at: { gt: now },
         },
-        data: { revoked_at: now },
+        data: {
+          revoked_at: now,
+          replaced_by_token_id: refreshTokenId,
+        },
       });
       if (revoked.count !== 1) {
         throw new AppError("Sesi login tidak valid.", 401);
@@ -260,6 +303,7 @@ exports.rotateRefreshToken = async ({
         user_id: userId,
         token_hash: refreshTokenHash,
         expires_at: expiresAt,
+        created_at: now,
         ip_address: ipAddress,
         user_agent: userAgent,
         last_used_at: now,

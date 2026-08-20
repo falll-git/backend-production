@@ -87,7 +87,14 @@ app.use(
             return callback(error);
           },
           credentials: true,
-          exposedHeaders: ["X-Request-Id"],
+          exposedHeaders: [
+            "X-Request-Id",
+            "Retry-After",
+            "RateLimit-Limit",
+            "RateLimit-Remaining",
+            "RateLimit-Reset",
+            "RateLimit-Policy",
+          ],
         }
       : undefined,
   ),

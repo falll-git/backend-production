@@ -67,12 +67,10 @@ exports.groupByAction = (where) =>
 
 exports.distinctOptions = () =>
   prisma.system_activity_logs.findMany({
-    distinct: ["module", "action", "source", "entity_type"],
+    distinct: ["module", "action"],
     select: {
       module: true,
       action: true,
-      source: true,
-      entity_type: true,
     },
   });
 

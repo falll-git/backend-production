@@ -1,8 +1,23 @@
 const service = require("./memorandum.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const { logErrorOnce } = require("../../system/error-observability");
 
-function resolveStatusCode(error, fallback = 400) {
-  return error.statusCode || fallback;
+function sendError(res, error, fallbackStatus = 400) {
+  if (error?.statusCode || error?.status) {
+    return res.status(error.statusCode || error.status).json({
+      status: false,
+      message: error.message,
+    });
+  }
+
+  logErrorOnce(error, {
+    event: "memorandum_request_failed",
+    message: "Memorandum request failed",
+  });
+  return res.status(Math.max(500, fallbackStatus)).json({
+    status: false,
+    message: "Gagal memproses memorandum.",
+  });
 }
 
 exports.getAll = async (req, res) => {
@@ -19,10 +34,7 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -35,10 +47,7 @@ exports.getDispositionRecipients = async (req, res) => {
 
     return successResponse(res, result);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -51,10 +60,7 @@ exports.getById = async (req, res) => {
     });
     return successResponse(res, result);
   } catch (error) {
-    return res.status(resolveStatusCode(error, 404)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error, 404);
   }
 };
 
@@ -73,10 +79,7 @@ exports.createWithDisposition = async (req, res) => {
         "Memorandum beserta disposisi awal ke penerima disposisi divisi berhasil dibuat",
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -95,10 +98,7 @@ exports.update = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -108,10 +108,7 @@ exports.delete = async (req, res) => {
     await service.deleteMemorandum(req.params.id, userId);
     return successResponse(res, null, "Memorandum berhasil dihapus");
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -129,10 +126,7 @@ exports.redispose = async (req, res) => {
       message: "Disposisi memorandum berhasil ditambahkan",
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -150,10 +144,7 @@ exports.complete = async (req, res) => {
       message: "Memorandum berhasil ditandai selesai",
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };
 
@@ -173,9 +164,6 @@ exports.updateDispositionStatus = async (req, res) => {
       message: "Status disposisi memorandum berhasil diperbarui",
     });
   } catch (error) {
-    return res.status(resolveStatusCode(error, 400)).json({
-      status: false,
-      message: error.message,
-    });
+    return sendError(res, error);
   }
 };

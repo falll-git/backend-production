@@ -264,6 +264,39 @@ exports.aggregateDeposits = (where = { deleted_at: null }) =>
     },
   });
 
+exports.findDepositsForLedgerReport = (where = { deleted_at: null }) =>
+  prisma.legal_deposits.findMany({
+    where,
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      nominal: true,
+      paid_amount: true,
+      processed_amount: true,
+      remaining_amount: true,
+    },
+  });
+
+exports.aggregateDepositTransactionLedger = ({ depositIds, depositWhere } = {}, tx) => {
+  const where = depositIds
+    ? { deposit_id: { in: depositIds } }
+    : depositWhere
+      ? { deposit: { is: depositWhere } }
+      : {};
+
+  return client(tx).legal_deposit_transactions.groupBy({
+    by: ["deposit_id", "action", "source"],
+    where,
+    _sum: {
+      amount: true,
+    },
+    _count: {
+      _all: true,
+    },
+  });
+};
+
 exports.findDepositTransactionsByDepositId = (depositId, tx) =>
   client(tx).legal_deposit_transactions.findMany({
     where: { deposit_id: depositId },

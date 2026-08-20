@@ -18,6 +18,7 @@ function createDrainMiddleware({
     return res.status(503).json({
       status: false,
       success: false,
+      code: "SERVICE_DRAINING",
       request_id: req.requestId || null,
       message: "Layanan sedang melakukan graceful shutdown. Silakan coba lagi.",
     });

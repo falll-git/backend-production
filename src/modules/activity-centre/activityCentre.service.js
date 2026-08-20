@@ -11,17 +11,6 @@ const {
 } = require("../../utils/pagination");
 const { AppError } = require("../../utils/errors");
 
-const SOURCE_LABELS = Object.freeze({
-  API: "Aplikasi",
-  MANUAL: "Input Manual",
-  MODULE_AUDIT: "Audit Modul",
-  IMPORT: "Impor",
-  SLIK_IMPORT: "Impor SLIK",
-  IDEB_IMPORT: "Impor IDEB",
-  EXCEL: "Upload Excel",
-  SYSTEM: "Sistem",
-});
-
 const ENTITY_LABELS = Object.freeze({
   SESI: "Sesi Pengguna",
   AKTIVITAS_SISTEM: "Aktivitas Sistem",
@@ -155,7 +144,7 @@ const METADATA_FIELD_DEFINITIONS = Object.freeze([
   ["file_count", "Jumlah File"],
   ["files_count", "Jumlah File"],
   ["total_size_bytes", "Total Ukuran File"],
-  ["worksheet", "Worksheet"],
+  ["worksheet", "Nama Lembar"],
   ["row_number", "Nomor Baris"],
   ["period_month", "Periode Data"],
   ["import_segment", "Segmen Impor"],
@@ -163,7 +152,7 @@ const METADATA_FIELD_DEFINITIONS = Object.freeze([
   ["total_parts", "Total Bagian"],
   ["received_parts", "Bagian Diterima"],
   ["part_numbers", "Nomor Bagian"],
-  ["source_format", "Format Sumber"],
+  ["source_format", "Format File"],
   ["report_number", "Nomor Laporan"],
   ["reference_number", "Nomor Referensi"],
   ["link_status", "Status Hubungan"],
@@ -171,8 +160,6 @@ const METADATA_FIELD_DEFINITIONS = Object.freeze([
   ["error_total", "Jumlah Kesalahan"],
   ["document_number", "Nomor Dokumen"],
   ["document_name", "Nama Dokumen"],
-  ["reference_type", "Jenis Referensi"],
-  ["reference_id", "Referensi"],
   ["category", "Kategori"],
 ]);
 
@@ -190,10 +177,9 @@ const IMPORT_SNAPSHOT_FIELD_DEFINITIONS = Object.freeze([
 const IMPORT_STAT_LABELS = Object.freeze({
   debtors: "Debitur Terbentuk",
   contracts: "Kontrak Terbentuk",
-  contract_snapshots: "Snapshot Kontrak",
+  contract_snapshots: "Riwayat Kontrak",
   collectibilities: "Kolektibilitas Terbentuk",
   collaterals: "Agunan Terbentuk",
-  raw_records: "Raw Record Tersimpan",
 });
 
 const WORKFLOW_ACTIONS = new Set([
@@ -256,10 +242,6 @@ function entityLabel(value) {
 
 function actionLabel(value) {
   return ACTION_LABELS[value] || humanize(value);
-}
-
-function sourceLabel(value) {
-  return SOURCE_LABELS[value] || humanize(value);
 }
 
 function basename(value) {
@@ -361,15 +343,15 @@ function resolveContextKind(item) {
 
 function contextTitle(kind) {
   const labels = {
-    AUTH: "Konteks Sesi",
-    IMPORT: "Konteks Impor Data",
-    EXPORT: "Konteks Export",
-    DOCUMENT: "Konteks Dokumen",
-    WORKFLOW: "Konteks Alur Kerja",
-    ACCESS: "Konteks User & Akses",
-    PARAMETER: "Konteks Parameter",
-    CHANGE: "Konteks Perubahan Data",
-    GENERAL: "Konteks Aktivitas",
+    AUTH: "Informasi Login",
+    IMPORT: "Rincian Impor",
+    EXPORT: "Rincian Ekspor",
+    DOCUMENT: "Rincian Dokumen",
+    WORKFLOW: "Rincian Proses",
+    ACCESS: "Rincian Akses Pengguna",
+    PARAMETER: "Rincian Pengaturan",
+    CHANGE: "Rincian Perubahan",
+    GENERAL: "Rincian Aktivitas",
   };
   return labels[kind] || labels.GENERAL;
 }
@@ -428,14 +410,7 @@ function buildContext(item) {
     addDetailField(fields, "object_label", "Referensi Data", item.object_label);
   }
 
-  if (kind === "AUTH") {
-    addDetailField(
-      fields,
-      "action",
-      "Aktivitas Sesi",
-      actionLabel(item.action),
-    );
-  } else if (kind === "EXPORT") {
+  if (kind === "EXPORT") {
     const exportSubject = String(item.request_path || "")
       .split("?")[0]
       .replace(/\/+$/, "") === "/api/activity-centre/export"
@@ -444,22 +419,8 @@ function buildContext(item) {
     addDetailField(
       fields,
       "module",
-      "Data yang Diexport",
+      "Data yang Diekspor",
       exportSubject,
-    );
-  } else if (kind === "WORKFLOW") {
-    addDetailField(
-      fields,
-      "action",
-      "Tahap Proses",
-      actionLabel(item.action),
-    );
-  } else if (kind === "ACCESS") {
-    addDetailField(
-      fields,
-      "action",
-      "Perubahan Akses",
-      actionLabel(item.action),
     );
   } else if (kind === "PARAMETER") {
     addDetailField(
@@ -467,20 +428,6 @@ function buildContext(item) {
       "entity_type",
       "Parameter",
       entityLabel(item.entity_type),
-    );
-  } else if (kind === "DOCUMENT") {
-    addDetailField(
-      fields,
-      "action",
-      "Aktivitas Dokumen",
-      actionLabel(item.action),
-    );
-  } else if (kind === "CHANGE") {
-    addDetailField(
-      fields,
-      "action",
-      "Operasi Data",
-      actionLabel(item.action),
     );
   }
 
@@ -519,10 +466,6 @@ function buildContext(item) {
     title: contextTitle(kind),
     fields,
     changed_fields: changedFields,
-    empty_message:
-      fields.length === 0 && changedFields.length === 0
-        ? "Detail tambahan tidak tercatat untuk aktivitas ini."
-        : null,
     target_path: targetPath,
     target_label: targetPath ? "Buka Modul Terkait" : null,
   };
@@ -628,15 +571,8 @@ function serializeDetail(item) {
   const result = resultMeta(item.response_status);
   return {
     ...serialize(item),
-    source: item.source,
-    source_label: sourceLabel(item.source),
-    entity_type: item.entity_type,
-    entity_label: entityLabel(item.entity_type),
-    entity_id: item.entity_id,
-    object_label: safeText(item.object_label),
     title: safeText(item.title),
     summary: safeText(item.summary, 500),
-    response_status: item.response_status,
     result_label: result.label,
     result_tone: result.tone,
     context: buildContext(item),
@@ -710,8 +646,6 @@ exports.options = async () => {
   return {
     modules: unique("module", MODULE_LABELS, Object.keys(MODULE_LABELS)),
     actions: unique("action", ACTION_LABELS, Object.keys(ACTION_LABELS)),
-    sources: unique("source"),
-    entity_types: unique("entity_type"),
     actors: actorRows
       .filter((item) => item.actor_id && item.actor)
       .map((item) => ({

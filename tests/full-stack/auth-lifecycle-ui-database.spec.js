@@ -2,7 +2,10 @@ const crypto = require("node:crypto");
 
 const { test, expect } = require("@playwright/test");
 
-const prisma = require("../../src/config/prisma");
+// Setup, direct database assertions, and cleanup intentionally use the system
+// client. The browser/API under test continues to use the least-privilege
+// runtime client, so this does not bypass RLS in the application path.
+const prisma = require("../../src/config/prisma-system");
 const { comparePassword, hashPassword } = require("../../src/utils/bcrypt");
 const {
   generatePlainToken,
@@ -274,6 +277,45 @@ test("login kedua mencabut sesi browser pertama", async ({ browser }) => {
     ).toBeVisible();
   } finally {
     await Promise.all([contextOne.close(), contextTwo.close()]);
+    await fixture.cleanup();
+  }
+});
+
+test("dua belas reload cepat tidak menghapus sesi aktif", async ({ page }) => {
+  const fixture = createFixture("Full-stack rapid reload session");
+  const account = await createAuthUser(fixture, "rapid-reload");
+  const internalErrors = [];
+
+  page.on("response", (response) => {
+    if (response.status() >= 500 && response.status() !== 503) {
+      internalErrors.push({
+        status: response.status(),
+        url: response.url(),
+      });
+    }
+  });
+
+  try {
+    await loginFromUi(page, account.username, account.password);
+    await expect(page).toHaveURL(/\/dashboard(?:\/|$)/, { timeout: 30_000 });
+
+    for (let index = 0; index < 12; index += 1) {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(100);
+    }
+
+    await expect(page).toHaveURL(/\/dashboard(?:\/|$)/, { timeout: 30_000 });
+    await expect(
+      page.getByRole("heading", { name: /Assalamualaikum/i }),
+    ).toBeVisible({ timeout: 30_000 });
+    await page.waitForLoadState("networkidle", { timeout: 30_000 });
+    expect(internalErrors).toEqual([]);
+    expect(
+      await prisma.refresh_tokens.count({
+        where: { user_id: account.user.id, revoked_at: null },
+      }),
+    ).toBe(1);
+  } finally {
     await fixture.cleanup();
   }
 });

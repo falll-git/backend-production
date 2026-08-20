@@ -91,15 +91,13 @@ exports.update = async (id, data) => {
   return loadById(id);
 };
 
-exports.delete = async (id, deleted_by) => {
-  await prisma.outgoing_mails.update({
-    where: { id },
-    data: {
-      deleted_by,
-      deleted_at: new Date(),
-      status: "INACTIVE",
-    },
-  });
+exports.delete = async (id, deletedBy) => {
+  const [result] = await prisma.$queryRaw`
+    SELECT public.ruwang_arsip_soft_delete_outgoing_mail(
+      ${id},
+      ${deletedBy}
+    ) AS deleted
+  `;
 
-  return loadById(id);
+  return result?.deleted === true;
 };

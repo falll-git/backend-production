@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDatabasePoolConfig } = require("./database-pool");
+const {
+  buildDatabasePoolConfig,
+  buildDatabaseTransactionOptions,
+} = require("./database-pool");
 
 test("pool database memakai batas koneksi dan timeout dari environment", () => {
   const config = buildDatabasePoolConfig({
@@ -40,4 +43,33 @@ test("worker memakai pool terpisah dan application name yang dapat ditelusuri", 
 
   assert.equal(config.max, 4);
   assert.equal(config.application_name, "ruwang-arsip-slik-import-worker");
+});
+
+test("transaksi Prisma memakai batas tunggu dan eksekusi eksplisit", () => {
+  assert.deepEqual(
+    buildDatabaseTransactionOptions({
+      DB_TRANSACTION_MAX_WAIT_MS: "7000",
+      DB_TRANSACTION_TIMEOUT_MS: "24000",
+    }),
+    { maxWait: 7000, timeout: 24000 },
+  );
+});
+
+test("transaksi Prisma memakai default aman saat environment tidak valid", () => {
+  assert.deepEqual(
+    buildDatabaseTransactionOptions({
+      DB_TRANSACTION_MAX_WAIT_MS: "0",
+      DB_TRANSACTION_TIMEOUT_MS: "invalid",
+    }),
+    { maxWait: 15000, timeout: 30000 },
+  );
+});
+
+test("default antrean transaksi tidak berakhir sebelum checkout pool", () => {
+  const pool = buildDatabasePoolConfig({});
+  const transaction = buildDatabaseTransactionOptions({});
+
+  assert.equal(pool.connectionTimeoutMillis, 15000);
+  assert.equal(transaction.maxWait, pool.connectionTimeoutMillis);
+  assert.ok(transaction.timeout > transaction.maxWait);
 });

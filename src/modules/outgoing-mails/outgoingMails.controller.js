@@ -1,8 +1,23 @@
 const service = require("./outgoingMails.service");
 const { paginatedResponse, successResponse } = require("../../utils/response");
+const { logErrorOnce } = require("../../system/error-observability");
 
-function resolveStatusCode(error, fallback = 400) {
-  return error.statusCode || fallback;
+function sendError(res, error, fallbackStatus = 400) {
+  if (error?.statusCode || error?.status) {
+    return res.status(error.statusCode || error.status).json({
+      status: false,
+      message: error.message,
+    });
+  }
+
+  logErrorOnce(error, {
+    event: "outgoing_mail_request_failed",
+    message: "Outgoing mail request failed",
+  });
+  return res.status(Math.max(500, fallbackStatus)).json({
+    status: false,
+    message: "Gagal memproses surat keluar.",
+  });
 }
 
 exports.getAll = async (req, res) => {
@@ -19,9 +34,7 @@ exports.getAll = async (req, res) => {
 
     return successResponse(res, result.data);
   } catch (error) {
-    return res
-      .status(resolveStatusCode(error, 400))
-      .json({ status: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -34,9 +47,7 @@ exports.getById = async (req, res) => {
     });
     return successResponse(res, result);
   } catch (error) {
-    return res
-      .status(resolveStatusCode(error, 404))
-      .json({ status: false, message: error.message });
+    return sendError(res, error, 404);
   }
 };
 
@@ -50,9 +61,7 @@ exports.create = async (req, res) => {
       message: "Surat keluar berhasil dibuat",
     });
   } catch (error) {
-    return res
-      .status(resolveStatusCode(error, 400))
-      .json({ status: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -71,9 +80,7 @@ exports.update = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return res
-      .status(resolveStatusCode(error, 400))
-      .json({ status: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -87,8 +94,6 @@ exports.delete = async (req, res) => {
       data: null,
     });
   } catch (error) {
-    return res
-      .status(resolveStatusCode(error, 400))
-      .json({ status: false, message: error.message });
+    return sendError(res, error);
   }
 };

@@ -1,6 +1,8 @@
 const { test, expect } = require("@playwright/test");
 
-const prisma = require("../../src/config/prisma");
+// Fixture setup and direct assertions require the controlled system client;
+// every UI/API operation under test still runs through runtime RLS.
+const prisma = require("../../src/config/prisma-system");
 const {
   assertLoopbackUrl,
 } = require("../../scripts/release-quality-gate");
@@ -89,7 +91,19 @@ test("Admin mengatur expired agunan dari UI dan status tersimpan di PostgreSQL",
     let dialog = page.getByRole("dialog", { name: "Atur Monitoring Expired" });
     await dialog.locator("#collateral-has-expiry-date").selectOption("true");
     const expiryDate = futureUtcDate({ months: 2 }).toISOString().slice(0, 10);
-    await dialog.locator("#collateral-expiry-date").fill(expiryDate);
+    await dialog.locator("#collateral-expiry-date").click();
+    const datePicker = page.getByRole("dialog", { name: "Pilih tanggal" });
+    const expiryDateButton = datePicker.locator(
+      `[data-calendar-date="${expiryDate}"][data-calendar-current-month="true"]`,
+    );
+    for (let monthOffset = 0; monthOffset < 3; monthOffset += 1) {
+      if ((await expiryDateButton.count()) > 0) {
+        break;
+      }
+      await datePicker.getByRole("button", { name: "Bulan berikutnya" }).click();
+    }
+    await expect(expiryDateButton).toBeVisible();
+    await expiryDateButton.click();
     await dialog
       .locator("#collateral-expiry-note")
       .fill("Perpanjangan diuji melalui UI full-stack");

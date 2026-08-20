@@ -1,6 +1,5 @@
 const prisma = require("../../config/prisma");
 const { withDatabaseTransaction } = require("../../config/database-rls");
-const { getRequestContext } = require("../../utils/request-context");
 const {
   buildActiveApprovedAccessWhere,
 } = require("../../utils/digital-archive-access");
@@ -178,6 +177,16 @@ function update(id, data, client = prisma) {
   });
 }
 
+async function softDelete(id, actorId, client = prisma) {
+  const rows = await client.$queryRaw`
+    SELECT public.ruwang_arsip_soft_delete_digital_document(
+      ${id},
+      ${actorId}
+    ) AS deleted
+  `;
+  return rows[0]?.deleted === true;
+}
+
 function findUserById(id, client = prisma) {
   return client.users.findFirst({
     where: {
@@ -318,37 +327,10 @@ function findPendingAccessConflict(documentId, client = prisma) {
 }
 
 async function createActivityLog(data, client = prisma) {
-  const created = await client.digital_document_activity_logs.create({
-    data,
-  });
-
-  const context = getRequestContext();
-  await client.system_activity_logs.create({
-    data: {
-      actor_id: data.actor_id || null,
-      module: "ARSIP_DIGITAL",
-      action: data.action,
-      source: "MODULE_AUDIT",
-      entity_type: "DOKUMEN_DIGITAL",
-      entity_id: data.document_id,
-      object_label: data.reference_id || data.document_id,
-      title: data.description || `${data.action} dokumen digital`,
-      summary: data.description || null,
-      request_method: context.request_method || null,
-      request_path: context.request_path || null,
-      request_id: context.request_id || null,
-      metadata: {
-        reference_type: data.reference_type || null,
-        reference_id: data.reference_id || null,
-        from_storage_id: data.from_storage_id || null,
-        to_storage_id: data.to_storage_id || null,
-      },
-      user_agent: context.user_agent || null,
-      created_at: created.created_at,
-    },
-  });
-
-  return created;
+  // Activity-log callers only need an acknowledged insert. `createMany` avoids
+  // PostgreSQL `RETURNING`, so an actor may append an auditable event without
+  // broadening the SELECT policy for a document they are only requesting.
+  return client.digital_document_activity_logs.createMany({ data: [data] });
 }
 
 function createDocumentFile(data, client = prisma) {
@@ -470,6 +452,7 @@ module.exports = {
   findUsersByIds,
   getDocumentInclude,
   replaceRelatedUsers,
+  softDelete,
   update,
   updateDebtor,
   withTransaction,

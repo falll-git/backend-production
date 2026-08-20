@@ -969,6 +969,7 @@ function serializeDepositTransaction(req, transaction) {
   return {
     ...transaction,
     raw_action: transaction.action,
+    source: transaction.source || "MANUAL_ENTRY",
     amount: decimalToNumber(transaction.amount),
     file: serializeLegalFile(req, transaction, `bukti-${transaction.action || "titipan"}`),
     files: serializeLegalFiles(req, transaction, `bukti-${transaction.action || "titipan"}`),
@@ -990,6 +991,7 @@ function serializeDeposit(req, item) {
     total_payment_amount: totalPayment,
     total_refund_amount: totalRefund,
     balance_amount: balanceAmount,
+    ledger: item.ledger || null,
     transactions: Array.isArray(item.transactions)
       ? item.transactions.map((transaction) => serializeDepositTransaction(req, transaction))
       : [],

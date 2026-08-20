@@ -3,7 +3,12 @@ const { loadEnv, validateEnv } = require("../src/config/env");
 loadEnv();
 validateEnv();
 
-const prisma = require("../src/config/prisma");
+// Reconciliation is a cross-scope maintenance operation. The runtime client is
+// intentionally constrained by RLS and, without a request context, can make
+// referenced files look like orphans. Use the dedicated non-superuser system
+// client so every persisted file reference is visible without bypassing the
+// production role split.
+const prisma = require("../src/config/prisma-system");
 const { ensureStorageReady } = require("../src/system/storage-runtime");
 const { reconcileStorage } = require("../src/system/storage-reconciliation");
 

@@ -6,6 +6,21 @@ function isUnsafeClientMessage(message) {
   );
 }
 
+const SAFE_SERVER_ERROR_CODES = new Set([
+  "RATE_LIMIT_STORE_UNAVAILABLE",
+  "SERVICE_DRAINING",
+]);
+
+function resolveClientMessage(statusCode, body) {
+  const message = body?.message;
+  if (isUnsafeClientMessage(message)) return "Internal server error";
+  if (statusCode < 500) return message || "Request failed";
+  if (SAFE_SERVER_ERROR_CODES.has(body?.code) && typeof message === "string") {
+    return message;
+  }
+  return "Internal server error";
+}
+
 function serverErrorResponse(req, res, next) {
   const sendJson = res.json.bind(res);
 
@@ -21,10 +36,7 @@ function serverErrorResponse(req, res, next) {
         status: false,
         success: false,
         request_id: body.request_id || req.requestId || null,
-        message:
-          res.statusCode >= 500 || isUnsafeClientMessage(body.message)
-            ? "Internal server error"
-            : body.message || "Request failed",
+        message: resolveClientMessage(res.statusCode, body),
       });
     }
 
@@ -36,3 +48,4 @@ function serverErrorResponse(req, res, next) {
 
 module.exports = serverErrorResponse;
 module.exports.isUnsafeClientMessage = isUnsafeClientMessage;
+module.exports.resolveClientMessage = resolveClientMessage;

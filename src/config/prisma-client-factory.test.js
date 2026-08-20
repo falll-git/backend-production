@@ -13,7 +13,7 @@ const {
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 
-test("query beridentitas memasang kedua GUC dan query dalam satu batch transaction", async () => {
+test("query beridentitas memasang seluruh GUC konteks dan query dalam satu batch transaction", async () => {
   const calls = [];
   const baseClient = {
     $executeRaw(strings, ...values) {
@@ -43,8 +43,14 @@ test("query beridentitas memasang kedua GUC dan query dalam satu batch transacti
   assert.deepEqual(calls[0].values, [
     USER_ID,
     "digital_document_requestable",
+    "",
+    "",
+    "",
+    "",
   ]);
-  assert.deepEqual(calls[1], { type: "transaction", size: 2 });
+  assert.equal(calls[1].type, "context");
+  assert.match(calls[1].sql, /ruwang_arsip_prepare_read_context/);
+  assert.deepEqual(calls[2], { type: "transaction", size: 3 });
 });
 
 test("query tanpa user atau di dalam transaction tidak membuat batch baru", async () => {

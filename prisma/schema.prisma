@@ -186,20 +186,22 @@ model auth_action_tokens {
 }
 
 model refresh_tokens {
-  id           String    @id @default(uuid())
-  user_id      String
-  token_hash   String    @unique
-  expires_at   DateTime
-  revoked_at   DateTime?
-  ip_address   String?
-  user_agent   String?
-  last_used_at DateTime  @default(now())
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  id                   String    @id @default(uuid())
+  user_id              String
+  token_hash           String    @unique
+  expires_at           DateTime
+  revoked_at           DateTime?
+  replaced_by_token_id String?
+  ip_address           String?
+  user_agent           String?
+  last_used_at         DateTime  @default(now())
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, revoked_at])
+  @@index([replaced_by_token_id])
   @@index([expires_at])
   @@index([user_id, last_used_at])
 }
@@ -301,6 +303,7 @@ model notifications {
   @@index([module, event_type])
   @@index([entity_type, entity_id])
   @@index([email_status])
+  @@index([created_by])
 }
 
 model watermark_settings {
@@ -467,6 +470,8 @@ model incoming_mails {
   @@index([letter_prioritie_id])
   @@index([storage_id])
   @@index([created_by])
+  @@index([updated_by])
+  @@index([deleted_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -567,6 +572,8 @@ model digital_documents {
   @@index([debtor_id])
   @@index([document_type_id])
   @@index([created_by])
+  @@index([updated_by])
+  @@index([deleted_by])
   @@index([access_level])
   @@index([watermark_status])
 }
@@ -843,6 +850,7 @@ model digital_document_activity_logs {
 
   @@index([document_id, created_at])
   @@index([action, created_at])
+  @@index([actor_id])
   @@index([from_storage_id])
   @@index([to_storage_id])
   @@map("storage_activity_logs")
@@ -886,6 +894,8 @@ model outgoing_mails {
   @@index([letter_prioritie_id])
   @@index([storage_id])
   @@index([created_by])
+  @@index([updated_by])
+  @@index([deleted_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -932,6 +942,8 @@ model memorandums {
   @@index([origin_division_id])
   @@index([storage_id])
   @@index([created_by])
+  @@index([updated_by])
+  @@index([deleted_by])
   @@index([status])
   @@index([watermark_status])
 }
@@ -1830,6 +1842,8 @@ model legal_print_histories {
   files              legal_print_history_files[]
 
   @@index([contract_id])
+  @@index([template_id])
+  @@index([numbering_template_id])
   @@index([document_type])
   @@index([printed_at])
   @@index([deleted_at])
@@ -1998,7 +2012,7 @@ model legal_activity_logs {
 }
 
 model system_activity_logs {
-  id              String   @id @default(uuid())
+  id              String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   actor_id        String?
   module          String
   action          String
@@ -2289,6 +2303,7 @@ model legal_deposit_transactions {
   transaction_date DateTime
   action           String
   amount           Decimal  @default(0) @db.Decimal(18, 2)
+  source           String   @default("MANUAL_ENTRY")
   notes            String?
   file_path        String?
   file_name        String?
@@ -2304,6 +2319,7 @@ model legal_deposit_transactions {
   @@index([deposit_id])
   @@index([transaction_date])
   @@index([action])
+  @@index([source])
 }
 
 model legal_deposit_transaction_files {

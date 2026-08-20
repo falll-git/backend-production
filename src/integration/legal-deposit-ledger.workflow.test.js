@@ -30,7 +30,7 @@ test(
   { skip: process.env.RUN_CRITICAL_DB_INTEGRATION !== "true" },
   async (t) => {
     const app = require("../app");
-    const prisma = require("../config/prisma");
+    const prisma = require("../config/prisma-system");
     const fixture = createIntegrationFixture(prisma, "Legal deposit ledger workflow");
     const agent = request.agent(app);
     const outsiderAgent = request.agent(app);
@@ -141,6 +141,14 @@ test(
       .expect(201);
     const depositId = created.body.data?.id;
     assert.equal(typeof depositId, "string");
+    assert.equal(
+      created.body.data?.transactions?.[0]?.source,
+      "OPENING_BALANCE",
+    );
+    assert.equal(
+      created.body.data?.ledger?.reconciliation?.status,
+      "MATCHED",
+    );
     fixture.track("legalDeposit", depositId);
     const openingFile = created.body.data?.transactions?.[0]?.files?.[0];
     assert.ok(openingFile?.url, "Bukti transaksi awal wajib tersedia.");
@@ -175,6 +183,7 @@ test(
       .expect(201);
     const paymentId = paid.body.data?.id;
     assert.equal(typeof paymentId, "string");
+    assert.equal(paid.body.data?.source, "MANUAL_ENTRY");
     fixture.track("legalTransaction", paymentId);
     const paymentFile = paid.body.data?.files?.[0];
     assert.ok(paymentFile?.url, "Bukti pembayaran wajib tersedia.");
@@ -243,6 +252,67 @@ test(
       transactions.map((item) => item.action),
       ["TITIPAN", "PEMBAYARAN"],
     );
+    assert.deepEqual(
+      transactions.map((item) => item.source),
+      ["OPENING_BALANCE", "MANUAL_ENTRY"],
+    );
+
+    const reconciledList = await agent
+      .get("/api/v1/legal/deposits?page=1&limit=100&type=ANGSURAN")
+      .set("User-Agent", fixture.userAgent)
+      .set(login.authorization)
+      .expect(200);
+    const reconciledDeposit = reconciledList.body.data.find(
+      (item) => item.id === depositId,
+    );
+    assert.equal(reconciledDeposit.total_deposit_amount, 1000);
+    assert.equal(reconciledDeposit.total_payment_amount, 250);
+    assert.equal(reconciledDeposit.total_refund_amount, 0);
+    assert.equal(reconciledDeposit.balance_amount, 750);
+    assert.equal(reconciledDeposit.ledger.transaction_count, 2);
+    assert.equal(reconciledDeposit.ledger.reconciliation.status, "MATCHED");
+
+    await prisma.legal_deposits.update({
+      where: { id: depositId },
+      data: {
+        paid_amount: 999,
+        processed_amount: 100,
+        remaining_amount: 1,
+      },
+    });
+
+    const mismatchList = await agent
+      .get("/api/v1/legal/deposits?page=1&limit=100&type=ANGSURAN")
+      .set("User-Agent", fixture.userAgent)
+      .set(login.authorization)
+      .expect(200);
+    const mismatchedDeposit = mismatchList.body.data.find(
+      (item) => item.id === depositId,
+    );
+    assert.equal(mismatchedDeposit.total_payment_amount, 250);
+    assert.equal(mismatchedDeposit.total_refund_amount, 0);
+    assert.equal(mismatchedDeposit.balance_amount, 750);
+    assert.equal(mismatchedDeposit.ledger.reconciliation.status, "MISMATCH");
+    assert.equal(
+      mismatchedDeposit.ledger.reconciliation.stored_totals.total_payment_amount,
+      999,
+    );
+
+    const depositReport = await agent
+      .get("/api/v1/legal/reports/third-party-deposit-funds")
+      .set("User-Agent", fixture.userAgent)
+      .set(login.authorization)
+      .expect(200);
+    const reportRow = depositReport.body.data?.data?.find(
+      (item) => item.type === "ANGSURAN" && item.status === "AKTIF",
+    );
+    assert.ok(reportRow);
+    assert.equal(reportRow.total_deposit_amount, 1000);
+    assert.equal(reportRow.total_payment_amount, 250);
+    assert.equal(reportRow.total_refund_amount, 0);
+    assert.equal(reportRow.balance_amount, 750);
+    assert.equal(reportRow.reconciliation_status, "MISMATCH");
+    assert.equal(reportRow.mismatched_records, 1);
 
     const legalAudits = await prisma.legal_activity_logs.findMany({
       where: {

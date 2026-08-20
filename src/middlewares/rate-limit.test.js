@@ -5,6 +5,7 @@ const {
   authKeyGenerator,
   createRateLimiter,
   fileDownloadKeyGenerator,
+  shouldSkipApiGeneralRateLimit,
 } = require("./rate-limit.middleware");
 const {
   createMemoryRateLimitStore,
@@ -60,13 +61,59 @@ test("rate limiter meneruskan request sampai batas dan menolak sisanya", async (
   assert.equal(blocked.response.statusCode, 429);
   assert.equal(blocked.response.payload.status, false);
   assert.equal(blocked.response.payload.success, false);
+  assert.equal(blocked.response.payload.code, "RATE_LIMITED");
   assert.equal(blocked.response.payload.request_id, "request-123");
+  assert.equal(
+    blocked.response.payload.retry_after_seconds,
+    Number(blocked.response.headers["Retry-After"]),
+  );
   assert.equal(blocked.response.headers["RateLimit-Remaining"], "0");
   assert.match(blocked.response.headers["Retry-After"], /^\d+$/);
 
   now += 60_001;
   const afterReset = await invoke(limiter);
   assert.equal(afterReset.continued, true);
+});
+
+test("refresh sesi tidak ikut kuota API umum dan tetap memiliki limiter khusus", async () => {
+  const generalLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: 1,
+    keyGenerator: () => "same-ip",
+    profile: "api-general-test",
+    skip: shouldSkipApiGeneralRateLimit,
+    store: createMemoryRateLimitStore({ now: () => 1_000 }),
+  });
+  const refreshLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: 1,
+    keyGenerator: () => "same-refresh-ip",
+    profile: "auth-refresh-test",
+    store: createMemoryRateLimitStore({ now: () => 1_000 }),
+  });
+  const normalRequest = {
+    method: "GET",
+    path: "/menus",
+    originalUrl: "/api/v1/menus",
+  };
+  const refreshRequest = {
+    method: "POST",
+    path: "/auth/refresh",
+    originalUrl: "/api/v1/auth/refresh",
+  };
+
+  assert.equal((await invoke(generalLimiter, normalRequest)).continued, true);
+  assert.equal(
+    (await invoke(generalLimiter, normalRequest)).response.statusCode,
+    429,
+  );
+  assert.equal((await invoke(generalLimiter, refreshRequest)).continued, true);
+
+  assert.equal((await invoke(refreshLimiter, refreshRequest)).continued, true);
+  assert.equal(
+    (await invoke(refreshLimiter, refreshRequest)).response.statusCode,
+    429,
+  );
 });
 
 test("rate limiter tetap berjalan setelah menerima banyak kunci unik", async () => {
@@ -137,6 +184,10 @@ test("kegagalan store ditolak aman tanpa membocorkan error", async () => {
     const result = await invoke(limiter, { requestId: "request-503" });
     assert.equal(result.continued, false);
     assert.equal(result.response.statusCode, 503);
+    assert.equal(
+      result.response.payload.code,
+      "RATE_LIMIT_STORE_UNAVAILABLE",
+    );
     assert.equal(result.response.payload.request_id, "request-503");
     assert.equal(
       JSON.stringify(result.response.payload).includes("secret"),

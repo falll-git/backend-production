@@ -3,9 +3,26 @@ const { paginatedResponse, successResponse } = require("../../utils/response");
 const {
   buildContentDisposition,
 } = require("../../utils/file-names");
+const { logErrorOnce } = require("../../system/error-observability");
 
-function status(error, fallback = 400) {
-  return error.statusCode || fallback;
+function sendError(res, error, fallbackStatus = 400) {
+  if (error?.statusCode || error?.status) {
+    return res.status(error.statusCode || error.status).json({
+      status: false,
+      success: false,
+      message: error.message,
+    });
+  }
+
+  logErrorOnce(error, {
+    event: "debtor_import_request_failed",
+    message: "Debtor import request failed",
+  });
+  return res.status(Math.max(500, fallbackStatus)).json({
+    status: false,
+    success: false,
+    message: "Gagal memproses impor data debitur.",
+  });
 }
 
 exports.getAll = async (req, res) => {
@@ -13,7 +30,7 @@ exports.getAll = async (req, res) => {
     const result = await service.getAll({ req, query: req.query });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -22,7 +39,7 @@ exports.getPendingIdeb = async (req, res) => {
     const result = await service.getPendingIdeb({ req, query: req.query });
     return paginatedResponse(res, result.data, result.meta);
   } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -39,7 +56,7 @@ exports.resolveIdeb = async (req, res) => {
       "Hasil IDEB berhasil dihubungkan.",
     );
   } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -58,7 +75,7 @@ exports.getIdebResumePdf = async (req, res) => {
     res.setHeader("Content-Length", String(result.buffer.length));
     return res.send(result.buffer);
   } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -74,7 +91,7 @@ exports.retrySlik = async (req, res) => {
       "Job Import SLIK dijadwalkan ulang.",
     );
   } catch (error) {
-    return res.status(status(error)).json({ status: false, success: false, message: error.message });
+    return sendError(res, error);
   }
 };
 
@@ -89,7 +106,7 @@ function createHandler(type) {
       });
       return res.status(201).json({ status: true, success: true, message: "Job import berhasil dibuat.", data });
     } catch (error) {
-      return res.status(status(error)).json({ status: false, success: false, message: error.message });
+      return sendError(res, error);
     }
   };
 }

@@ -61,6 +61,10 @@ test("CORS menerima origin terdaftar dan menolak origin asing", async () => {
       "https://allowed.example",
     );
     assert.equal(allowed.headers.get("access-control-allow-credentials"), "true");
+    const exposedHeaders =
+      allowed.headers.get("access-control-expose-headers") || "";
+    assert.match(exposedHeaders, /Retry-After/i);
+    assert.match(exposedHeaders, /RateLimit-Remaining/i);
 
     const denied = await fetch(`${baseUrl}/health`, {
       headers: { Origin: "https://blocked.example" },

@@ -502,6 +502,8 @@ function validateEnv() {
       "DB_SYSTEM_POOL_MAX",
       "DB_CONNECTION_TIMEOUT_MS",
       "DB_POOL_IDLE_TIMEOUT_MS",
+      "DB_TRANSACTION_MAX_WAIT_MS",
+      "DB_TRANSACTION_TIMEOUT_MS",
       "DB_STATEMENT_TIMEOUT_MS",
       "DB_QUERY_TIMEOUT_MS",
       "DB_LOCK_TIMEOUT_MS",
@@ -613,6 +615,7 @@ function validateEnv() {
   validateOptionalPositiveInt("AUTH_IP_RATE_LIMIT_MAX", errors);
   validateOptionalPositiveInt("AUTH_RATE_LIMIT_MAX", errors);
   validateOptionalPositiveInt("AUTH_REFRESH_RATE_LIMIT_MAX", errors);
+  validateOptionalPositiveInt("AUTH_REFRESH_REUSE_GRACE_MS", errors);
   validateOptionalBoolean("APP_CACHE_ENABLED", errors);
   validateOptionalRedisUrl("APP_CACHE_REDIS_URL", errors);
   validateOptionalCachePrefix("APP_CACHE_KEY_PREFIX", errors);
@@ -751,6 +754,8 @@ function validateEnv() {
   validateOptionalPositiveInt("DB_SYSTEM_POOL_MAX", errors);
   validateOptionalPositiveInt("DB_CONNECTION_TIMEOUT_MS", errors);
   validateOptionalPositiveInt("DB_POOL_IDLE_TIMEOUT_MS", errors);
+  validateOptionalPositiveInt("DB_TRANSACTION_MAX_WAIT_MS", errors);
+  validateOptionalPositiveInt("DB_TRANSACTION_TIMEOUT_MS", errors);
   validateOptionalPositiveInt("DB_STATEMENT_TIMEOUT_MS", errors);
   validateOptionalPositiveInt("DB_QUERY_TIMEOUT_MS", errors);
   validateOptionalPositiveInt("DB_LOCK_TIMEOUT_MS", errors);

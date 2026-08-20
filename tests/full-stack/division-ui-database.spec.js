@@ -1,6 +1,8 @@
 const crypto = require("node:crypto");
 const { test, expect } = require("@playwright/test");
-const prisma = require("../../src/config/prisma");
+// Direct database verification and cleanup must not depend on the actor scope
+// exercised by the browser/API request itself.
+const prisma = require("../../src/config/prisma-system");
 const {
   assertLoopbackUrl,
 } = require("../../scripts/release-quality-gate");
@@ -71,11 +73,12 @@ test("Admin mengelola divisi dari UI dan perubahan terbukti di PostgreSQL", asyn
     });
     await actionButton.click();
     await page.getByRole("menuitem", { name: "Edit" }).click();
-    await expect(actionButton).toHaveAttribute("aria-expanded", "false");
 
     dialog = page.getByRole("dialog", { name: "Edit Divisi" });
+    await expect(dialog).toBeVisible();
     await dialog.getByPlaceholder("Masukkan nama divisi").fill(updatedName);
     await dialog.getByRole("button", { name: "Simpan" }).click();
+    await expect(dialog).toBeHidden();
     await page.getByLabel("Cari Data").fill(updatedName);
     await expect(
       page.getByRole("row").filter({ hasText: updatedName }),

@@ -29,7 +29,7 @@ function buildDatabasePoolConfig(env = process.env, options = {}) {
     connectionTimeoutMillis: readPositiveInt(
       env,
       "DB_CONNECTION_TIMEOUT_MS",
-      5000,
+      15000,
     ),
     idleTimeoutMillis: readPositiveInt(env, "DB_POOL_IDLE_TIMEOUT_MS", 30000),
     statement_timeout: readPositiveInt(env, "DB_STATEMENT_TIMEOUT_MS", 30000),
@@ -44,6 +44,14 @@ function buildDatabasePoolConfig(env = process.env, options = {}) {
   };
 }
 
+function buildDatabaseTransactionOptions(env = process.env) {
+  return {
+    maxWait: readPositiveInt(env, "DB_TRANSACTION_MAX_WAIT_MS", 15000),
+    timeout: readPositiveInt(env, "DB_TRANSACTION_TIMEOUT_MS", 30000),
+  };
+}
+
 module.exports = {
   buildDatabasePoolConfig,
+  buildDatabaseTransactionOptions,
 };

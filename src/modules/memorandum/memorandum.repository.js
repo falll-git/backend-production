@@ -236,10 +236,16 @@ exports.forwardDispositionToReceivers = async ({
     });
     newDispositionsCreated = true;
 
-    await prisma.memorandums.update({
-      where: { id: memorandumId },
-      data: { status: "IN_PROGRESS", updated_by: senderId },
-    });
+    const [workflowStatusSynced] = await prisma.$queryRaw`
+      SELECT public.ruwang_arsip_sync_memorandum_workflow_status(
+        ${memorandumId},
+        ${senderId}
+      ) AS synced
+    `;
+
+    if (!workflowStatusSynced?.synced) {
+      throw new Error("Status alur memorandum tidak dapat diselaraskan.");
+    }
   } catch (error) {
     if (newDispositionsCreated) {
       await prisma.memorandum_dispositions
@@ -296,7 +302,7 @@ exports.completeDispositions = (memorandumId) => {
     where: {
       memorandums_id: memorandumId,
       status: {
-        in: ["NEW", "IN_PROGRESS"],
+        in: ["IN_PROGRESS"],
       },
     },
     data: {
@@ -307,14 +313,24 @@ exports.completeDispositions = (memorandumId) => {
   });
 };
 
-exports.delete = async (id, deleted_by) => {
-  await prisma.memorandums.update({
-    where: { id },
-    data: {
-      deleted_by,
-      deleted_at: new Date(),
-    },
-  });
+exports.syncWorkflowStatus = async ({ memorandumId, actorUserId }) => {
+  const [result] = await prisma.$queryRaw`
+    SELECT public.ruwang_arsip_sync_memorandum_workflow_status(
+      ${memorandumId},
+      ${actorUserId}
+    ) AS synced
+  `;
 
-  return loadById(id);
+  return result?.synced === true;
+};
+
+exports.delete = async (id, deletedBy) => {
+  const [result] = await prisma.$queryRaw`
+    SELECT public.ruwang_arsip_soft_delete_memorandum(
+      ${id},
+      ${deletedBy}
+    ) AS deleted
+  `;
+
+  return result?.deleted === true;
 };

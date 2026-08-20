@@ -56,6 +56,42 @@ test("preserves expected client error messages", () => {
   });
 });
 
+test("preserves allowlisted operational 503 messages without exposing internals", () => {
+  const req = { requestId: "request-operational-503" };
+  const res = createResponse(503);
+
+  serverErrorResponse(req, res, () => {});
+  res.json({
+    status: false,
+    code: "RATE_LIMIT_STORE_UNAVAILABLE",
+    message:
+      "Layanan pembatasan permintaan sedang tidak tersedia. Silakan coba lagi.",
+  });
+
+  assert.deepEqual(res.payload, {
+    status: false,
+    success: false,
+    code: "RATE_LIMIT_STORE_UNAVAILABLE",
+    request_id: "request-operational-503",
+    message:
+      "Layanan pembatasan permintaan sedang tidak tersedia. Silakan coba lagi.",
+  });
+});
+
+test("allowlist tidak dapat dipakai untuk melewatkan pesan infrastruktur", () => {
+  const req = { requestId: "request-unsafe-operational-503" };
+  const res = createResponse(503);
+
+  serverErrorResponse(req, res, () => {});
+  res.json({
+    status: false,
+    code: "RATE_LIMIT_STORE_UNAVAILABLE",
+    message: "connect ECONNREFUSED redis://internal:6379",
+  });
+
+  assert.equal(res.payload.message, "Internal server error");
+});
+
 test("masks infrastructure details even when a controller used status 400", () => {
   const req = { requestId: "request-unsafe-client-error" };
   const res = createResponse(400);

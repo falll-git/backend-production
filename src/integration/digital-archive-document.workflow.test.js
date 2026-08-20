@@ -34,7 +34,7 @@ test(
   { skip: process.env.RUN_CRITICAL_DB_INTEGRATION !== "true" },
   async (t) => {
     const app = require("../app");
-    const prisma = require("../config/prisma");
+    const prisma = require("../config/prisma-system");
     const fixture = createIntegrationFixture(
       prisma,
       "Digital archive document workflow",
@@ -188,7 +188,13 @@ test(
         request_reason: "Membutuhkan dokumen untuk pengujian disposisi",
         expires_at: futureUtcDate({ days: 7 }).toISOString(),
       })
-      .expect(201);
+      .expect((response) => {
+        assert.equal(
+          response.statusCode,
+          201,
+          `Pengajuan akses gagal: ${JSON.stringify(response.body)}`,
+        );
+      });
     const accessRequestId = requested.body.data?.items?.[0]?.id;
     assert.equal(typeof accessRequestId, "string");
     fixture.track("notificationEntity", accessRequestId);
