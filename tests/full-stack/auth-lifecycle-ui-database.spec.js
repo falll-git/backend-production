@@ -380,7 +380,16 @@ test("access token kedaluwarsa dipulihkan dan sesi kedaluwarsa memaksa login ula
       where: { id: refreshedSession.id },
       data: { expires_at: new Date(Date.now() - 1000) },
     });
-    await page.reload();
+
+    // AuthProvider dapat mengalihkan halaman ke login sebelum navigasi reload
+    // selesai. Chromium melaporkan perlombaan yang memang diharapkan ini sebagai
+    // ERR_ABORTED walaupun tujuan akhirnya sudah benar. Abaikan hanya abort
+    // tersebut; kegagalan navigasi lain tetap harus menggagalkan pengujian.
+    await page.reload({ waitUntil: "domcontentloaded" }).catch((error) => {
+      if (!String(error?.message).includes("net::ERR_ABORTED")) {
+        throw error;
+      }
+    });
     await expect(page).toHaveURL(/\/$/, { timeout: 30000 });
   } finally {
     await fixture.cleanup();
