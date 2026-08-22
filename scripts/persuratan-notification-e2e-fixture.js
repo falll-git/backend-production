@@ -76,14 +76,16 @@ function loadPdfFixture(filePath) {
   }
 }
 
-function createSyntheticPdf(runId) {
-  const filePath = path.join(os.tmpdir(), `${FIXTURE_KIND}-${runId}.pdf`);
-  fs.writeFileSync(
-    filePath,
-    "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n",
-    { encoding: "utf8", flag: "wx", mode: 0o600 },
-  );
-  return filePath;
+function createSyntheticPdfFixture(runId) {
+  return {
+    buffer: Buffer.from(
+      "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n",
+      "utf8",
+    ),
+    name: `${FIXTURE_KIND}-${runId}.pdf`,
+    path: null,
+    temporary: false,
+  };
 }
 
 function resolvePdf(runId) {
@@ -91,7 +93,7 @@ function resolvePdf(runId) {
   if (configured) {
     return { ...loadPdfFixture(configured), temporary: false };
   }
-  return { ...loadPdfFixture(createSyntheticPdf(runId)), temporary: true };
+  return createSyntheticPdfFixture(runId);
 }
 
 async function findBaseline() {
@@ -597,6 +599,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createSyntheticPdfFixture,
   fixtureRecordCounts,
   hasFixtureRecords,
   loadPdfFixture,

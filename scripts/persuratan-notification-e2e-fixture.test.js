@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  createSyntheticPdfFixture,
   fixtureRecordCounts,
   hasFixtureRecords,
   loadPdfFixture,
@@ -75,4 +76,16 @@ test("validasi PDF menolak directory dan signature non-PDF", () => {
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("fallback PDF sintetis tetap in-memory tanpa file temporary", () => {
+  const fixture = createSyntheticPdfFixture("run-terkendali");
+
+  assert.equal(
+    fixture.name,
+    "ruwang-arsip-persuratan-notification-e2e-run-terkendali.pdf",
+  );
+  assert.equal(fixture.path, null);
+  assert.equal(fixture.temporary, false);
+  assert.equal(fixture.buffer.subarray(0, 4).toString("utf8"), "%PDF");
 });
