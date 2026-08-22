@@ -64,6 +64,13 @@ test("workflow Quality mewajibkan runtime role CI sebelum migration", () => {
   );
 });
 
+test("workflow Quality mewajibkan HOME writable untuk browser container", () => {
+  assert.throws(
+    () => validateQualityWorkflow(workflow.replace(/^\s+HOME:\s*\/root\s*\r?\n/m, "")),
+    /HOME writable/,
+  );
+});
+
 test("workflow Quality menolak pull_request_target", () => {
   assert.throws(
     () => validateQualityWorkflow(`${workflow}\npull_request_target:\n`),

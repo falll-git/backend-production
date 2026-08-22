@@ -1,8 +1,16 @@
 const CI_DEBTOR_NUMBER = "CI-DEBTOR-001";
 const CI_CONTRACT_NUMBER = "CI-CONTRACT-001";
+const CI_COLLATERAL_ID = "00000000-0000-4000-8000-00000000c001";
+const CI_IDEB_UPLOAD_ID = "00000000-0000-4000-8000-00000000c002";
+const CI_IMPORT_JOB_ID = "00000000-0000-4000-8000-00000000c003";
+const CI_IDEB_PENDING_UPLOAD_ID = "00000000-0000-4000-8000-00000000c004";
+const CI_IDEB_FINGERPRINT = "ci-ideb-report-fixture-v1";
+const CI_IDEB_PENDING_FINGERPRINT = "ci-ideb-pending-fixture-v1";
 const CI_MARKETING_ACTIVITY_ID = "00000000-0000-4000-8000-00000000c101";
+const CI_ACTION_PLAN_ACTIVITY_ID = "00000000-0000-4000-8000-00000000c102";
 const CI_NOTARY_CODE = "CI-NOTARY-001";
 const CI_NOTARY_PROGRESS_ID = "00000000-0000-4000-8000-00000000c201";
+const CI_CLAIM_ID = "00000000-0000-4000-8000-00000000c202";
 const CI_DEPOSIT_ID = "00000000-0000-4000-8000-00000000c301";
 const CI_DEPOSIT_TRANSACTION_ID = "00000000-0000-4000-8000-00000000c302";
 
@@ -174,6 +182,235 @@ async function seedCiTestData(env = process.env, client) {
       },
     });
 
+    await tx.debtor_collaterals.upsert({
+      where: { id: CI_COLLATERAL_ID },
+      update: {
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        collateral_number: "CI-COLLATERAL-001",
+        facility_number: CI_CONTRACT_NUMBER,
+        collateral_type: "Tanah dan Bangunan",
+        owner_name: "Pemilik Agunan Fixture CI",
+        proof_number: "SHM-CI-001",
+        address: "Alamat agunan fixture CI",
+        location_city_code: "3275",
+        market_value: 15000000,
+        appraisal_value: 15000000,
+        reporter_appraisal_date: new Date("2026-04-15T00:00:00.000Z"),
+        description: "Data sementara untuk pengujian modal agunan.",
+        branch_code: "CI",
+        period_month: "2026-04",
+        has_expiry_date: false,
+        expiry_date: null,
+        expiry_note: null,
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_COLLATERAL_ID,
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        collateral_number: "CI-COLLATERAL-001",
+        facility_number: CI_CONTRACT_NUMBER,
+        collateral_type: "Tanah dan Bangunan",
+        owner_name: "Pemilik Agunan Fixture CI",
+        proof_number: "SHM-CI-001",
+        address: "Alamat agunan fixture CI",
+        location_city_code: "3275",
+        market_value: 15000000,
+        appraisal_value: 15000000,
+        reporter_appraisal_date: new Date("2026-04-15T00:00:00.000Z"),
+        description: "Data sementara untuk pengujian modal agunan.",
+        branch_code: "CI",
+        period_month: "2026-04",
+        has_expiry_date: false,
+        created_by: admin.id,
+      },
+    });
+
+    await tx.debtor_ideb_uploads.upsert({
+      where: { source_fingerprint: CI_IDEB_FINGERPRINT },
+      update: {
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        month: 4,
+        year: 2026,
+        status: "COMPLETED",
+        result_summary: {
+          summary: {
+            active_facilities: 1,
+            paid_facilities: 0,
+            total_ceiling: 10000000,
+            outstanding_balance: 7500000,
+            highest_dpd: 0,
+            worst_collectibility: 1,
+          },
+          facilities: [],
+        },
+        file_path: "ci-fixtures/ideb-report.json",
+        file_name: "ideb-report-ci.json",
+        mime_type: "application/json",
+        size_bytes: 2,
+        uploaded_by: admin.id,
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_IDEB_UPLOAD_ID,
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        source_fingerprint: CI_IDEB_FINGERPRINT,
+        month: 4,
+        year: 2026,
+        status: "COMPLETED",
+        result_summary: {
+          summary: {
+            active_facilities: 1,
+            paid_facilities: 0,
+            total_ceiling: 10000000,
+            outstanding_balance: 7500000,
+            highest_dpd: 0,
+            worst_collectibility: 1,
+          },
+          facilities: [],
+        },
+        file_path: "ci-fixtures/ideb-report.json",
+        file_name: "ideb-report-ci.json",
+        mime_type: "application/json",
+        size_bytes: 2,
+        uploaded_by: admin.id,
+        created_by: admin.id,
+      },
+    });
+
+    await tx.debtor_ideb_uploads.upsert({
+      where: { source_fingerprint: CI_IDEB_PENDING_FINGERPRINT },
+      update: {
+        debtor_id: null,
+        contract_id: null,
+        month: 4,
+        year: 2026,
+        status: "MATCH_PENDING",
+        result_summary: {
+          schema_version: "ideb-v1",
+          period_month: "2026-04",
+          debtor_name: "Debitur Pending Fixture CI",
+          identity_number: "CI-IDEB-PENDING-001",
+          contract_number: "CI-FASILITAS-PENDING-001",
+          report_number: "CI-LAPORAN-IDEB-001",
+          source_format: "IDEB_JSON",
+          officer_name: "Petugas Fixture CI",
+          current_collectibility: "2",
+          outstanding_pokok: 6250000,
+          facilities: [],
+        },
+        file_path: "ci-fixtures/ideb-pending-report.json",
+        file_name: "ideb-pending-report-ci.json",
+        mime_type: "application/json",
+        size_bytes: 2,
+        uploaded_by: admin.id,
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_IDEB_PENDING_UPLOAD_ID,
+        debtor_id: null,
+        contract_id: null,
+        source_fingerprint: CI_IDEB_PENDING_FINGERPRINT,
+        month: 4,
+        year: 2026,
+        status: "MATCH_PENDING",
+        result_summary: {
+          schema_version: "ideb-v1",
+          period_month: "2026-04",
+          debtor_name: "Debitur Pending Fixture CI",
+          identity_number: "CI-IDEB-PENDING-001",
+          contract_number: "CI-FASILITAS-PENDING-001",
+          report_number: "CI-LAPORAN-IDEB-001",
+          source_format: "IDEB_JSON",
+          officer_name: "Petugas Fixture CI",
+          current_collectibility: "2",
+          outstanding_pokok: 6250000,
+          facilities: [],
+        },
+        file_path: "ci-fixtures/ideb-pending-report.json",
+        file_name: "ideb-pending-report-ci.json",
+        mime_type: "application/json",
+        size_bytes: 2,
+        uploaded_by: admin.id,
+        created_by: admin.id,
+      },
+    });
+
+    await tx.debtor_import_jobs.upsert({
+      where: { id: CI_IMPORT_JOB_ID },
+      update: {
+        type: "SLIK",
+        status: "COMPLETED",
+        import_segment: "F01",
+        period_month: "2026-04",
+        file_path: "ci-fixtures/slik-import.txt",
+        file_name: "slik-import-ci.txt",
+        mime_type: "text/plain",
+        size_bytes: 2,
+        total_rows: 1,
+        success_rows: 1,
+        failed_rows: 0,
+        completed_at: new Date("2026-04-20T00:00:00.000Z"),
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_IMPORT_JOB_ID,
+        type: "SLIK",
+        status: "COMPLETED",
+        import_segment: "F01",
+        period_month: "2026-04",
+        file_path: "ci-fixtures/slik-import.txt",
+        file_name: "slik-import-ci.txt",
+        mime_type: "text/plain",
+        size_bytes: 2,
+        total_rows: 1,
+        success_rows: 1,
+        failed_rows: 0,
+        completed_at: new Date("2026-04-20T00:00:00.000Z"),
+        created_by: admin.id,
+      },
+    });
+
+    await tx.debtor_marketing_activities.upsert({
+      where: { id: CI_ACTION_PLAN_ACTIVITY_ID },
+      update: {
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        activity_kind: "ACTION_PLAN",
+        activity_date: new Date("2026-04-18T00:00:00.000Z"),
+        target_date: new Date("2026-04-25T00:00:00.000Z"),
+        status: "PENDING",
+        action_plan: "Action plan fixture CI.",
+        notes: "Data sementara untuk pengujian modal Action Plan.",
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_ACTION_PLAN_ACTIVITY_ID,
+        debtor_id: debtor.id,
+        contract_id: contract.id,
+        activity_kind: "ACTION_PLAN",
+        activity_date: new Date("2026-04-18T00:00:00.000Z"),
+        target_date: new Date("2026-04-25T00:00:00.000Z"),
+        status: "PENDING",
+        action_plan: "Action plan fixture CI.",
+        notes: "Data sementara untuk pengujian modal Action Plan.",
+        created_by: admin.id,
+      },
+    });
+
     await tx.debtor_marketing_activities.upsert({
       where: { id: CI_MARKETING_ACTIVITY_ID },
       update: {
@@ -245,6 +482,35 @@ async function seedCiTestData(env = process.env, client) {
         estimated_completed_at: new Date("2026-05-18T00:00:00.000Z"),
         status: "PROSES",
         notes: "Data sementara untuk pengujian detail Notaris.",
+        created_by: admin.id,
+      },
+    });
+
+    await tx.legal_claims.upsert({
+      where: { id: CI_CLAIM_ID },
+      update: {
+        contract_id: contract.id,
+        collateral_id: CI_COLLATERAL_ID,
+        policy_number: "POLIS-CI-001",
+        claim_type: "Klaim Kerusakan Fixture CI",
+        claim_amount: 2500000,
+        submitted_at: new Date("2026-04-19T00:00:00.000Z"),
+        status: "PENGAJUAN",
+        notes: "Data sementara untuk pengujian detail klaim.",
+        updated_by: admin.id,
+        deleted_at: null,
+        deleted_by: null,
+      },
+      create: {
+        id: CI_CLAIM_ID,
+        contract_id: contract.id,
+        collateral_id: CI_COLLATERAL_ID,
+        policy_number: "POLIS-CI-001",
+        claim_type: "Klaim Kerusakan Fixture CI",
+        claim_amount: 2500000,
+        submitted_at: new Date("2026-04-19T00:00:00.000Z"),
+        status: "PENGAJUAN",
+        notes: "Data sementara untuk pengujian detail klaim.",
         created_by: admin.id,
       },
     });
@@ -323,10 +589,18 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CI_ACTION_PLAN_ACTIVITY_ID,
+  CI_CLAIM_ID,
+  CI_COLLATERAL_ID,
   CI_CONTRACT_NUMBER,
   CI_DEBTOR_NUMBER,
   CI_DEPOSIT_ID,
   CI_DEPOSIT_TRANSACTION_ID,
+  CI_IDEB_FINGERPRINT,
+  CI_IDEB_PENDING_FINGERPRINT,
+  CI_IDEB_PENDING_UPLOAD_ID,
+  CI_IDEB_UPLOAD_ID,
+  CI_IMPORT_JOB_ID,
   CI_MARKETING_ACTIVITY_ID,
   CI_NOTARY_CODE,
   CI_NOTARY_PROGRESS_ID,

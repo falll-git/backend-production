@@ -2,9 +2,17 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  CI_ACTION_PLAN_ACTIVITY_ID,
+  CI_CLAIM_ID,
+  CI_COLLATERAL_ID,
   CI_CONTRACT_NUMBER,
   CI_DEBTOR_NUMBER,
   CI_DEPOSIT_ID,
+  CI_IDEB_FINGERPRINT,
+  CI_IDEB_PENDING_FINGERPRINT,
+  CI_IDEB_PENDING_UPLOAD_ID,
+  CI_IDEB_UPLOAD_ID,
+  CI_IMPORT_JOB_ID,
   CI_MARKETING_ACTIVITY_ID,
   CI_NOTARY_CODE,
   CI_NOTARY_PROGRESS_ID,
@@ -86,6 +94,12 @@ test("seed CI membuat fixture browser deterministik tanpa data geolocation", asy
       return result;
     },
   });
+  const multiModel = (name) => ({
+    upsert: async (payload) => {
+      payloads[name] ||= [];
+      payloads[name].push(payload);
+    },
+  });
   const client = {
     $transaction: async (callback) => callback(client),
     users: {
@@ -101,27 +115,66 @@ test("seed CI membuat fixture browser deterministik tanpa data geolocation", asy
     digital_debtors: model("debtor", { id: "debtor-ci" }),
     debtor_contracts: model("contract", { id: "contract-ci" }),
     debtor_collectibilities: model("collectibility"),
-    debtor_marketing_activities: model("marketing"),
+    debtor_collaterals: model("collateral"),
+    debtor_ideb_uploads: multiModel("idebUpload"),
+    debtor_import_jobs: model("importJob"),
+    debtor_marketing_activities: multiModel("marketing"),
     third_parties: model("thirdParty", { id: "notary-ci" }),
     legal_notary_progress: model("notaryProgress"),
+    legal_claims: model("claim"),
     legal_deposits: model("deposit"),
     legal_deposit_transactions: model("depositTransaction"),
   };
 
+  await seedCiTestData(safeEnv, client);
   await seedCiTestData(safeEnv, client);
 
   assert.equal(payloads.debtor.where.debtor_number, CI_DEBTOR_NUMBER);
   assert.equal(payloads.debtor.create.created_by, "admin-ci");
   assert.equal(payloads.debtor.update.updated_by, "admin-ci");
   assert.equal(payloads.contract.where.no_kontrak, CI_CONTRACT_NUMBER);
-  assert.equal(payloads.marketing.where.id, CI_MARKETING_ACTIVITY_ID);
+  assert.equal(payloads.collateral.where.id, CI_COLLATERAL_ID);
+  const linkedIdebFixtures = payloads.idebUpload.filter(
+    (payload) => payload.where.source_fingerprint === CI_IDEB_FINGERPRINT,
+  );
+  const pendingIdebFixtures = payloads.idebUpload.filter(
+    (payload) => payload.where.source_fingerprint === CI_IDEB_PENDING_FINGERPRINT,
+  );
+  assert.equal(linkedIdebFixtures.length, 2);
+  assert.equal(pendingIdebFixtures.length, 2);
+  assert.equal(linkedIdebFixtures[0].create.id, CI_IDEB_UPLOAD_ID);
+  assert.equal(linkedIdebFixtures[0].create.status, "COMPLETED");
+  assert.equal(linkedIdebFixtures[0].create.debtor_id, "debtor-ci");
+  assert.equal(pendingIdebFixtures[0].create.id, CI_IDEB_PENDING_UPLOAD_ID);
+  assert.equal(pendingIdebFixtures[0].create.status, "MATCH_PENDING");
+  assert.equal(pendingIdebFixtures[0].create.debtor_id, null);
+  assert.equal(pendingIdebFixtures[0].create.contract_id, null);
+  assert.notEqual(CI_IDEB_PENDING_UPLOAD_ID, CI_IDEB_UPLOAD_ID);
+  assert.notEqual(CI_IDEB_PENDING_FINGERPRINT, CI_IDEB_FINGERPRINT);
+  assert.equal(payloads.importJob.where.id, CI_IMPORT_JOB_ID);
+  assert.equal(payloads.importJob.create.type, "SLIK");
+  assert.equal(payloads.importJob.create.status, "COMPLETED");
+  assert.equal(payloads.importJob.create.created_by, "admin-ci");
+  const actionPlanFixture = payloads.marketing.find(
+    (payload) => payload.where.id === CI_ACTION_PLAN_ACTIVITY_ID,
+  );
+  const handlingFixture = payloads.marketing.find(
+    (payload) => payload.where.id === CI_MARKETING_ACTIVITY_ID,
+  );
+  assert.equal(actionPlanFixture.create.debtor_id, "debtor-ci");
+  assert.equal(actionPlanFixture.create.activity_kind, "ACTION_PLAN");
+  assert.equal(handlingFixture.create.activity_kind, "HANDLING_STEP");
   assert.equal(payloads.thirdParty.where.code, CI_NOTARY_CODE);
   assert.equal(payloads.notaryProgress.where.id, CI_NOTARY_PROGRESS_ID);
+  assert.equal(payloads.claim.where.id, CI_CLAIM_ID);
+  assert.equal(payloads.claim.create.collateral_id, CI_COLLATERAL_ID);
   assert.equal(payloads.deposit.where.id, CI_DEPOSIT_ID);
   assert.equal(payloads.depositTransaction.create.action, "PEMBAYARAN");
   assert.equal(
-    Object.keys(payloads.marketing.create).some((key) =>
-      /(?:lat|lon|geo|location)/i.test(key),
+    payloads.marketing.some((payload) =>
+      Object.keys(payload.create).some((key) =>
+        /(?:lat|lon|geo|location)/i.test(key),
+      ),
     ),
     false,
   );

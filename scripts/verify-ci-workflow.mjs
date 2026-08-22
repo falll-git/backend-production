@@ -12,6 +12,7 @@ const REQUIRED_PATTERNS = Object.freeze([
   [/^\s+cancel-in-progress:\s*true\s*$/m, "pembatalan run lama"],
   [/^\s+runs-on:\s*ubuntu-24\.04\s*$/m, "GitHub-hosted Ubuntu runner"],
   [/^\s+timeout-minutes:\s*\d+\s*$/m, "timeout job"],
+  [/^\s+HOME:\s*\/root\s*$/m, "HOME writable untuk browser container"],
   [/^\s+postgres:\s*$/m, "PostgreSQL service CI"],
   [/postgresql:\/\/postgres:postgres@postgres:5432\/ruwang_arsip_ci\?schema=public/, "database PostgreSQL service khusus CI"],
   [/^\s+persist-credentials:\s*false\s*$/m, "checkout tanpa menyimpan credential Git"],
