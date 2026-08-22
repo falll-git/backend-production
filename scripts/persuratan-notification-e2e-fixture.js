@@ -52,23 +52,28 @@ function writeManifest(manifest) {
   });
 }
 
-function assertPdfFile(filePath) {
+function loadPdfFixture(filePath) {
   const resolved = path.resolve(filePath);
-  const stat = fs.statSync(resolved);
-  if (!stat.isFile() || path.extname(resolved).toLowerCase() !== ".pdf") {
+  if (path.extname(resolved).toLowerCase() !== ".pdf") {
     throw new Error("Fixture notifikasi membutuhkan file PDF yang valid.");
   }
-  const descriptor = fs.openSync(resolved, "r");
+
+  let descriptor;
   try {
-    const signature = Buffer.alloc(4);
-    fs.readSync(descriptor, signature, 0, signature.length, 0);
-    if (signature.toString("utf8") !== "%PDF") {
+    descriptor = fs.openSync(resolved, "r");
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) {
+      throw new Error("Fixture notifikasi membutuhkan file PDF yang valid.");
+    }
+
+    const buffer = fs.readFileSync(descriptor);
+    if (buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
       throw new Error("File fixture tidak memiliki signature PDF.");
     }
+    return { buffer, name: path.basename(resolved), path: resolved };
   } finally {
-    fs.closeSync(descriptor);
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
-  return resolved;
 }
 
 function createSyntheticPdf(runId) {
@@ -84,9 +89,9 @@ function createSyntheticPdf(runId) {
 function resolvePdf(runId) {
   const configured = String(process.env.PERSURATAN_E2E_PDF_PATH || "").trim();
   if (configured) {
-    return { path: assertPdfFile(configured), temporary: false };
+    return { ...loadPdfFixture(configured), temporary: false };
   }
-  return { path: createSyntheticPdf(runId), temporary: true };
+  return { ...loadPdfFixture(createSyntheticPdf(runId)), temporary: true };
 }
 
 async function findBaseline() {
@@ -323,7 +328,10 @@ async function setup() {
         "Dokumen uji lokal untuk membuktikan klik notifikasi membuka modal detail yang tepat.",
       )
       .field("note", "Tindak lanjut notifikasi E2E")
-      .attach("file", pdf.path)
+      .attach("file", pdf.buffer, {
+        contentType: "application/pdf",
+        filename: pdf.name,
+      })
       .expect(201);
 
     memorandum = response.body.data;
@@ -359,7 +367,7 @@ async function setup() {
       createdAt: new Date().toISOString(),
       database,
       sourcePdf: {
-        name: path.basename(pdf.path),
+        name: pdf.name,
         temporary: pdf.temporary,
         path: pdf.temporary ? pdf.path : null,
       },
@@ -387,7 +395,7 @@ async function setup() {
       JSON.stringify({
         status: "created",
         manifest: MANIFEST_PATH,
-        source_pdf: path.basename(pdf.path),
+        source_pdf: pdf.name,
       }),
     );
   } catch (error) {
@@ -591,4 +599,5 @@ if (require.main === module) {
 module.exports = {
   fixtureRecordCounts,
   hasFixtureRecords,
+  loadPdfFixture,
 };
