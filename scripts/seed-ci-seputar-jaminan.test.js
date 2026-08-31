@@ -51,6 +51,7 @@ test("fixture SJ CI dapat dijalankan ulang tanpa menggandakan snapshot", async (
     publicationVersion: false,
   };
   const upsertCounts = new Map();
+  let buildingPublicUsage = null;
   const upsert = (name, result) => async () => {
     upsertCounts.set(name, (upsertCounts.get(name) || 0) + 1);
     return result;
@@ -104,8 +105,9 @@ test("fixture SJ CI dapat dijalankan ulang tanpa menggandakan snapshot", async (
       update: async () => ({}),
     },
     sj_building_details: {
-      create: async () => {
+      create: async ({ data }) => {
         created.buildingDetail += 1;
+        buildingPublicUsage = data.public_usage;
       },
     },
     sj_publication_version_media: {
@@ -151,5 +153,5 @@ test("fixture SJ CI dapat dijalankan ulang tanpa menggandakan snapshot", async (
   assert.equal(upsertCounts.get("media"), 4);
   assert.equal(upsertCounts.get("review"), 4);
   assert.equal(mediaWrites, 2);
+  assert.equal(buildingPublicUsage, "HUNIAN");
 });
-

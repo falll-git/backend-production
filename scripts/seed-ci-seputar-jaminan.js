@@ -412,7 +412,7 @@ async function seedCiSeputarJaminan(env = process.env, client, dependencies = {}
         land_area_m2: 126,
         building_area_m2: 148,
         floor_count: 2,
-        public_usage: "Rumah tinggal",
+        public_usage: "HUNIAN",
       },
     };
     const publishedPayload = {
@@ -473,7 +473,7 @@ async function seedCiSeputarJaminan(env = process.env, client, dependencies = {}
           land_area_m2: 126,
           building_area_m2: 148,
           floor_count: 2,
-          public_usage: "Rumah tinggal",
+          public_usage: "HUNIAN",
         },
       });
       await tx.sj_publication_version_media.create({
