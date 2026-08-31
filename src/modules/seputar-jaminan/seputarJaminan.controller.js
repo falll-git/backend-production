@@ -66,7 +66,8 @@ exports.getMediaContent = async (req, res) => {
     res.set("Content-Type", row.detected_mime);
     res.set("Cache-Control", "private, max-age=60, no-transform");
     res.set("Content-Length", String(buffer.length));
-    return res.send(buffer);
+    res.end(buffer);
+    return undefined;
   } catch (error) {
     return errorResponse(res, error);
   }
