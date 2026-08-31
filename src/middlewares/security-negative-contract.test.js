@@ -21,6 +21,11 @@ const BODYLESS_MUTATIONS = new Set([
   "POST /debtor-imports/collectibility",
   "PATCH /notifications/read-all",
   "PATCH /notifications/:id/read",
+  // Upload media divalidasi oleh middleware multipart khusus, sedangkan retry
+  // dan rekonsiliasi tidak menerima request body.
+  "POST /seputar-jaminan/media",
+  "POST /seputar-jaminan/reconciliation",
+  "POST /seputar-jaminan/sync-events/:id/retry",
 ]);
 
 function routePaths(layer) {
@@ -56,7 +61,7 @@ function mutationEntries() {
 
 test("seluruh mutation route memakai schema body atau termasuk action tanpa body yang diaudit", () => {
   const entries = mutationEntries();
-  assert.equal(entries.length, 104);
+  assert.equal(entries.length, 127);
   const withoutValidation = entries
     .filter((entry) => entry.bodyValidations.length === 0)
     .map((entry) => entry.key)
@@ -84,7 +89,7 @@ test("seluruh schema mutation menolak atau membuang field mass-assignment asing"
       );
     }
   }
-  assert.equal(validatedRoutes, 92);
+  assert.equal(validatedRoutes, 112);
 });
 
 test("middleware validasi membuang field audit yang tidak ada di schema", async () => {

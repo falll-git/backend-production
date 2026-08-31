@@ -1,0 +1,24 @@
+{
+  "package": "@seputarjaminan/contracts",
+  "version": "1.0.0",
+  "generated_from": "packages/contracts",
+  "files": {
+    "schemas/v1/event-envelope.schema.json": "72539cd06a80d794b90e5aeec5e29d11fc716a5766eede912c69b277df9a4835",
+    "schemas/v1/media-revoked.schema.json": "0f4823dcdb51206e45d954d28fc15d5449026f09f2bb2ba6bfef00d05639134a",
+    "schemas/v1/media-upload-session-request.schema.json": "36f8534c992608a86f09eb81f7da64a3fcfc0571e4ddc8b8f444f9a48698fe26",
+    "schemas/v1/media-upload-session-response.schema.json": "2f11009840abeabdc9304bcfe50039e7f820a476a3f5b89c8395459ac864ffc2",
+    "schemas/v1/profile.schema.json": "f60697c7de249aea5d557c336369aff6f6ce2bed65fe5890f18c1737ad9926cb",
+    "schemas/v1/publication-archived.schema.json": "980b3bf03ed70fc25a7fca69b1f542e8bd99e6fddb31970b2e5bc854f506eca7",
+    "schemas/v1/publication-snapshot.schema.json": "2ec0b1b68764fc8a26a8c573cce98c36199c9f6170159a3e3868ff0fbc4014b4",
+    "schemas/v1/publication-unpublished.schema.json": "d8b272957b429f8a168c3871f2f6d5795b64f81457e33596a1249388a9af0830",
+    "schemas/v1/reconciliation-manifest.schema.json": "ceb5c7ddc7ad110c936e1ecf3d613501bb04f5122416ef2e3bc7667d87c9ee14",
+    "schemas/v1/whatsapp-contact-revoked.schema.json": "a18a99cc7af8049edd225bfa2104e1c6241c647b443ea2748cecb3d631bbb11c",
+    "schemas/v1/whatsapp-contact.schema.json": "7632a4e9e320fb2754b4eb9690527e74dd979e791fe6c94be1a321ab89062fc2",
+    "src/canonical-json.mjs": "d8bf85a4b86024905ff34a8c8c92d1ef698092026509b99bd897ca7e47a61a9a",
+    "src/constants.mjs": "b63aa24f8f805729aff6c158edc83870e15850de9821a0c101c0b2fad5d1ed77",
+    "src/index.d.ts": "b77542eb5edbff073f8bc68a27ecc3baf3e740f5656cb49ac78d71ebf20fe84f",
+    "src/index.mjs": "6e938d105f5ca823ebad2408febc212df3a5654aefae296d10ddb6636a624c7d",
+    "src/signing.mjs": "8fcd605007544037364cd32d0a53bc1a5dcdddac136edf322877c14af089a802",
+    "src/validate.mjs": "59fd1b24c1c82383bf6d380bd99b92921fbb42e3d0f7fa88bea210fb022aa761"
+  }
+}

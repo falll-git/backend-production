@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/publication-snapshot.schema.json",
+  "title": "Snapshot Publikasi V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "publication_id",
+    "reference_code",
+    "institution_id",
+    "taxonomy_version",
+    "category",
+    "subcategory",
+    "title",
+    "description",
+    "location",
+    "availability",
+    "attributes",
+    "media",
+    "whatsapp_contact_id",
+    "published_at",
+    "public_updated_at",
+    "availability_confirmed_at",
+    "next_confirmation_at"
+  ],
+  "properties": {
+    "publication_id": { "type": "string", "format": "uuid" },
+    "reference_code": { "type": "string", "pattern": "^SJ-[A-Z0-9]{8}$" },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "taxonomy_version": { "const": 1 },
+    "category": {
+      "enum": ["TANAH", "BANGUNAN", "MESIN_PERALATAN", "KENDARAAN"]
+    },
+    "subcategory": {
+      "enum": [
+        "TANAH",
+        "RUMAH",
+        "RUKO",
+        "KIOS",
+        "KANTOR",
+        "GUDANG",
+        "PABRIK",
+        "EXCAVATOR",
+        "BULDOSER",
+        "CRANE",
+        "MESIN_MANUFAKTUR",
+        "PERALATAN_KONSTRUKSI",
+        "PERALATAN_PERTANIAN",
+        "PERALATAN_MEDIS",
+        "MOBIL",
+        "MOTOR",
+        "TRUK",
+        "BUS"
+      ]
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["city_regency", "province"],
+      "properties": {
+        "city_regency": { "type": "string", "minLength": 1 },
+        "province": { "type": "string", "minLength": 1 }
+      }
+    },
+    "availability": { "const": "AVAILABLE" },
+    "attributes": {
+      "oneOf": [
+        { "$ref": "#/$defs/landAttributes" },
+        { "$ref": "#/$defs/buildingAttributes" },
+        { "$ref": "#/$defs/equipmentAttributes" },
+        { "$ref": "#/$defs/vehicleAttributes" }
+      ]
+    },
+    "media": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/mediaReference" }
+    },
+    "whatsapp_contact_id": { "type": "string", "format": "uuid" },
+    "published_at": { "type": "string", "format": "date-time" },
+    "public_updated_at": { "type": "string", "format": "date-time" },
+    "availability_confirmed_at": { "type": "string", "format": "date-time" },
+    "next_confirmation_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "controlledCode": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "publicCondition": {
+      "enum": ["SANGAT_BAIK", "BAIK", "CUKUP", "PERLU_PERBAIKAN"]
+    },
+    "contour": {
+      "enum": ["DATAR", "MIRING", "BERKONTUR"]
+    },
+    "roadAccess": {
+      "enum": ["RODA_DUA", "MOBIL", "TRUK"]
+    },
+    "publicUsage": {
+      "enum": ["HUNIAN", "KOMERSIAL", "PERKANTORAN", "PERGUDANGAN", "INDUSTRI", "SERBAGUNA"]
+    },
+    "transmission": {
+      "enum": ["MANUAL", "OTOMATIS"]
+    },
+    "fuelType": {
+      "enum": ["BENSIN", "DIESEL", "LISTRIK", "HIBRIDA", "GAS"]
+    },
+    "mediaReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_id", "checksum", "position", "is_cover", "alt_text"],
+      "properties": {
+        "media_id": { "type": "string", "format": "uuid" },
+        "checksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "position": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "is_cover": { "type": "boolean" },
+        "alt_text": { "type": "string", "minLength": 1 }
+      }
+    },
+    "landAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["land_area_m2"],
+      "properties": {
+        "land_area_m2": { "type": "number", "exclusiveMinimum": 0 },
+        "contour": { "$ref": "#/$defs/contour" },
+        "road_access": { "$ref": "#/$defs/roadAccess" }
+      }
+    },
+    "buildingAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["building_area_m2"],
+      "properties": {
+        "land_area_m2": { "type": "number", "exclusiveMinimum": 0 },
+        "building_area_m2": { "type": "number", "exclusiveMinimum": 0 },
+        "floor_count": { "type": "integer", "minimum": 1 },
+        "public_usage": { "$ref": "#/$defs/publicUsage" }
+      }
+    },
+    "equipmentAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_or_type", "public_condition"],
+      "properties": {
+        "brand_or_manufacturer": { "type": "string", "minLength": 1 },
+        "model_or_type": { "type": "string", "minLength": 1 },
+        "manufacture_year": { "type": "integer" },
+        "public_capacity": { "type": "string", "minLength": 1 },
+        "public_condition": { "$ref": "#/$defs/publicCondition" }
+      }
+    },
+    "vehicleAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brand", "model_or_type", "public_condition"],
+      "properties": {
+        "brand": { "type": "string", "minLength": 1 },
+        "model_or_type": { "type": "string", "minLength": 1 },
+        "manufacture_year": { "type": "integer" },
+        "transmission": { "$ref": "#/$defs/transmission" },
+        "fuel_type": { "$ref": "#/$defs/fuelType" },
+        "mileage_km": { "type": "number", "minimum": 0 },
+        "public_condition": { "$ref": "#/$defs/publicCondition" }
+      }
+    }
+  }
+}

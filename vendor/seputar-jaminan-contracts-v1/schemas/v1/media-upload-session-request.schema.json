@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/media-upload-session-request.schema.json",
+  "title": "Permintaan Sesi Upload Media V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "institution_id",
+    "publication_id",
+    "source_media_id",
+    "sha256",
+    "detected_mime",
+    "size_bytes",
+    "width",
+    "height",
+    "purpose",
+    "requested_ttl_seconds"
+  ],
+  "properties": {
+    "institution_id": { "type": "string", "format": "uuid" },
+    "publication_id": { "type": ["string", "null"], "format": "uuid" },
+    "source_media_id": { "type": "string", "format": "uuid" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "detected_mime": { "enum": ["image/jpeg", "image/png", "image/webp"] },
+    "size_bytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+    "width": { "type": "integer", "minimum": 1, "maximum": 2560 },
+    "height": { "type": "integer", "minimum": 1, "maximum": 2560 },
+    "purpose": { "enum": ["PUBLICATION_IMAGE", "BPRS_PUBLIC_MARK"] },
+    "requested_ttl_seconds": { "type": "integer", "minimum": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "purpose": { "const": "PUBLICATION_IMAGE" } } },
+      "then": { "properties": { "publication_id": { "type": "string", "format": "uuid" } } }
+    },
+    {
+      "if": { "properties": { "purpose": { "const": "BPRS_PUBLIC_MARK" } } },
+      "then": { "properties": { "publication_id": { "type": "null" } } }
+    }
+  ]
+}

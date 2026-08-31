@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/media-upload-session-response.schema.json",
+  "title": "Respons Sesi Upload Media V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "media_id",
+    "upload_session_id",
+    "upload_url",
+    "method",
+    "headers",
+    "expires_at",
+    "max_bytes"
+  ],
+  "properties": {
+    "request_id": { "type": "string", "format": "uuid" },
+    "media_id": { "type": "string", "format": "uuid" },
+    "upload_session_id": { "type": "string", "format": "uuid" },
+    "upload_url": { "type": "string", "format": "uri" },
+    "method": { "const": "PUT" },
+    "headers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "max_bytes": { "type": "integer", "minimum": 1, "maximum": 10485760 }
+  }
+}

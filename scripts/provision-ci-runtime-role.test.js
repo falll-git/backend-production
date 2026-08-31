@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   CI_RUNTIME_ROLE,
+  CI_SEPUTAR_JAMINAN_WORKER_ROLE,
   assertSafeCiMigrationDatabase,
   provisionCiRuntimeRole,
 } = require("./provision-ci-runtime-role");
@@ -72,8 +73,11 @@ test("provisioning membuat role least-privilege secara idempotent", async () => 
   const sql = calls.find(([name]) => name === "query")[1];
 
   assert.equal(result.runtime_role, CI_RUNTIME_ROLE);
+  assert.equal(result.worker_role, CI_SEPUTAR_JAMINAN_WORKER_ROLE);
   assert.match(sql, /IF NOT EXISTS[\s\S]*?rolname = 'ruwang_arsip_app'/i);
   assert.match(sql, /CREATE ROLE ruwang_arsip_app[\s\S]*?NOLOGIN/i);
+  assert.match(sql, /IF NOT EXISTS[\s\S]*?rolname = 'ruwang_sj_worker'/i);
+  assert.match(sql, /CREATE ROLE ruwang_sj_worker[\s\S]*?NOLOGIN/i);
   assert.match(sql, /NOSUPERUSER/i);
   assert.match(sql, /NOBYPASSRLS/i);
   assert.match(sql, /NOCREATEDB/i);

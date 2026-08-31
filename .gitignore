@@ -22,6 +22,7 @@ performance-reports/
 release-reports/
 dist/
 build/
+/docs/
 
 # Local review fixtures may reference workstation-only datasets.
 /prisma/seed-review.js

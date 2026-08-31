@@ -21,6 +21,8 @@ const migrationNames = [
   "20260726150000_require_contract_read_permission_rls",
   "20260820100000_cache_debtor_read_scope_context",
   "20260820101000_grant_debtor_read_scope_helpers",
+  "20260822111000_protect_seputar_jaminan_module",
+  "20260823120000_harden_seputar_jaminan_worker_identity",
 ];
 
 const migrationSql = migrationNames
@@ -144,6 +146,14 @@ test("role policy tidak dapat login dan hanya mendapat akses baca tabel", () => 
   );
 
   assert.match(provisioning, /ruwang_arsip_policy NOLOGIN/i);
+  assert.match(
+    provisioning,
+    /ALTER ROLE ruwang_arsip_app[\s\S]*?LOGIN[\s\S]*?NOBYPASSRLS/i,
+  );
+  assert.match(
+    provisioning,
+    /ALTER ROLE ruwang_arsip_system[\s\S]*?LOGIN[\s\S]*?BYPASSRLS/i,
+  );
   assert.match(provisioning, /GRANT SELECT ON ALL TABLES[\s\S]*?ruwang_arsip_policy/i);
   const applicationDmlGrant = provisioning.match(
     /GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES[\s\S]*?;/i,

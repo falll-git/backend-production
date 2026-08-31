@@ -5,6 +5,12 @@ function readBoolean(value, fallback = false) {
   );
 }
 
+// Fungsi trigger hanya dipanggil oleh PostgreSQL melalui trigger yang sudah
+// terpasang. Role runtime tidak perlu (dan tidak boleh dipaksa) memperoleh
+// izin EXECUTE langsung terhadap fungsi internal tersebut.
+const RUNTIME_CALLABLE_HELPER_PREDICATE =
+  "helper.prorettype <> 'pg_catalog.trigger'::regtype";
+
 const MANDATORY_RLS_TABLES = Object.freeze([
   "auth_action_tokens",
   "debtor_activity_logs",
@@ -56,6 +62,25 @@ const MANDATORY_RLS_TABLES = Object.freeze([
   "notifications",
   "outgoing_mails",
   "refresh_tokens",
+  "sj_building_details",
+  "sj_integration_settings",
+  "sj_land_details",
+  "sj_machine_details",
+  "sj_media_assets",
+  "sj_public_profile_versions",
+  "sj_public_profiles",
+  "sj_publication_reviews",
+  "sj_publication_version_media",
+  "sj_publication_versions",
+  "sj_publications",
+  "sj_reconciliation_runs",
+  "sj_sync_attempts",
+  "sj_sync_outbox",
+  "sj_taxonomy_items",
+  "sj_taxonomy_versions",
+  "sj_vehicle_details",
+  "sj_whatsapp_contact_versions",
+  "sj_whatsapp_contacts",
   "storage_activity_logs",
   "system_activity_logs",
 ]);
@@ -176,7 +201,8 @@ async function inspectDatabaseSecurity(prismaClient) {
         WHERE has_function_privilege('public', helper.oid, 'EXECUTE')
       )::int AS public_execute_count,
       COUNT(*) FILTER (
-        WHERE NOT has_function_privilege(current_user, helper.oid, 'EXECUTE')
+        WHERE ${RUNTIME_CALLABLE_HELPER_PREDICATE}
+          AND NOT has_function_privilege(current_user, helper.oid, 'EXECUTE')
       )::int AS missing_runtime_execute_count
     FROM pg_proc helper
     JOIN pg_namespace namespace_data ON namespace_data.oid = helper.pronamespace
@@ -399,6 +425,7 @@ function safeDatabaseSecuritySummary(report, evaluation) {
 module.exports = {
   MANDATORY_RLS_TABLES,
   RLS_TABLE_EXEMPTIONS,
+  RUNTIME_CALLABLE_HELPER_PREDICATE,
   assertDatabaseRuntimeSecurity,
   assertDatabaseSystemSecurity,
   assertDatabaseWorkerSecurity,

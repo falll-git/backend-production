@@ -73,6 +73,21 @@ model users {
   marketing_contracts                 debtor_contracts[]                 @relation("ContractMarketingOwner")
   uploaded_ideb_reports               debtor_ideb_uploads[]              @relation("DebtorIdebUploader")
   updated_collateral_expiries         debtor_collaterals[]               @relation("CollateralExpiryUpdater")
+  sj_profiles_created                 sj_public_profiles[]               @relation("SjProfileCreator")
+  sj_profiles_updated                 sj_public_profiles[]               @relation("SjProfileUpdater")
+  sj_profile_versions_created         sj_public_profile_versions[]       @relation("SjProfileVersionCreator")
+  sj_profile_versions_approved        sj_public_profile_versions[]       @relation("SjProfileVersionApprover")
+  sj_contacts_created                 sj_whatsapp_contacts[]             @relation("SjContactCreator")
+  sj_contacts_updated                 sj_whatsapp_contacts[]             @relation("SjContactUpdater")
+  sj_contact_versions_created         sj_whatsapp_contact_versions[]     @relation("SjContactVersionCreator")
+  sj_contact_versions_verified        sj_whatsapp_contact_versions[]     @relation("SjContactVersionVerifier")
+  sj_publications_created             sj_publications[]                  @relation("SjPublicationCreator")
+  sj_publications_updated             sj_publications[]                  @relation("SjPublicationUpdater")
+  sj_publication_versions_edited      sj_publication_versions[]          @relation("SjPublicationVersionEditor")
+  sj_publication_versions_submitted   sj_publication_versions[]          @relation("SjPublicationVersionSubmitter")
+  sj_publication_versions_approved    sj_publication_versions[]          @relation("SjPublicationVersionApprover")
+  sj_media_created                    sj_media_assets[]                  @relation("SjMediaCreator")
+  sj_publication_reviews              sj_publication_reviews[]           @relation("SjPublicationReviewer")
 
   created_outgoing_mails outgoing_mails[] @relation("OutgoingMailsCreator")
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
@@ -223,6 +238,8 @@ model divisions {
   memorandums             memorandums[]
   memorandum_targets      memorandum_target_divisions[]
   owned_digital_documents digital_documents[]              @relation("DigitalDocumentsOwnerDivision")
+  sj_publications         sj_publications[]
+  sj_media_assets         sj_media_assets[]
   created_at              DateTime                         @default(now())
   updated_at              DateTime                         @updatedAt
 }
@@ -1440,6 +1457,7 @@ model debtor_collaterals {
   legal_kjpp_progress      legal_kjpp_progress[]
   legal_claims             legal_claims[]
   legal_activity_logs      legal_activity_logs[]      @relation("LegalActivityLogCollateral")
+  sj_publications          sj_publications[]
 
   @@index([collateral_number, facility_number])
   @@index([debtor_id])
@@ -2205,6 +2223,544 @@ model legal_kjpp_progress_files {
 
   @@unique([progress_id, file_path])
   @@index([progress_id])
+}
+
+enum sj_publication_states {
+  DRAFT
+  IN_REVIEW
+  REVISION_REQUIRED
+  APPROVED
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+}
+
+enum sj_publication_source_types {
+  COLLATERAL
+  MANUAL
+}
+
+enum sj_public_availabilities {
+  AVAILABLE
+  UNAVAILABLE
+}
+
+enum sj_asset_categories {
+  LAND
+  BUILDING
+  MACHINE_EQUIPMENT
+  VEHICLE
+}
+
+enum sj_sync_states {
+  NOT_QUEUED
+  QUEUED
+  SENDING
+  ACKNOWLEDGED
+  RETRYING
+  FAILED
+  QUARANTINED
+}
+
+enum sj_media_states {
+  DRAFT
+  UPLOAD_PENDING
+  UPLOADED
+  PROCESSING
+  READY
+  REJECTED
+  REVOKED
+  DELETION_PENDING
+  DELETED
+}
+
+enum sj_contact_states {
+  DRAFT
+  IN_REVIEW
+  VERIFIED
+  REJECTED
+  REVOKED
+}
+
+enum sj_profile_states {
+  DRAFT
+  IN_REVIEW
+  VERIFIED
+  REVISION_REQUIRED
+}
+
+enum sj_storage_backends {
+  FILESYSTEM
+  S3_COMPATIBLE
+}
+
+enum sj_connection_states {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum sj_snapshot_states {
+  DRAFT
+  IN_REVIEW
+  VERIFIED
+  REVISION_REQUIRED
+  APPROVED
+}
+
+enum sj_review_actions {
+  SUBMITTED
+  REVISION_REQUESTED
+  APPROVED
+  PUBLISH_REQUESTED
+  UNPUBLISHED
+  RECONFIRMED
+  ARCHIVED
+}
+
+enum sj_reconciliation_states {
+  PENDING
+  RUNNING
+  MATCHED
+  MISMATCH
+  FAILED
+}
+
+model sj_integration_settings {
+  id                        String               @id @default(uuid())
+  institution_id            String               @unique
+  installation_id           String               @unique
+  key_id                    String
+  central_base_url          String
+  contract_version          Int                  @default(1)
+  taxonomy_version          Int                  @default(1)
+  connection_state          sj_connection_states @default(PENDING)
+  module_visible            Boolean              @default(false)
+  draft_enabled             Boolean              @default(false)
+  review_enabled            Boolean              @default(false)
+  sync_enabled              Boolean              @default(false)
+  publish_enabled           Boolean              @default(false)
+  filesystem_upload_enabled Boolean              @default(false)
+  s3_upload_enabled         Boolean              @default(false)
+  last_success_at           DateTime?
+  last_error_at             DateTime?
+  last_error_code           String?
+  created_at                DateTime             @default(now())
+  updated_at                DateTime             @default(now()) @updatedAt
+
+  @@index([connection_state])
+}
+
+model sj_public_profiles {
+  id                 String            @id @default(uuid())
+  singleton_key      String            @unique @default("BPRS_PUBLIC_PROFILE")
+  current_version_id String?           @unique
+  display_name       String
+  public_slug        String
+  city_regency       String
+  province           String
+  short_description  String
+  logo_media_id      String?
+  website_url        String?
+  state              sj_profile_states @default(DRAFT)
+  aggregate_version  Int               @default(0)
+  lock_version       Int               @default(0)
+  sync_state         sj_sync_states    @default(NOT_QUEUED)
+  created_by         String
+  updated_by         String
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @default(now()) @updatedAt
+
+  current_version sj_public_profile_versions?  @relation("SjProfileCurrentVersion", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions        sj_public_profile_versions[] @relation("SjProfileVersions")
+  logo_media      sj_media_assets?             @relation("SjProfileLogo", fields: [logo_media_id], references: [id], onDelete: SetNull)
+  creator         users                        @relation("SjProfileCreator", fields: [created_by], references: [id])
+  updater         users                        @relation("SjProfileUpdater", fields: [updated_by], references: [id])
+
+  @@index([state])
+  @@index([sync_state])
+  @@index([logo_media_id])
+  @@index([created_by])
+  @@index([updated_by])
+}
+
+model sj_public_profile_versions {
+  id               String             @id @default(uuid())
+  profile_id       String
+  version_number   Int
+  payload_json     Json
+  payload_checksum String
+  state            sj_snapshot_states @default(DRAFT)
+  created_by       String
+  submitted_at     DateTime?
+  approved_by      String?
+  approved_at      DateTime?
+  rejection_reason String?
+  created_at       DateTime           @default(now())
+
+  profile              sj_public_profiles        @relation("SjProfileVersions", fields: [profile_id], references: [id], onDelete: Restrict)
+  current_for_profile  sj_public_profiles?       @relation("SjProfileCurrentVersion")
+  creator              users                     @relation("SjProfileVersionCreator", fields: [created_by], references: [id])
+  approver             users?                    @relation("SjProfileVersionApprover", fields: [approved_by], references: [id], onDelete: SetNull)
+  publication_versions sj_publication_versions[]
+
+  @@unique([profile_id, version_number])
+  @@index([profile_id, state])
+  @@index([created_by])
+  @@index([approved_by])
+}
+
+model sj_whatsapp_contacts {
+  id                 String            @id @default(uuid())
+  label              String
+  phone_e164         String
+  phone_normalized   String
+  current_version_id String?           @unique
+  state              sj_contact_states @default(DRAFT)
+  is_default         Boolean           @default(false)
+  aggregate_version  Int               @default(0)
+  lock_version       Int               @default(0)
+  sync_state         sj_sync_states    @default(NOT_QUEUED)
+  last_verified_at   DateTime?
+  revoked_at         DateTime?
+  created_by         String
+  updated_by         String
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @default(now()) @updatedAt
+
+  current_version sj_whatsapp_contact_versions?  @relation("SjContactCurrentVersion", fields: [current_version_id], references: [id], onDelete: SetNull)
+  versions        sj_whatsapp_contact_versions[] @relation("SjContactVersions")
+  creator         users                          @relation("SjContactCreator", fields: [created_by], references: [id])
+  updater         users                          @relation("SjContactUpdater", fields: [updated_by], references: [id])
+
+  @@unique([phone_normalized])
+  @@index([state])
+  @@index([sync_state])
+  @@index([created_by])
+  @@index([updated_by])
+}
+
+model sj_whatsapp_contact_versions {
+  id                       String             @id @default(uuid())
+  contact_id               String
+  version_number           Int
+  label                    String
+  phone_e164               String
+  message_template_version Int                @default(1)
+  state                    sj_snapshot_states @default(DRAFT)
+  created_by               String
+  submitted_at             DateTime?
+  verified_by              String?
+  verified_at              DateTime?
+  rejection_reason         String?
+  checksum                 String
+  created_at               DateTime           @default(now())
+
+  contact              sj_whatsapp_contacts      @relation("SjContactVersions", fields: [contact_id], references: [id], onDelete: Restrict)
+  current_for_contact  sj_whatsapp_contacts?     @relation("SjContactCurrentVersion")
+  creator              users                     @relation("SjContactVersionCreator", fields: [created_by], references: [id])
+  verifier             users?                    @relation("SjContactVersionVerifier", fields: [verified_by], references: [id], onDelete: SetNull)
+  publication_versions sj_publication_versions[]
+
+  @@unique([contact_id, version_number])
+  @@index([contact_id, state])
+  @@index([created_by])
+  @@index([verified_by])
+}
+
+model sj_publications {
+  id                          String                      @id @default(uuid())
+  public_reference_code       String                      @unique
+  source_type                 sj_publication_source_types
+  source_collateral_id        String?
+  manual_reason               String?
+  manual_evidence_document_id String?
+  owner_division_id           String
+  asset_category              sj_asset_categories
+  current_version_id          String?                     @unique
+  published_version_id        String?                     @unique
+  state                       sj_publication_states       @default(DRAFT)
+  sync_state                  sj_sync_states              @default(NOT_QUEUED)
+  next_reconfirmation_at      DateTime?
+  last_confirmed_at           DateTime?
+  central_publication_id      String?
+  aggregate_version           Int                         @default(0)
+  lock_version                Int                         @default(0)
+  last_sync_error_code        String?
+  created_by                  String
+  updated_by                  String
+  created_at                  DateTime                    @default(now())
+  updated_at                  DateTime                    @default(now()) @updatedAt
+  archived_at                 DateTime?
+
+  source_collateral debtor_collaterals?       @relation(fields: [source_collateral_id], references: [id], onDelete: Restrict)
+  owner_division    divisions                 @relation(fields: [owner_division_id], references: [id], onDelete: Restrict)
+  current_version   sj_publication_versions?  @relation("SjPublicationCurrentVersion", fields: [current_version_id], references: [id], onDelete: SetNull)
+  published_version sj_publication_versions?  @relation("SjPublicationPublishedVersion", fields: [published_version_id], references: [id], onDelete: SetNull)
+  versions          sj_publication_versions[] @relation("SjPublicationVersions")
+  reviews           sj_publication_reviews[]
+  creator           users                     @relation("SjPublicationCreator", fields: [created_by], references: [id])
+  updater           users                     @relation("SjPublicationUpdater", fields: [updated_by], references: [id])
+
+  @@index([state, owner_division_id])
+  @@index([next_reconfirmation_at])
+  @@index([source_collateral_id])
+  @@index([owner_division_id])
+  @@index([sync_state])
+  @@index([created_by])
+  @@index([updated_by])
+}
+
+model sj_publication_versions {
+  id                          String                   @id @default(uuid())
+  publication_id              String
+  version_number              Int
+  taxonomy_version            Int                      @default(1)
+  taxonomy_item_id            String
+  title                       String
+  description                 String
+  city_regency                String
+  province                    String
+  availability                sj_public_availabilities @default(AVAILABLE)
+  whatsapp_contact_version_id String
+  profile_version_id          String
+  public_payload_json         Json
+  payload_checksum            String
+  state                       sj_snapshot_states       @default(DRAFT)
+  last_edited_by              String
+  submitted_by                String?
+  submitted_at                DateTime?
+  approved_by                 String?
+  approved_at                 DateTime?
+  rejection_reason            String?
+  created_at                  DateTime                 @default(now())
+
+  publication               sj_publications                @relation("SjPublicationVersions", fields: [publication_id], references: [id], onDelete: Restrict)
+  current_for_publication   sj_publications?               @relation("SjPublicationCurrentVersion")
+  published_for_publication sj_publications?               @relation("SjPublicationPublishedVersion")
+  whatsapp_contact_version  sj_whatsapp_contact_versions   @relation(fields: [whatsapp_contact_version_id], references: [id], onDelete: Restrict)
+  profile_version           sj_public_profile_versions     @relation(fields: [profile_version_id], references: [id], onDelete: Restrict)
+  editor                    users                          @relation("SjPublicationVersionEditor", fields: [last_edited_by], references: [id])
+  submitter                 users?                         @relation("SjPublicationVersionSubmitter", fields: [submitted_by], references: [id], onDelete: SetNull)
+  approver                  users?                         @relation("SjPublicationVersionApprover", fields: [approved_by], references: [id], onDelete: SetNull)
+  land_detail               sj_land_details?
+  building_detail           sj_building_details?
+  machine_detail            sj_machine_details?
+  vehicle_detail            sj_vehicle_details?
+  media                     sj_publication_version_media[]
+  reviews                   sj_publication_reviews[]
+  taxonomy_item             sj_taxonomy_items              @relation(fields: [taxonomy_item_id], references: [id], onDelete: Restrict)
+
+  @@unique([publication_id, version_number])
+  @@index([publication_id, state])
+  @@index([whatsapp_contact_version_id])
+  @@index([profile_version_id])
+  @@index([taxonomy_item_id])
+  @@index([last_edited_by])
+  @@index([submitted_by])
+  @@index([approved_by])
+}
+
+model sj_land_details {
+  publication_version_id String  @id
+  land_area_m2           Decimal @db.Decimal(14, 2)
+  contour                String?
+  road_access            String?
+
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+}
+
+model sj_building_details {
+  publication_version_id String   @id
+  land_area_m2           Decimal? @db.Decimal(14, 2)
+  building_area_m2       Decimal  @db.Decimal(14, 2)
+  floor_count            Int?
+  public_usage           String?
+
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+}
+
+model sj_machine_details {
+  publication_version_id String  @id
+  brand_or_manufacturer  String?
+  model_or_type          String
+  manufacture_year       Int?
+  public_capacity        String?
+  public_condition       String
+
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+}
+
+model sj_vehicle_details {
+  publication_version_id String   @id
+  brand                  String
+  model_or_type          String
+  manufacture_year       Int?
+  transmission           String?
+  fuel_type              String?
+  mileage_km             Decimal? @db.Decimal(14, 2)
+  public_condition       String
+
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+}
+
+model sj_media_assets {
+  id                         String              @id @default(uuid())
+  owner_division_id          String
+  purpose                    String
+  logical_object_key         String              @unique
+  storage_backend            sj_storage_backends @default(FILESYSTEM)
+  source_file_name_sanitized String
+  detected_mime              String
+  size_bytes                 BigInt
+  width                      Int?
+  height                     Int?
+  sha256                     String
+  state                      sj_media_states     @default(DRAFT)
+  central_media_id           String?
+  upload_session_id          String?
+  rejection_code             String?
+  created_by                 String
+  created_at                 DateTime            @default(now())
+  updated_at                 DateTime            @default(now()) @updatedAt
+  revoked_at                 DateTime?
+
+  owner_division divisions                      @relation(fields: [owner_division_id], references: [id], onDelete: Restrict)
+  creator        users                          @relation("SjMediaCreator", fields: [created_by], references: [id])
+  profile_logo   sj_public_profiles[]           @relation("SjProfileLogo")
+  version_media  sj_publication_version_media[]
+
+  @@index([owner_division_id, state])
+  @@index([central_media_id])
+  @@index([sha256])
+  @@index([created_by])
+}
+
+model sj_publication_version_media {
+  id                     String  @id @default(uuid())
+  publication_version_id String
+  media_asset_id         String
+  sort_order             Int
+  is_cover               Boolean @default(false)
+  alt_text               String
+
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+  media_asset         sj_media_assets         @relation(fields: [media_asset_id], references: [id], onDelete: Restrict)
+
+  @@unique([publication_version_id, media_asset_id])
+  @@unique([publication_version_id, sort_order])
+  @@index([media_asset_id])
+}
+
+model sj_publication_reviews {
+  id                     String            @id @default(uuid())
+  publication_id         String
+  publication_version_id String
+  action                 sj_review_actions
+  reviewer_id            String
+  reason                 String?
+  safe_metadata          Json?
+  created_at             DateTime          @default(now())
+
+  publication         sj_publications         @relation(fields: [publication_id], references: [id], onDelete: Restrict)
+  publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
+  reviewer            users                   @relation("SjPublicationReviewer", fields: [reviewer_id], references: [id])
+
+  @@index([publication_id, created_at])
+  @@index([publication_version_id])
+  @@index([reviewer_id, created_at])
+}
+
+model sj_sync_outbox {
+  id                String         @id @default(uuid())
+  event_id          String         @unique
+  aggregate_type    String
+  aggregate_id      String
+  aggregate_version Int
+  event_type        String
+  schema_version    Int            @default(1)
+  payload_json      Json
+  payload_checksum  String
+  state             sj_sync_states @default(QUEUED)
+  priority          Int            @default(100)
+  available_at      DateTime       @default(now())
+  attempt_count     Int            @default(0)
+  last_error_code   String?
+  locked_at         DateTime?
+  locked_by         String?
+  created_at        DateTime       @default(now())
+  acknowledged_at   DateTime?
+
+  attempts sj_sync_attempts[]
+
+  @@unique([aggregate_id, aggregate_version, event_type])
+  @@index([state, available_at, priority])
+  @@index([aggregate_id, aggregate_version])
+}
+
+model sj_sync_attempts {
+  id             String    @id @default(uuid())
+  outbox_id      String
+  attempt_number Int
+  started_at     DateTime  @default(now())
+  finished_at    DateTime?
+  result         String
+  http_status    Int?
+  error_code     String?
+  request_id     String?
+
+  outbox sj_sync_outbox @relation(fields: [outbox_id], references: [id], onDelete: Restrict)
+
+  @@unique([outbox_id, attempt_number])
+  @@index([outbox_id, started_at])
+}
+
+model sj_reconciliation_runs {
+  id                        String                   @id @default(uuid())
+  initiated_by_type         String
+  initiated_by              String?
+  state                     sj_reconciliation_states @default(PENDING)
+  local_manifest_checksum   String
+  central_manifest_checksum String?
+  count_checked             Int                      @default(0)
+  count_mismatch            Int                      @default(0)
+  safe_report_json          Json?
+  started_at                DateTime                 @default(now())
+  finished_at               DateTime?
+
+  @@index([state, started_at])
+}
+
+model sj_taxonomy_versions {
+  id                 String   @id @default(uuid())
+  version            Int      @unique
+  checksum           String
+  signature_metadata Json
+  valid_from         DateTime
+  fetched_at         DateTime @default(now())
+  is_active          Boolean  @default(false)
+
+  items sj_taxonomy_items[]
+
+  @@index([is_active])
+}
+
+model sj_taxonomy_items {
+  id                    String              @id @default(uuid())
+  taxonomy_version      Int
+  code                  String
+  parent_code           String?
+  category              sj_asset_categories
+  label_id              String
+  required_field_schema Json
+  is_active             Boolean             @default(true)
+
+  taxonomy             sj_taxonomy_versions      @relation(fields: [taxonomy_version], references: [version], onDelete: Restrict)
+  publication_versions sj_publication_versions[]
+
+  @@unique([taxonomy_version, code])
+  @@index([category, is_active])
 }
 
 model legal_claims {

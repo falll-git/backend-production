@@ -1,6 +1,7 @@
 const { Client } = require("pg");
 
 const CI_RUNTIME_ROLE = "ruwang_arsip_app";
+const CI_SEPUTAR_JAMINAN_WORKER_ROLE = "ruwang_sj_worker";
 
 function assertSafeCiMigrationDatabase(env = process.env) {
   if (String(env.CI || "").trim().toLowerCase() !== "true") {
@@ -44,7 +45,7 @@ async function provisionCiRuntimeRole(env = process.env, ClientClass = Client) {
   await client.connect();
   try {
     await client.query(`
-      DO $provision_ci_runtime_role$
+      DO $provision_ci_runtime_roles$
       BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM pg_roles WHERE rolname = '${CI_RUNTIME_ROLE}'
@@ -57,8 +58,21 @@ async function provisionCiRuntimeRole(env = process.env, ClientClass = Client) {
             NOCREATEROLE
             NOINHERIT;
         END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_roles
+          WHERE rolname = '${CI_SEPUTAR_JAMINAN_WORKER_ROLE}'
+        ) THEN
+          CREATE ROLE ${CI_SEPUTAR_JAMINAN_WORKER_ROLE}
+            NOLOGIN
+            NOSUPERUSER
+            NOBYPASSRLS
+            NOCREATEDB
+            NOCREATEROLE
+            NOINHERIT;
+        END IF;
       END
-      $provision_ci_runtime_role$;
+      $provision_ci_runtime_roles$;
     `);
   } finally {
     await client.end();
@@ -67,6 +81,7 @@ async function provisionCiRuntimeRole(env = process.env, ClientClass = Client) {
   return {
     database_name: database.databaseName,
     runtime_role: CI_RUNTIME_ROLE,
+    worker_role: CI_SEPUTAR_JAMINAN_WORKER_ROLE,
   };
 }
 
@@ -89,6 +104,7 @@ if (require.main === module) {
 
 module.exports = {
   CI_RUNTIME_ROLE,
+  CI_SEPUTAR_JAMINAN_WORKER_ROLE,
   assertSafeCiMigrationDatabase,
   provisionCiRuntimeRole,
 };

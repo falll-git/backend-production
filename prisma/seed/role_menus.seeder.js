@@ -10,6 +10,15 @@ const {
   REPORT_ALL_FEATURE,
   REVOKE_FEATURE,
   RETURN_FEATURE,
+  SJ_ARCHIVE_FEATURE,
+  SJ_CONTACT_VERIFY_FEATURE,
+  SJ_MANAGE_ALL_FEATURE,
+  SJ_PROFILE_VERIFY_FEATURE,
+  SJ_PUBLISH_FEATURE,
+  SJ_RECONFIRM_FEATURE,
+  SJ_REVIEW_FEATURE,
+  SJ_SYNC_RETRY_FEATURE,
+  SJ_UNPUBLISH_FEATURE,
   VIEW_DIVISION_FEATURE,
   getMenuCapabilities,
   getMenuFeatures,
@@ -24,6 +33,11 @@ const URLS = {
   dashboard: DASHBOARD_URL,
   accountSecurity: "/dashboard/account/security",
   storageUsage: "/dashboard/storage-usage",
+  seputarJaminan: "/dashboard/seputar-jaminan",
+  seputarJaminanCatalog: "/dashboard/seputar-jaminan/katalog",
+  seputarJaminanReview: "/dashboard/seputar-jaminan/pemeriksaan",
+  seputarJaminanProfileContact:
+    "/dashboard/seputar-jaminan/profil-kontak",
 
   archiveInput: "/dashboard/arsip-digital/input-dokumen",
   archiveStorage: "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan",
@@ -204,6 +218,33 @@ const ROLE_MENU_POLICIES = {
     { url: URLS.accountSecurity, permissions: ["read"] },
     { url: URLS.storageUsage, permissions: ["read"] },
     { url: URLS.activityCentre, permissions: ["read"] },
+    {
+      url: URLS.seputarJaminan,
+      permissions: ["create", "read", "update", "delete"],
+      features: [
+        SJ_REVIEW_FEATURE,
+        SJ_PUBLISH_FEATURE,
+        SJ_UNPUBLISH_FEATURE,
+        SJ_ARCHIVE_FEATURE,
+        SJ_RECONFIRM_FEATURE,
+        SJ_CONTACT_VERIFY_FEATURE,
+        SJ_PROFILE_VERIFY_FEATURE,
+        SJ_SYNC_RETRY_FEATURE,
+        SJ_MANAGE_ALL_FEATURE,
+      ],
+    },
+    {
+      url: URLS.seputarJaminanCatalog,
+      permissions: ["create", "read", "update", "delete"],
+    },
+    {
+      url: URLS.seputarJaminanReview,
+      permissions: ["read", "update"],
+    },
+    {
+      url: URLS.seputarJaminanProfileContact,
+      permissions: ["create", "read", "update", "delete"],
+    },
 
     ...CORE_PARAMETER_URLS.map((url) => ({
       url,

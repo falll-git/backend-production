@@ -3,10 +3,18 @@ const test = require("node:test");
 const {
   MANDATORY_RLS_TABLES,
   RLS_TABLE_EXEMPTIONS,
+  RUNTIME_CALLABLE_HELPER_PREDICATE,
   evaluateDatabaseSecurity,
   evaluateDatabaseSystemSecurity,
   parseRequiredRlsTables,
 } = require("./database-security");
+
+test("pemeriksaan izin runtime mengecualikan fungsi trigger internal", () => {
+  assert.equal(
+    RUNTIME_CALLABLE_HELPER_PREDICATE,
+    "helper.prorettype <> 'pg_catalog.trigger'::regtype",
+  );
+});
 
 function report(overrides = {}) {
   return {

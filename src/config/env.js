@@ -10,6 +10,7 @@ const FILE_BACKED_ENV_KEYS = Object.freeze([
   "DATABASE_URL",
   "DATABASE_SYSTEM_URL",
   "MIGRATION_DATABASE_URL",
+  "SJ_WORKER_DATABASE_URL",
   "REDIS_URL",
   "JOB_QUEUE_REDIS_URL",
   "RATE_LIMIT_REDIS_URL",
@@ -19,6 +20,9 @@ const FILE_BACKED_ENV_KEYS = Object.freeze([
   "FILE_ACCESS_SECRET",
   "RATE_LIMIT_KEY_SECRET",
   "RESEND_API_KEY",
+  "SJ_INTEGRATION_PRIVATE_KEY",
+  "SJ_MEDIA_S3_ACCESS_KEY_ID",
+  "SJ_MEDIA_S3_SECRET_ACCESS_KEY",
 ]);
 const MAX_FILE_BACKED_ENV_BYTES = 64 * 1024;
 
@@ -607,6 +611,23 @@ function validateEnv() {
     }
     requireEnv("RESEND_API_KEY", errors);
     requireEnv("RESEND_FROM_EMAIL", errors);
+    requireEnv("SJ_WORKER_DATABASE_URL", errors);
+    requireEnv("SJ_INTEGRATION_PRIVATE_KEY", errors);
+    requireEnv("SJ_MEDIA_STORAGE_PROVIDER", errors);
+    requireEnv("SJ_OUTBOX_POLL_INTERVAL_MS", errors);
+    requireEnv("SJ_OUTBOX_BATCH_SIZE", errors);
+    if (readEnv("SJ_MEDIA_STORAGE_PROVIDER").toUpperCase() === "FILESYSTEM") {
+      validateAbsolutePathEnv("SJ_MEDIA_FILESYSTEM_ROOT", errors);
+    }
+    if (readEnv("SJ_MEDIA_STORAGE_PROVIDER").toUpperCase() === "S3_COMPATIBLE") {
+      [
+        "SJ_MEDIA_S3_ENDPOINT",
+        "SJ_MEDIA_S3_REGION",
+        "SJ_MEDIA_S3_BUCKET",
+        "SJ_MEDIA_S3_ACCESS_KEY_ID",
+        "SJ_MEDIA_S3_SECRET_ACCESS_KEY",
+      ].forEach((key) => requireEnv(key, errors));
+    }
   }
 
   validateOptionalInstanceKey("APP_INSTANCE_KEY", errors);
@@ -688,6 +709,14 @@ function validateEnv() {
   validateOptionalPositiveInt("WATERMARK_WORKER_POLL_INTERVAL_MS", errors);
   validateOptionalPositiveInt("WATERMARK_WORKER_BATCH_SIZE", errors);
   validateOptionalPositiveInt("WATERMARK_PROCESSING_STALE_MS", errors);
+  validateOptionalEnum(
+    "SJ_MEDIA_STORAGE_PROVIDER",
+    ["filesystem", "s3_compatible"],
+    errors,
+  );
+  validateOptionalPositiveInt("SJ_OUTBOX_POLL_INTERVAL_MS", errors);
+  validateOptionalPositiveInt("SJ_OUTBOX_BATCH_SIZE", errors);
+  validateOptionalPositiveInt("SJ_MEDIA_UPLOAD_TTL_SECONDS", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_WORKER_CONCURRENCY", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_MAX_FILE_SIZE_MB", errors);
   validateOptionalPositiveInt("SLIK_IMPORT_MAX_TOTAL_SIZE_MB", errors);
@@ -765,7 +794,7 @@ function validateEnv() {
   validateOptionalPositiveIntList("RETENTION_REPORT_BUCKET_DAYS", errors);
   validateOptionalEnum(
     "RUNTIME_ROLE",
-    ["api", "slik-import-worker", "watermark-worker"],
+    ["api", "slik-import-worker", "watermark-worker", "seputar-jaminan-worker"],
     errors,
   );
 

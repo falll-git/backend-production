@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/whatsapp-contact.schema.json",
+  "title": "Kontak WhatsApp Terverifikasi V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "whatsapp_contact_id",
+    "institution_id",
+    "phone_e164",
+    "status",
+    "template_version",
+    "verified_at"
+  ],
+  "properties": {
+    "whatsapp_contact_id": { "type": "string", "format": "uuid" },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "phone_e164": { "type": "string", "pattern": "^\\+[1-9][0-9]{7,14}$" },
+    "status": { "const": "VERIFIED" },
+    "template_version": { "type": "integer", "minimum": 1 },
+    "verified_at": { "type": "string", "format": "date-time" }
+  }
+}

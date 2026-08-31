@@ -37,6 +37,7 @@ const legalRoutes = require("../modules/legal/legal.route");
 const notificationRoutes = require("../modules/notifications/notifications.route");
 const activityCentreRoutes = require("../modules/activity-centre/activityCentre.route");
 const clientErrorRoutes = require("../modules/client-errors/clientErrors.route");
+const seputarJaminanRoutes = require("../modules/seputar-jaminan/seputarJaminan.route");
 
 const API_MODULES = Object.freeze([
   { path: "/auth", tag: "Authentication", router: authRoutes },
@@ -82,6 +83,7 @@ const API_MODULES = Object.freeze([
   { path: "/notifications", tag: "Notifications", router: notificationRoutes },
   { path: "/activity-centre", tag: "Activity centre", router: activityCentreRoutes },
   { path: "/client-errors", tag: "Client error reporting", router: clientErrorRoutes },
+  { path: "/seputar-jaminan", tag: "Seputar Jaminan", router: seputarJaminanRoutes },
 ]);
 
 module.exports = API_MODULES;

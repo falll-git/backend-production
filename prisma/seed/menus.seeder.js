@@ -400,15 +400,41 @@ const menuTree = [
     ],
   },
   {
+    name: "Seputar Jaminan",
+    url: "/dashboard/seputar-jaminan",
+    icon: "lucide lucide-store",
+    order: 6,
+    children: [
+      {
+        name: "Katalog Aset",
+        url: "/dashboard/seputar-jaminan/katalog",
+        icon: "lucide lucide-layout-grid",
+        order: 1,
+      },
+      {
+        name: "Pemeriksaan",
+        url: "/dashboard/seputar-jaminan/pemeriksaan",
+        icon: "lucide lucide-badge-check",
+        order: 2,
+      },
+      {
+        name: "Profil & Kontak",
+        url: "/dashboard/seputar-jaminan/profil-kontak",
+        icon: "lucide lucide-building-2",
+        order: 3,
+      },
+    ],
+  },
+  {
     name: "Pusat Log Aktivitas",
     url: "/dashboard/activity-centre",
     icon: "lucide lucide-activity",
-    order: 6,
+    order: 7,
   },
   {
     name: "Parameter",
     icon: "lucide lucide-settings",
-    order: 7,
+    order: 8,
     children: [
       {
         name: "Admin Sistem",

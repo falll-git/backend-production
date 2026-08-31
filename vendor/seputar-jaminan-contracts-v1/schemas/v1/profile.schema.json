@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/profile.schema.json",
+  "title": "Profil BPRS Publik V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "institution_id",
+    "public_name",
+    "public_mark",
+    "short_description",
+    "office_city_regency",
+    "office_province",
+    "profile_updated_at"
+  ],
+  "properties": {
+    "institution_id": { "type": "string", "format": "uuid" },
+    "public_name": { "type": "string", "minLength": 1 },
+    "public_mark": { "type": "string", "format": "uuid" },
+    "short_description": { "type": "string", "minLength": 1 },
+    "office_city_regency": { "type": "string", "minLength": 1 },
+    "office_province": { "type": "string", "minLength": 1 },
+    "profile_updated_at": { "type": "string", "format": "date-time" }
+  }
+}

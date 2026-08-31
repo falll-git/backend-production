@@ -22,6 +22,18 @@ test("API v1 menjadi kontrak utama tanpa header deprecated", async () => {
   assert.equal(response.body.data.documentation, "/api/v1/docs/");
 });
 
+test("modul Seputar Jaminan tidak menggandakan segmen versi API", async () => {
+  const canonical = await request(app).get(
+    "/api/v1/seputar-jaminan/dashboard",
+  );
+  const duplicated = await request(app).get(
+    "/api/v1/v1/seputar-jaminan/dashboard",
+  );
+
+  assert.equal(canonical.statusCode, 401);
+  assert.equal(duplicated.statusCode, 404);
+});
+
 test("jalur /api lama tetap kompatibel dan menunjukkan successor version", async () => {
   const response = await request(app).get("/api/").expect(200);
 

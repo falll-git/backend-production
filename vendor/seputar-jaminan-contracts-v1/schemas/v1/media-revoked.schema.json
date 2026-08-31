@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/media-revoked.schema.json",
+  "title": "Media Dicabut V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["media_id", "institution_id", "reason_code", "revoked_at"],
+  "properties": {
+    "media_id": { "type": "string", "format": "uuid" },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "revoked_at": { "type": "string", "format": "date-time" }
+  }
+}

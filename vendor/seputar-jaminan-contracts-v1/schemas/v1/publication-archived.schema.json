@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/publication-archived.schema.json",
+  "title": "Publikasi Diarsipkan V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["publication_id", "institution_id", "archived_at"],
+  "properties": {
+    "publication_id": { "type": "string", "format": "uuid" },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "archived_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -36,6 +36,15 @@ const REJECT_FEATURE = "reject";
 const REVOKE_FEATURE = "revoke";
 const HANDOVER_FEATURE = "handover";
 const RETURN_FEATURE = "return";
+const SJ_REVIEW_FEATURE = "sj_review";
+const SJ_PUBLISH_FEATURE = "sj_publish";
+const SJ_UNPUBLISH_FEATURE = "sj_unpublish";
+const SJ_ARCHIVE_FEATURE = "sj_archive";
+const SJ_RECONFIRM_FEATURE = "sj_reconfirm";
+const SJ_CONTACT_VERIFY_FEATURE = "sj_contact_verify";
+const SJ_PROFILE_VERIFY_FEATURE = "sj_profile_verify";
+const SJ_SYNC_RETRY_FEATURE = "sj_sync_retry";
+const SJ_MANAGE_ALL_FEATURE = "sj_manage_all";
 const LEGAL_DEPOSIT_MENU_URL_BY_TYPE = {
   NOTARIS: "/dashboard/legal/titipan/notaris",
   ASURANSI: "/dashboard/legal/titipan/asuransi",
@@ -54,12 +63,26 @@ const FEATURE_LABELS = {
   [REVOKE_FEATURE]: "Cabut Akses",
   [HANDOVER_FEATURE]: "Serahkan",
   [RETURN_FEATURE]: "Kembalikan",
+  [SJ_REVIEW_FEATURE]: "Periksa Publikasi",
+  [SJ_PUBLISH_FEATURE]: "Terbitkan Publikasi",
+  [SJ_UNPUBLISH_FEATURE]: "Turunkan Publikasi",
+  [SJ_ARCHIVE_FEATURE]: "Arsipkan Publikasi",
+  [SJ_RECONFIRM_FEATURE]: "Konfirmasi Ketersediaan",
+  [SJ_CONTACT_VERIFY_FEATURE]: "Verifikasi Kontak WhatsApp",
+  [SJ_PROFILE_VERIFY_FEATURE]: "Verifikasi Profil BPRS",
+  [SJ_SYNC_RETRY_FEATURE]: "Ulangi Sinkronisasi",
+  [SJ_MANAGE_ALL_FEATURE]: "Kelola Semua Divisi",
 };
 
 const MENU_CAPABILITIES = {
   "/dashboard": READ_ONLY,
   "/dashboard/storage-usage": READ_ONLY,
   "/dashboard/account/security": READ_ONLY,
+
+  "/dashboard/seputar-jaminan": CRUD,
+  "/dashboard/seputar-jaminan/katalog": CRUD,
+  "/dashboard/seputar-jaminan/pemeriksaan": READ_UPDATE,
+  "/dashboard/seputar-jaminan/profil-kontak": CRUD,
 
   "/dashboard/arsip-digital/input-dokumen": READ_CREATE,
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan": READ_ONLY,
@@ -131,6 +154,17 @@ const MENU_CAPABILITIES = {
 };
 
 const MENU_FEATURES = {
+  "/dashboard/seputar-jaminan": [
+    SJ_REVIEW_FEATURE,
+    SJ_PUBLISH_FEATURE,
+    SJ_UNPUBLISH_FEATURE,
+    SJ_ARCHIVE_FEATURE,
+    SJ_RECONFIRM_FEATURE,
+    SJ_CONTACT_VERIFY_FEATURE,
+    SJ_PROFILE_VERIFY_FEATURE,
+    SJ_SYNC_RETRY_FEATURE,
+    SJ_MANAGE_ALL_FEATURE,
+  ],
   "/dashboard/arsip-digital/input-dokumen": [
     VIEW_DIVISION_FEATURE,
     MANAGE_ALL_FEATURE,
@@ -453,6 +487,15 @@ module.exports = {
   REPORT_ALL_FEATURE,
   REVOKE_FEATURE,
   RETURN_FEATURE,
+  SJ_ARCHIVE_FEATURE,
+  SJ_CONTACT_VERIFY_FEATURE,
+  SJ_MANAGE_ALL_FEATURE,
+  SJ_PROFILE_VERIFY_FEATURE,
+  SJ_PUBLISH_FEATURE,
+  SJ_RECONFIRM_FEATURE,
+  SJ_REVIEW_FEATURE,
+  SJ_SYNC_RETRY_FEATURE,
+  SJ_UNPUBLISH_FEATURE,
   VIEW_DIVISION_FEATURE,
   assertMenuFeaturesAllowed,
   assertMenuPermissionAllowed,

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/whatsapp-contact-revoked.schema.json",
+  "title": "Pencabutan Kontak WhatsApp V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "whatsapp_contact_id",
+    "institution_id",
+    "status",
+    "reason_code",
+    "revoked_at"
+  ],
+  "properties": {
+    "whatsapp_contact_id": { "type": "string", "format": "uuid" },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "status": { "const": "REVOKED" },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "revoked_at": { "type": "string", "format": "date-time" }
+  }
+}

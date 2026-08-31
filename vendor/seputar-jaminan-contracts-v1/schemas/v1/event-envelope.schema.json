@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/event-envelope.schema.json",
+  "title": "Envelope Event Integrasi V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "schema_version",
+    "event_type",
+    "institution_id",
+    "aggregate_id",
+    "aggregate_version",
+    "occurred_at",
+    "payload_checksum",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "schema_version": { "const": 1 },
+    "event_type": {
+      "enum": [
+        "UPSERT_BPRS_PROFILE",
+        "UPSERT_WHATSAPP_CONTACT",
+        "REVOKE_WHATSAPP_CONTACT",
+        "UPSERT_PUBLICATION_SNAPSHOT",
+        "UNPUBLISH_PUBLICATION",
+        "ARCHIVE_PUBLICATION",
+        "REVOKE_MEDIA"
+      ]
+    },
+    "institution_id": { "type": "string", "format": "uuid" },
+    "aggregate_id": { "type": "string", "format": "uuid" },
+    "aggregate_version": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "payload_checksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "payload": { "type": "object" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "event_type": { "const": "UPSERT_BPRS_PROFILE" },
+        "payload": { "$ref": "profile.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "UPSERT_WHATSAPP_CONTACT" },
+        "payload": { "$ref": "whatsapp-contact.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "REVOKE_WHATSAPP_CONTACT" },
+        "payload": { "$ref": "whatsapp-contact-revoked.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "UPSERT_PUBLICATION_SNAPSHOT" },
+        "payload": { "$ref": "publication-snapshot.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "UNPUBLISH_PUBLICATION" },
+        "payload": { "$ref": "publication-unpublished.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "ARCHIVE_PUBLICATION" },
+        "payload": { "$ref": "publication-archived.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "REVOKE_MEDIA" },
+        "payload": { "$ref": "media-revoked.schema.json" }
+      }
+    }
+  ]
+}
