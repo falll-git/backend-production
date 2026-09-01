@@ -17,7 +17,7 @@ const {
 
 const ROLE_NAMES = ["Admin", "Staf", "Supervisor", "Manager"];
 const EXPECTED_ROUTE_COUNTS = {
-  Admin: 61,
+  Admin: 65,
   Staf: 36,
   Supervisor: 35,
   Manager: 36,
@@ -204,7 +204,7 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
   const roleNames = resolveRoleNames();
 
   try {
-    expect(staticRoutes.size).toBe(61);
+    expect(staticRoutes.size).toBe(65);
 
     const [roles, division] = await Promise.all([
       prisma.roles.findMany({
