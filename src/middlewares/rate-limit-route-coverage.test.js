@@ -18,6 +18,7 @@ const incomingMailRouter = require("../modules/incoming-mail/incomingMail.route"
 const legalRouter = require("../modules/legal/legal.route");
 const memorandumRouter = require("../modules/memorandum/memorandum.route");
 const outgoingMailsRouter = require("../modules/outgoing-mails/outgoingMails.route");
+const seputarJaminanRouter = require("../modules/seputar-jaminan/seputarJaminan.route");
 const watermarkSettingsRouter = require("../modules/watermark-settings/watermarkSettings.route");
 const clientErrorsRouter = require("../modules/client-errors/clientErrors.route");
 
@@ -119,6 +120,11 @@ test("seluruh endpoint parser file memiliki profile upload", () => {
   for (const [router, method, path] of routes) {
     assertProfiles(router, method, path, ["upload"]);
   }
+});
+
+test("endpoint Seputar Jaminan berbiaya tinggi memiliki limiter khusus", () => {
+  assertProfiles(seputarJaminanRouter, "post", "/media", ["upload"]);
+  assertProfiles(seputarJaminanRouter, "post", "/reconciliation", ["report"]);
 });
 
 test("operasi watermark massal memiliki profile operasi berat", () => {

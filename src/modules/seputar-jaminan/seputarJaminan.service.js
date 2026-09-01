@@ -47,10 +47,9 @@ const publicationInclude = Object.freeze({
 });
 
 function newPublicReferenceCode() {
-  const bytes = crypto.randomBytes(8);
   let value = "";
   for (let index = 0; index < 8; index += 1) {
-    value += PUBLIC_CODE_ALPHABET[bytes[index] % PUBLIC_CODE_ALPHABET.length];
+    value += PUBLIC_CODE_ALPHABET[crypto.randomInt(PUBLIC_CODE_ALPHABET.length)];
   }
   return `SJ-${value}`;
 }
