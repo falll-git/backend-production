@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -209,6 +210,31 @@ test("release ID dan deploy root tidak dapat keluar dari batas aman", () => {
       /filesystem root/,
     );
   } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("preflight memvalidasi dan menghitung checksum dari file descriptor yang sama", (context) => {
+  const { parent, deployRoot } = createDisposableDeployRoot();
+  try {
+    const { applicationPreflightReportPath } = createRelease(deployRoot, "release-a1", "a");
+    const original = fs.readFileSync(applicationPreflightReportPath);
+    const readFile = fs.readFileSync;
+    let descriptorReads = 0;
+    context.mock.method(fs, "readFileSync", function (filename, ...options) {
+      const content = readFile.call(fs, filename, ...options);
+      if (typeof filename === "number") {
+        descriptorReads += 1;
+        fs.writeFileSync(applicationPreflightReportPath, '{"status":"failed"}');
+      }
+      return content;
+    });
+    const marker = runAtomicPreflight({ deployRoot, releaseId: "release-a1", applicationPreflightReportPath });
+    assert.equal(descriptorReads, 1);
+    assert.equal(marker.application_preflight_sha256, crypto.createHash("sha256").update(original).digest("hex"));
+    assert.throws(() => activateRelease({ deployRoot, releaseId: "release-a1" }), /belum menyatakan seluruh check lulus/);
+  } finally {
+    context.mock.restoreAll();
     fs.rmSync(parent, { recursive: true, force: true });
   }
 });

@@ -69,3 +69,21 @@ test("renderer Nginx menolak domain, path, port, dan overwrite yang tidak aman",
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test("file yang muncul selama render tidak dapat ditimpa", (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "ruwang-nginx-race-"));
+  const outputPath = path.join(temporaryDirectory, "demo.conf");
+  const readFile = fs.readFileSync;
+  try {
+    context.mock.method(fs, "readFileSync", function (filename, ...options) {
+      const source = readFile.call(fs, filename, ...options);
+      if (filename === DEFAULT_TEMPLATE_PATH) fs.writeFileSync(outputPath, "existing-config", { flag: "wx" });
+      return source;
+    });
+    assert.throws(() => renderNginxConfigFile({ outputPath, ...validValues() }), /tidak boleh ditimpa/);
+    assert.equal(readFile(outputPath, "utf8"), "existing-config");
+  } finally {
+    context.mock.restoreAll();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});

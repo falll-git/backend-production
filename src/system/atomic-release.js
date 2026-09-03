@@ -297,10 +297,23 @@ function verifyApplicationPreflightReport(
   ) {
     throw new Error("Application preflight report wajib berada di dalam release target.");
   }
-  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-    throw new Error("Application preflight report tidak ditemukan.");
+  let descriptor;
+  let content;
+  try {
+    descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    if (!fs.fstatSync(descriptor).isFile()) {
+      throw new Error("Application preflight report wajib berupa file biasa.");
+    }
+    content = fs.readFileSync(descriptor);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error("Application preflight report tidak ditemukan.", { cause: error });
+    }
+    throw error;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
-  const report = JSON.parse(fs.readFileSync(resolved, "utf8"));
+  const report = JSON.parse(content.toString("utf8"));
   if (
     report?.schema_version !== 1 ||
     report?.kind !== "preflight" ||
@@ -316,7 +329,7 @@ function verifyApplicationPreflightReport(
   return {
     path: resolved,
     relative_path: relative.split(path.sep).join("/"),
-    sha256: sha256File(resolved),
+    sha256: crypto.createHash("sha256").update(content).digest("hex"),
   };
 }
 

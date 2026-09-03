@@ -95,15 +95,19 @@ function renderNginxConfigFile({
     throw new Error("Output Nginx wajib berupa absolute path.");
   }
   const resolvedOutput = path.resolve(output);
-  if (fs.existsSync(resolvedOutput)) {
-    throw new Error("Output Nginx sudah ada dan tidak boleh ditimpa.");
-  }
   const rendered = renderNginxTemplate({
     templateSource: fs.readFileSync(path.resolve(templatePath), "utf8"),
     ...values,
   });
   fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
-  fs.writeFileSync(resolvedOutput, rendered, { encoding: "utf8", mode: 0o644 });
+  try {
+    fs.writeFileSync(resolvedOutput, rendered, { encoding: "utf8", mode: 0o644, flag: "wx" });
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      throw new Error("Output Nginx sudah ada dan tidak boleh ditimpa.", { cause: error });
+    }
+    throw error;
+  }
   return { output_path: resolvedOutput, bytes: Buffer.byteLength(rendered) };
 }
 
