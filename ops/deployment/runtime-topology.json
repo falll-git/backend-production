@@ -6,8 +6,10 @@
   },
   "orchestration": {
     "managed_on_vps": true,
-    "implementation": "vps-choice-pending",
-    "automatic_deployment": false
+    "implementation": "pm2-manual-atomic",
+    "deployment_strategy": "manual-atomic-symlink",
+    "automatic_deployment": false,
+    "approval_required": true
   },
   "recovery": {
     "startup_job_recovery_required": true,
@@ -47,6 +49,14 @@
       "repository": "backend",
       "package_script": "worker:watermark",
       "runtime_role": "watermark-worker",
+      "required": true,
+      "minimum_instances": 1
+    },
+    {
+      "id": "seputar-jaminan-worker",
+      "repository": "backend",
+      "package_script": "worker:seputar-jaminan",
+      "runtime_role": "seputar-jaminan-worker",
       "required": true,
       "minimum_instances": 1
     }
@@ -110,9 +120,33 @@
       "automatic": false
     },
     {
+      "id": "release-manifest",
+      "repository": "backend",
+      "package_script": "release:atomic:manifest",
+      "automatic": false
+    },
+    {
+      "id": "atomic-preflight",
+      "repository": "backend",
+      "package_script": "release:atomic:preflight",
+      "automatic": false
+    },
+    {
+      "id": "atomic-symlink-switch",
+      "repository": "backend",
+      "package_script": "release:atomic:switch",
+      "automatic": false
+    },
+    {
       "id": "process-start-or-restart",
       "repository": "vps",
       "package_script": null,
+      "automatic": false
+    },
+    {
+      "id": "pm2-process-verification",
+      "repository": "backend",
+      "package_script": "release:pm2:verify",
       "automatic": false
     },
     {
@@ -124,6 +158,7 @@
   ],
   "required_environment": [
     "NODE_ENV",
+    "DEPLOY_RELEASE_ID",
     "RUNTIME_ROLE",
     "APP_INSTANCE_KEY",
     "DATABASE_URL",

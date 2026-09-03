@@ -204,6 +204,8 @@ function createReleaseEnvironment(
     FULLSTACK_FRONTEND_URL: frontendUrl,
     FULLSTACK_REUSE_FRONTEND_BUILD: "true",
     NEXT_PUBLIC_API_URL: backendApiUrl,
+    RUWANG_API_HOSTNAME: backendApiTarget.hostname,
+    RUWANG_ALLOW_LOOPBACK_API: "true",
     PLAYWRIGHT_BASE_URL: frontendUrl,
     QUALITY_GATE_FRONTEND_PORT: String(resolveUrlPort(frontendTarget)),
   };

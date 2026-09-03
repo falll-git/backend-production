@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "strategy": "manual-atomic-symlink",
+  "production_platform": "linux",
+  "automatic_deployment": false,
+  "approval_required": true,
+  "paths": {
+    "releases": "releases",
+    "shared": "shared",
+    "current": "current",
+    "backend_component": "backend",
+    "frontend_component": "frontend",
+    "manifest": "release-manifest.json",
+    "preflight_marker": ".atomic-preflight.json"
+  },
+  "shared_paths": [
+    "env/backend.env",
+    "env/frontend.env",
+    "logs",
+    "reports",
+    "uploads",
+    "seputar-jaminan-public"
+  ],
+  "activation_requirements": [
+    "release-manifest-checksum-valid",
+    "frontend-production-build-present",
+    "prisma-migrations-present",
+    "application-production-preflight-passed",
+    "manual-approval-recorded"
+  ],
+  "post_activation_checks": [
+    "pm2-five-processes-online",
+    "api-health-ready",
+    "frontend-http-ok"
+  ],
+  "rollback": {
+    "scope": "application-release-only",
+    "database_migrations": "forward-only",
+    "requires_explicit_current_release": true,
+    "deletes_release": false
+  }
+}

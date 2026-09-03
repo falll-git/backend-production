@@ -1,0 +1,137 @@
+const path = require("node:path");
+
+function requireValue(key) {
+  const value = String(process.env[key] || "").trim();
+  if (!value || value.includes("<") || value.includes(">")) {
+    throw new Error(`${key} wajib diisi sebelum PM2 dijalankan.`);
+  }
+  return value;
+}
+
+function requireAbsolutePath(key) {
+  const value = requireValue(key);
+  if (!path.isAbsolute(value)) throw new Error(`${key} wajib absolute path.`);
+  return path.resolve(value);
+}
+
+function requirePort(key) {
+  const value = Number(requireValue(key));
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${key} wajib berupa port 1-65535.`);
+  }
+  return value;
+}
+
+const deployRoot = requireAbsolutePath("RUWANG_DEPLOY_ROOT");
+const instance = requireValue("RUWANG_INSTANCE");
+if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(instance)) {
+  throw new Error("RUWANG_INSTANCE wajib berupa slug aman.");
+}
+const frontendPort = requirePort("RUWANG_FRONTEND_PORT");
+const apiPort = requirePort("RUWANG_API_PORT");
+if (frontendPort === apiPort) throw new Error("Port frontend dan API wajib berbeda.");
+const deployCommitSha = requireValue("DEPLOY_COMMIT_SHA").toLowerCase();
+if (!/^[0-9a-f]{40}$/.test(deployCommitSha)) {
+  throw new Error("DEPLOY_COMMIT_SHA wajib berupa full commit SHA 40 karakter.");
+}
+
+const current = path.join(deployRoot, "current");
+const backend = path.join(current, "backend");
+const frontend = path.join(current, "frontend");
+const shared = path.join(deployRoot, "shared");
+const backendEnv = path.join(shared, "env", "backend.env");
+const frontendEnv = path.join(shared, "env", "frontend.env");
+const node = process.execPath;
+
+function processConfig({
+  id,
+  cwd,
+  envFile,
+  entrypoint,
+  args = [],
+  runtimeRole,
+  extraEnv = {},
+}) {
+  return {
+    name: `${instance}-${id}`,
+    cwd,
+    script: node,
+    args: [`--env-file=${envFile}`, entrypoint, ...args],
+    interpreter: "none",
+    exec_mode: "fork",
+    instances: 1,
+    autorestart: true,
+    restart_delay: 2000,
+    min_uptime: "10s",
+    max_restarts: 10,
+    kill_timeout: 120000,
+    listen_timeout: 15000,
+    merge_logs: true,
+    log_date_format: "YYYY-MM-DDTHH:mm:ss.SSSZ",
+    out_file: path.join(shared, "logs", `${id}-out.log`),
+    error_file: path.join(shared, "logs", `${id}-error.log`),
+    env: {
+      NODE_ENV: "production",
+      APP_INSTANCE_KEY: instance,
+      RUWANG_DEPLOY_ROOT: deployRoot,
+      ...(runtimeRole ? { RUNTIME_ROLE: runtimeRole } : {}),
+      ...extraEnv,
+    },
+  };
+}
+
+module.exports = {
+  apps: [
+    {
+      ...processConfig({
+        id: "frontend",
+        cwd: frontend,
+        envFile: frontendEnv,
+        entrypoint: path.join("node_modules", "next", "dist", "bin", "next"),
+        args: ["start", "--hostname", "127.0.0.1", "--port", String(frontendPort)],
+        extraEnv: {
+          NEXT_DEPLOYMENT_ID: deployCommitSha,
+          NEXT_PUBLIC_APP_RELEASE: deployCommitSha,
+        },
+      }),
+    },
+    {
+      ...processConfig({
+        id: "api",
+        cwd: backend,
+        envFile: backendEnv,
+        entrypoint: path.join("src", "server.js"),
+        runtimeRole: "api",
+      }),
+      env: {
+        NODE_ENV: "production",
+        APP_INSTANCE_KEY: instance,
+        RUWANG_DEPLOY_ROOT: deployRoot,
+        RUNTIME_ROLE: "api",
+        HOST: "127.0.0.1",
+        PORT: String(apiPort),
+      },
+    },
+    processConfig({
+      id: "slik-import-worker",
+      cwd: backend,
+      envFile: backendEnv,
+      entrypoint: path.join("src", "workers", "slik-import.worker.js"),
+      runtimeRole: "slik-import-worker",
+    }),
+    processConfig({
+      id: "watermark-worker",
+      cwd: backend,
+      envFile: backendEnv,
+      entrypoint: path.join("src", "workers", "watermark.worker.js"),
+      runtimeRole: "watermark-worker",
+    }),
+    processConfig({
+      id: "seputar-jaminan-worker",
+      cwd: backend,
+      envFile: backendEnv,
+      entrypoint: path.join("src", "workers", "seputar-jaminan.worker.js"),
+      runtimeRole: "seputar-jaminan-worker",
+    }),
+  ],
+};

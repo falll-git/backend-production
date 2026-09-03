@@ -553,7 +553,36 @@ test(
     contact = defaultContact.body.data;
     assert.equal(contact.is_default, true);
     if (usesRealCentral) {
-      await assertQueuedEventContract("UPSERT_WHATSAPP_CONTACT", contact.id);
+      const contactOutbox = await assertQueuedEventContract(
+        "UPSERT_WHATSAPP_CONTACT",
+        contact.id,
+      );
+      await makerAgent
+        .patch("/api/v1/seputar-jaminan/settings")
+        .set("User-Agent", userAgent)
+        .set(makerLogin.authorization)
+        .send({ central_base_url: "http://127.0.0.1:1" })
+        .expect(200);
+      await runSyncCycle({ workerId: `integration-retry-${runId}`, batchSize: 10 });
+      const recoverableContactEvent = await prisma.sj_sync_outbox.findUnique({
+        where: { id: contactOutbox.id },
+      });
+      assert.equal(recoverableContactEvent.state, "RETRYING");
+      assert.equal(recoverableContactEvent.attempt_count, 1);
+      assert.equal(recoverableContactEvent.last_error_code, "CENTRAL_UNREACHABLE");
+      await makerAgent
+        .patch("/api/v1/seputar-jaminan/settings")
+        .set("User-Agent", userAgent)
+        .set(makerLogin.authorization)
+        .send({ central_base_url: centralBaseUrl })
+        .expect(200);
+      const retriedContactEvent = await checkerAgent
+        .post(`/api/v1/seputar-jaminan/sync-events/${contactOutbox.id}/retry`)
+        .set("User-Agent", userAgent)
+        .set(checkerLogin.authorization)
+        .expect(200);
+      assert.equal(retriedContactEvent.body.data.state, "QUEUED");
+      assert.equal(retriedContactEvent.body.data.last_error_code, null);
       contact = await waitForAggregateAcknowledged(
         "sj_whatsapp_contacts",
         contact.id,
@@ -974,6 +1003,57 @@ test(
       const institutionDirectory = await publicInstitutions.json();
       assert.equal(institutionDirectory.items.length, 1);
       assert.equal(institutionDirectory.items[0].published_asset_count, 1);
+
+      const updatedDraft = await makerAgent
+        .patch(`/api/v1/seputar-jaminan/publications/${publication.id}/draft`)
+        .set("User-Agent", userAgent)
+        .set(makerLogin.authorization)
+        .send({
+          expected_version: publication.lock_version,
+          title: "Rumah tinggal dua lantai siap huni dan terawat",
+        })
+        .expect(200);
+      publication = updatedDraft.body.data;
+      assert.equal(publication.state, "DRAFT");
+      const updatedSubmission = await makerAgent
+        .post(`/api/v1/seputar-jaminan/publications/${publication.id}/submit`)
+        .set("User-Agent", userAgent)
+        .set(makerLogin.authorization)
+        .send({ expected_version: publication.lock_version })
+        .expect(200);
+      const updatedApproval = await checkerAgent
+        .post(`/api/v1/seputar-jaminan/publications/${publication.id}/approve-and-publish`)
+        .set("User-Agent", userAgent)
+        .set(checkerLogin.authorization)
+        .send({ expected_version: updatedSubmission.body.data.lock_version })
+        .expect(200);
+      publication = await waitForAggregateAcknowledged(
+        "sj_publications",
+        updatedApproval.body.data.id,
+        "Pembaruan publikasi katalog",
+      );
+      assert.equal(publication.state, "PUBLISHED");
+      const updatedPublicResponse = await fetch(
+        `${centralBaseUrl}/v1/public/assets/${encodeURIComponent(referenceCode)}`,
+      );
+      assert.equal(updatedPublicResponse.status, 200);
+      const updatedPublicAsset = await updatedPublicResponse.json();
+      assert.equal(
+        updatedPublicAsset.title,
+        "Rumah tinggal dua lantai siap huni dan terawat",
+      );
+      assert.match(updatedPublicAsset.whatsapp_url, /6281234567890/u);
+      if (publicWebBaseUrl) {
+        const updatedPublicHtml = await (
+          await fetch(publicWebBaseUrl, { cache: "no-store" })
+        ).text();
+        assert.equal(
+          updatedPublicHtml.includes(
+            "Rumah tinggal dua lantai siap huni dan terawat",
+          ),
+          true,
+        );
+      }
 
       if (!keepLocalFixture) {
         const unpublished = await checkerAgent

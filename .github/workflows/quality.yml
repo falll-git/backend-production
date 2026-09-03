@@ -36,6 +36,10 @@ jobs:
     env:
       HOME: /root
       CI: "true"
+      APP_INSTANCE_KEY: demoruwangarsip
+      NEXT_PUBLIC_APP_BRAND: demoruwangarsip
+      NEXT_DEPLOYMENT_ID: ${{ github.sha }}
+      NEXT_PUBLIC_APP_RELEASE: ${{ github.sha }}
       NODE_ENV: development
       HOST: 127.0.0.1
       PORT: "7111"
@@ -153,7 +157,14 @@ jobs:
           append_secret JWT_REFRESH_SECRET "$(openssl rand -hex 32)"
           append_secret FILE_ACCESS_SECRET "$(openssl rand -hex 32)"
           append_secret RATE_LIMIT_KEY_SECRET "$(openssl rand -hex 32)"
-          append_secret NEXT_SERVER_ACTIONS_ENCRYPTION_KEY "$(openssl rand -base64 32 | tr -d '\n')"
+          server_actions_key="$(openssl rand -base64 32 | tr -d '\n')"
+          printf '::add-mask::%s\n' "$server_actions_key"
+          server_actions_dir="${RUNNER_TEMP}/demoruwangarsip/shared/credentials/frontend"
+          install -d -m 700 "$server_actions_dir"
+          server_actions_file="${server_actions_dir}/NEXT_SERVER_ACTIONS_ENCRYPTION_KEY"
+          printf '%s\n' "$server_actions_key" > "$server_actions_file"
+          chmod 600 "$server_actions_file"
+          append_env NEXT_SERVER_ACTIONS_ENCRYPTION_KEY_FILE "$server_actions_file"
 
       - name: Install backend dependencies
         working-directory: backend-production

@@ -1,6 +1,9 @@
 const path = require("path");
 const fs = require("fs");
 const dotenv = require("dotenv");
+const {
+  validateBackendProductionEnvironment,
+} = require("./production-contract");
 
 let loaded = false;
 let validated = false;
@@ -494,6 +497,11 @@ function validateEnv() {
     validateProductionCorsOrigins(errors);
     validateAbsolutePathEnv("UPLOAD_DIR", errors);
     validateAbsolutePathEnv("UPLOAD_TEMP_DIR", errors);
+    const productionContract = validateBackendProductionEnvironment(
+      process.env,
+      { repositoryRoot: process.cwd(), requireMigration: false },
+    );
+    errors.push(...productionContract.errors);
     [
       "UPLOAD_TEMP_TTL_MS",
       "UPLOAD_TEMP_CLEANUP_INTERVAL_MS",
@@ -612,7 +620,7 @@ function validateEnv() {
     requireEnv("RESEND_API_KEY", errors);
     requireEnv("RESEND_FROM_EMAIL", errors);
     requireEnv("SJ_WORKER_DATABASE_URL", errors);
-    requireEnv("SJ_INTEGRATION_PRIVATE_KEY", errors);
+    requireSecret("SJ_INTEGRATION_PRIVATE_KEY", errors);
     requireEnv("SJ_MEDIA_STORAGE_PROVIDER", errors);
     requireEnv("SJ_OUTBOX_POLL_INTERVAL_MS", errors);
     requireEnv("SJ_OUTBOX_BATCH_SIZE", errors);

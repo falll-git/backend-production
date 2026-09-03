@@ -112,6 +112,8 @@ test("environment release memakai credential admin dan satu build frontend", () 
   assert.equal(result.E2E_USERNAME, "admin-test");
   assert.equal(result.API_TEST_ADMIN_USERNAME, "admin-test");
   assert.equal(result.NEXT_PUBLIC_API_URL, "http://localhost:7111/api/v1");
+  assert.equal(result.RUWANG_API_HOSTNAME, "localhost");
+  assert.equal(result.RUWANG_ALLOW_LOOPBACK_API, "true");
   assert.equal(result.FULLSTACK_FRONTEND_URL, "http://localhost:3000");
   assert.equal(result.QUALITY_GATE_FRONTEND_PORT, "3000");
   assert.equal(result.E2E_REUSE_FRONTEND_BUILD, "true");

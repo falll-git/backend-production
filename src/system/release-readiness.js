@@ -9,6 +9,12 @@ const TOPOLOGY_PATH = path.join(
   "deployment",
   "runtime-topology.json",
 );
+const RELEASE_LAYOUT_PATH = path.join(
+  REPOSITORY_DIRECTORY,
+  "ops",
+  "deployment",
+  "release-layout.json",
+);
 const EXPECTED_PROCESS_CONTRACT = Object.freeze({
   frontend: {
     repository: "frontend",
@@ -34,6 +40,12 @@ const EXPECTED_PROCESS_CONTRACT = Object.freeze({
     runtimeRole: "watermark-worker",
     command: "node src/workers/watermark.worker.js",
   },
+  "seputar-jaminan-worker": {
+    repository: "backend",
+    packageScript: "worker:seputar-jaminan",
+    runtimeRole: "seputar-jaminan-worker",
+    command: "node src/workers/seputar-jaminan.worker.js",
+  },
 });
 const EXPECTED_STARTUP_RECOVERY_CONTRACT = Object.freeze({
   "slik-import-worker": Object.freeze({
@@ -51,6 +63,7 @@ const REQUIRED_DEPENDENCIES = Object.freeze([
   "redis",
 ]);
 const REQUIRED_PREFLIGHT_ENV = Object.freeze([
+  "DEPLOY_RELEASE_ID",
   "RELEASE_FRONTEND_DIR",
 ]);
 const REQUIRED_VERIFY_ENV = Object.freeze([
@@ -69,7 +82,11 @@ const EXPECTED_RELEASE_SEQUENCE = Object.freeze([
   ["frontend-build", "frontend", "build", null],
   ["database-migration", "backend", "migrate:deploy", null],
   ["production-preflight", "backend", "release:preflight", null],
+  ["release-manifest", "backend", "release:atomic:manifest", null],
+  ["atomic-preflight", "backend", "release:atomic:preflight", null],
+  ["atomic-symlink-switch", "backend", "release:atomic:switch", null],
   ["process-start-or-restart", "vps", null, null],
+  ["pm2-process-verification", "backend", "release:pm2:verify", null],
   ["post-deploy-verification", "backend", "release:verify", null],
 ]);
 const MAX_PROBE_BODY_BYTES = 1024 * 1024;
@@ -189,8 +206,14 @@ function validateRuntimeTopology({
   if (topology.orchestration?.automatic_deployment !== false) {
     errors.push("Topologi wajib menonaktifkan automatic deployment.");
   }
-  if (topology.orchestration?.implementation !== "vps-choice-pending") {
-    errors.push("Process manager VPS belum boleh diasumsikan.");
+  if (topology.orchestration?.implementation !== "pm2-manual-atomic") {
+    errors.push("Process manager wajib PM2 dengan aktivasi manual-atomic.");
+  }
+  if (
+    topology.orchestration?.deployment_strategy !== "manual-atomic-symlink" ||
+    topology.orchestration?.approval_required !== true
+  ) {
+    errors.push("Deployment wajib memakai symlink manual-atomic setelah persetujuan.");
   }
   if (topology.recovery?.backup_automation !== false) {
     errors.push("Backup automation harus tetap di luar STEP 10.");
@@ -394,10 +417,12 @@ function verifyReleaseContract({
   backendDirectory = REPOSITORY_DIRECTORY,
   frontendDirectory = resolveContractFrontendDirectory(),
   topologyPath = TOPOLOGY_PATH,
+  releaseLayoutPath = RELEASE_LAYOUT_PATH,
 } = {}) {
   const backendPackage = readJson(path.join(backendDirectory, "package.json"));
   const frontendPackage = readJson(path.join(frontendDirectory, "package.json"));
   const topology = readJson(topologyPath);
+  const releaseLayout = readJson(releaseLayoutPath);
   const envExampleKeys = parseEnvExampleKeys(
     fs.readFileSync(path.join(backendDirectory, ".env.example"), "utf8"),
   );
@@ -409,6 +434,24 @@ function verifyReleaseContract({
   });
   if (!evaluation.valid) {
     throw new Error(`Kontrak release tidak valid: ${evaluation.errors.join(" ")}`);
+  }
+  if (
+    releaseLayout.schema_version !== 1 ||
+    releaseLayout.strategy !== "manual-atomic-symlink" ||
+    releaseLayout.production_platform !== "linux" ||
+    releaseLayout.automatic_deployment !== false ||
+    releaseLayout.approval_required !== true ||
+    JSON.stringify(releaseLayout.post_activation_checks) !==
+      JSON.stringify([
+        "pm2-five-processes-online",
+        "api-health-ready",
+        "frontend-http-ok",
+      ]) ||
+    releaseLayout.rollback?.scope !== "application-release-only" ||
+    releaseLayout.rollback?.database_migrations !== "forward-only" ||
+    releaseLayout.rollback?.deletes_release !== false
+  ) {
+    throw new Error("Kontrak layout release manual-atomic tidak valid.");
   }
 
   const currentNodeMajor = Number(process.versions.node.split(".")[0]);
@@ -423,6 +466,7 @@ function verifyReleaseContract({
     process_count: evaluation.process_count,
     required_dependency_count: evaluation.required_dependency_count,
     automatic_deployment: false,
+    deployment_strategy: releaseLayout.strategy,
     backup_automation: false,
     node_major: currentNodeMajor,
     data_backup_restore_status:
@@ -446,6 +490,9 @@ function assertProductionReleaseEnvironment(
     throw new Error(
       `Environment release wajib belum lengkap: ${missing.join(", ")}.`,
     );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{5,95}$/.test(String(env.DEPLOY_RELEASE_ID))) {
+    throw new Error("DEPLOY_RELEASE_ID tidak memenuhi format release ID yang aman.");
   }
   const migrationUrl = String(env.MIGRATION_DATABASE_URL || "").trim();
   let parsedMigrationUrl;
@@ -772,8 +819,15 @@ async function runNamedChecks(definitions) {
   return results;
 }
 
-function buildReleaseReport(kind, startedAt, checks) {
+function buildReleaseReport(kind, startedAt, checks, { releaseId = null } = {}) {
   const passed = checks.length > 0 && checks.every((check) => check.status === "passed");
+  const normalizedReleaseId = String(releaseId || "").trim();
+  if (
+    normalizedReleaseId &&
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{5,95}$/.test(normalizedReleaseId)
+  ) {
+    throw new Error("Release ID pada report tidak valid.");
+  }
   return {
     schema_version: 1,
     kind,
@@ -782,6 +836,7 @@ function buildReleaseReport(kind, startedAt, checks) {
     finished_at: new Date().toISOString(),
     automatic_deployment: false,
     backup_automation: false,
+    ...(normalizedReleaseId ? { release_id: normalizedReleaseId } : {}),
     checks,
   };
 }
@@ -834,6 +889,7 @@ function assertMigrationStatus() {
 
 async function runProductionPreflight() {
   const startedAt = new Date();
+  const releaseId = String(process.env.DEPLOY_RELEASE_ID || "").trim();
   let frontendDirectory;
   const { loadEnv, validateEnv } = require("../config/env");
   loadEnv();
@@ -853,7 +909,11 @@ async function runProductionPreflight() {
     },
   ]);
   if (initialChecks.some((check) => check.status === "failed")) {
-    return buildReleaseReport("preflight", startedAt, initialChecks);
+    return buildReleaseReport("preflight", startedAt, initialChecks, {
+      releaseId: /^[A-Za-z0-9][A-Za-z0-9._-]{5,95}$/.test(releaseId)
+        ? releaseId
+        : null,
+    });
   }
 
   let prisma;
@@ -942,6 +1002,7 @@ async function runProductionPreflight() {
     "preflight",
     startedAt,
     [...initialChecks, ...runtimeChecks],
+    { releaseId },
   );
 }
 
@@ -1042,6 +1103,7 @@ module.exports = {
   REQUIRED_PREFLIGHT_ENV,
   REQUIRED_RELEASE_ENV,
   REQUIRED_VERIFY_ENV,
+  RELEASE_LAYOUT_PATH,
   REPOSITORY_DIRECTORY,
   TOPOLOGY_PATH,
   assertPostDeployEnvironment,

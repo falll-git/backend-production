@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const {
   REPOSITORY_DIRECTORY,
+  RELEASE_LAYOUT_PATH,
   TOPOLOGY_PATH,
   assertPostDeployEnvironment,
   assertProductionReleaseEnvironment,
@@ -54,6 +55,7 @@ function validReadinessPayload() {
 function productionReleaseEnv(frontendDirectory) {
   return {
     NODE_ENV: "production",
+    DEPLOY_RELEASE_ID: "release-test",
     DATABASE_URL: "postgresql://runtime:secret@database/ruwang_arsip",
     MIGRATION_DATABASE_URL:
       "postgresql://migration:secret@database/ruwang_arsip",
@@ -71,16 +73,36 @@ function productionReleaseEnv(frontendDirectory) {
   };
 }
 
-test("kontrak release aktual cocok dengan empat proses production", () => {
+test("kontrak release aktual cocok dengan lima proses production dan aktivasi manual-atomic", () => {
   const result = verifyReleaseContract();
-  assert.equal(result.process_count, 4);
+  assert.equal(result.process_count, 5);
   assert.equal(result.required_dependency_count, 3);
   assert.equal(result.automatic_deployment, false);
+  assert.equal(result.deployment_strategy, "manual-atomic-symlink");
   assert.equal(result.backup_automation, false);
   assert.equal(result.recovery_role_count, 2);
   assert.equal(result.recovery_task_count, 2);
   assert.equal(result.data_backup_restore_status, "deferred");
   assert.equal(result.rpo_rto_status, "pending-decision");
+});
+
+test("kontrak release menolak layout yang menghapus persetujuan atau mencoba rollback database", () => {
+  const temporaryDirectory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ruwang-release-layout-"),
+  );
+  try {
+    const layout = JSON.parse(fs.readFileSync(RELEASE_LAYOUT_PATH, "utf8"));
+    layout.approval_required = false;
+    layout.rollback.database_migrations = "reverse";
+    const layoutPath = path.join(temporaryDirectory, "release-layout.json");
+    fs.writeFileSync(layoutPath, `${JSON.stringify(layout)}\n`, "utf8");
+    assert.throws(
+      () => verifyReleaseContract({ releaseLayoutPath: layoutPath }),
+      /layout release manual-atomic tidak valid/,
+    );
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test("kontrak recovery menolak task atau pemanggilan role worker yang salah", () => {
@@ -155,6 +177,9 @@ test("topologi menolak auto-deploy, backup otomatis, dan runtime development", (
   const changed = structuredClone(topology);
   const changedBackend = structuredClone(backendPackage);
   changed.orchestration.automatic_deployment = true;
+  changed.orchestration.implementation = "vps-choice-pending";
+  changed.orchestration.deployment_strategy = "git-pull-in-place";
+  changed.orchestration.approval_required = false;
   changed.recovery.backup_automation = true;
   changed.operations.data_backup_restore_status = "enabled";
   changed.operations.rpo_rto_status = "assumed";
@@ -170,6 +195,8 @@ test("topologi menolak auto-deploy, backup otomatis, dan runtime development", (
   });
   assert.equal(result.valid, false);
   assert.match(result.errors.join(" "), /automatic deployment/i);
+  assert.match(result.errors.join(" "), /PM2 dengan aktivasi manual-atomic/i);
+  assert.match(result.errors.join(" "), /symlink manual-atomic/i);
   assert.match(result.errors.join(" "), /Backup automation/i);
   assert.match(result.errors.join(" "), /Backup dan restore data/i);
   assert.match(result.errors.join(" "), /RPO dan RTO/i);
@@ -318,6 +345,14 @@ test("production release memerlukan migration credential dan frontend absolut te
             "postgresql://GANTI_OWNER:GANTI_PASSWORD@database/ruwang_arsip",
         }),
       /wajib diisi/,
+    );
+    assert.throws(
+      () =>
+        assertProductionReleaseEnvironment({
+          ...env,
+          DEPLOY_RELEASE_ID: "../release",
+        }),
+      /format release ID yang aman/,
     );
     assert.throws(
       () =>
