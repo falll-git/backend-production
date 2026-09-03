@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const {
@@ -8,6 +9,9 @@ const {
 
 function productionFixture(overrides = {}) {
   const target = "db.internal:5432/ruwang_demo?schema=public";
+  const testRoot = path.join(os.tmpdir(), "ruwang-production-contract");
+  const deployRoot = path.join(testRoot, "deploy", "demoruwangarsip");
+  const storageRoot = path.join(testRoot, "storage", "demoruwangarsip");
   return {
     DATABASE_URL: `postgresql://ruwang_arsip_app:runtime-pass@${target}`,
     DATABASE_SYSTEM_URL: `postgresql://ruwang_arsip_system:system-pass@${target}`,
@@ -15,20 +19,19 @@ function productionFixture(overrides = {}) {
     SJ_WORKER_DATABASE_URL: `postgresql://ruwang_arsip_sj_worker:worker-pass@${target}`,
     DATABASE_RUNTIME_ROLE: "ruwang_arsip_app",
     DATABASE_SYSTEM_ROLE: "ruwang_arsip_system",
-    RUWANG_DEPLOY_ROOT: path.resolve("D:/srv/ruwang/demoruwangarsip"),
-    UPLOAD_DIR: path.resolve("D:/var/lib/ruwang-arsip/demoruwangarsip/uploads"),
-    UPLOAD_TEMP_DIR: path.resolve("D:/var/lib/ruwang-arsip/demoruwangarsip/uploads/tmp"),
+    RUWANG_DEPLOY_ROOT: deployRoot,
+    UPLOAD_DIR: path.join(storageRoot, "uploads"),
+    UPLOAD_TEMP_DIR: path.join(storageRoot, "uploads", "tmp"),
     SJ_MEDIA_STORAGE_PROVIDER: "FILESYSTEM",
-    SJ_MEDIA_FILESYSTEM_ROOT: path.resolve(
-      "D:/var/lib/ruwang-arsip/demoruwangarsip/seputar-jaminan-public",
-    ),
+    SJ_MEDIA_FILESYSTEM_ROOT: path.join(storageRoot, "seputar-jaminan-public"),
     ...overrides,
   };
 }
 
 test("kontrak production menerima empat credential terpisah dan storage persistent", () => {
-  const result = validateBackendProductionEnvironment(productionFixture(), {
-    repositoryRoot: path.resolve("D:/srv/ruwang/demoruwangarsip/current/backend"),
+  const fixture = productionFixture();
+  const result = validateBackendProductionEnvironment(fixture, {
+    repositoryRoot: path.join(fixture.RUWANG_DEPLOY_ROOT, "current", "backend"),
     requireMigration: true,
   });
   assert.deepEqual(result, { valid: true, errors: [] });
@@ -71,7 +74,7 @@ test("kontrak production menolak role yang tidak sama dengan user URL", () => {
 });
 
 test("kontrak production menolak storage di dalam release", () => {
-  const deployRoot = path.resolve("D:/srv/ruwang/demoruwangarsip");
+  const deployRoot = productionFixture().RUWANG_DEPLOY_ROOT;
   const result = validateBackendProductionEnvironment(
     productionFixture({
       RUWANG_DEPLOY_ROOT: deployRoot,
