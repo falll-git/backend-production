@@ -11,6 +11,7 @@ const {
   assertPostDeployEnvironment,
   assertProductionReleaseEnvironment,
   assertReleaseUrl,
+  buildMigrationStatusEnvironment,
   buildReleaseReport,
   evaluateLivenessPayload,
   evaluateReadinessPayload,
@@ -25,6 +26,28 @@ const {
   verifyReleaseContract,
   verifyStartupRecoveryContract,
 } = require("./release-readiness");
+
+test("status migration child hanya mewariskan pointer file-backed", () => {
+  const childEnv = buildMigrationStatusEnvironment({
+    DATABASE_URL: "resolved-runtime-value",
+    DATABASE_URL_FILE: "/run/credentials/runtime/DATABASE_URL",
+    MIGRATION_DATABASE_URL: "resolved-migration-value",
+    MIGRATION_DATABASE_URL_FILE: "/run/credentials/migration/MIGRATION_DATABASE_URL",
+    NODE_ENV: "production",
+  });
+
+  assert.equal(childEnv.DATABASE_URL, undefined);
+  assert.equal(childEnv.MIGRATION_DATABASE_URL, undefined);
+  assert.equal(
+    childEnv.DATABASE_URL_FILE,
+    "/run/credentials/runtime/DATABASE_URL",
+  );
+  assert.equal(
+    childEnv.MIGRATION_DATABASE_URL_FILE,
+    "/run/credentials/migration/MIGRATION_DATABASE_URL",
+  );
+  assert.equal(childEnv.NODE_ENV, "production");
+});
 
 function validReadinessPayload() {
   return {

@@ -876,7 +876,7 @@ function assertMigrationStatus() {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, ["run", "migrate:status", "--silent"], {
     cwd: REPOSITORY_DIRECTORY,
-    env: process.env,
+    env: buildMigrationStatusEnvironment(),
     encoding: "utf8",
     shell: false,
     timeout: 120000,
@@ -885,6 +885,18 @@ function assertMigrationStatus() {
   if (result.error || result.status !== 0) {
     throw new Error("Status migration Prisma belum siap untuk release.");
   }
+}
+
+function buildMigrationStatusEnvironment(sourceEnv = process.env) {
+  const childEnv = { ...sourceEnv };
+  const { FILE_BACKED_ENV_KEYS } = require("../config/env");
+  for (const key of FILE_BACKED_ENV_KEYS) {
+    const fileKey = `${key}_FILE`;
+    if (String(childEnv[fileKey] || "").trim()) {
+      delete childEnv[key];
+    }
+  }
+  return childEnv;
 }
 
 async function runProductionPreflight() {
@@ -1110,6 +1122,7 @@ module.exports = {
   assertProductionReleaseEnvironment,
   assertReleaseUrl,
   buildReleaseReport,
+  buildMigrationStatusEnvironment,
   evaluateLivenessPayload,
   evaluateReadinessPayload,
   inspectFrontendProductionBuild,
