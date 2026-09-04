@@ -42,6 +42,10 @@ const shared = path.join(deployRoot, "shared");
 const backendEnv = path.join(shared, "env", "backend.env");
 const frontendEnv = path.join(shared, "env", "frontend.env");
 const node = process.execPath;
+const { verifyFrontendReleaseIdentity } = require(
+  path.join(backend, "src", "system", "pm2-release-verification.js"),
+);
+verifyFrontendReleaseIdentity(deployRoot, deployCommitSha);
 
 function processConfig({
   id,

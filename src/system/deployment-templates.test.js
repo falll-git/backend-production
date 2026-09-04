@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const deploymentRoot = path.resolve(__dirname, "..", "..", "ops", "deployment");
 const nginxRoot = path.resolve(__dirname, "..", "..", "ops", "nginx");
 
-function loadPm2Template() {
+function loadPm2Template(context, buildCommitSha = "a".repeat(40)) {
   const filename = path.join(deploymentRoot, "ecosystem.config.cjs.example");
   const source = fs.readFileSync(filename, "utf8");
   const moduleRecord = { exports: {} };
@@ -21,16 +21,40 @@ function loadPm2Template() {
     },
     execPath: process.execPath,
   };
+  const deployRoot = sandboxProcess.env.RUWANG_DEPLOY_ROOT;
+  const fixtureFiles = new Map([
+    [path.join(deployRoot, "current", "release-manifest.json"), JSON.stringify({
+      components: { frontend: { root: "frontend", commit_sha: "a".repeat(40) } },
+    })],
+    [path.join(deployRoot, "current", "frontend", ".next", "required-server-files.json"), JSON.stringify({
+      config: { deploymentId: buildCommitSha, env: { NEXT_PUBLIC_APP_RELEASE: buildCommitSha } },
+    })],
+    [path.join(deployRoot, "shared", "env", "frontend.env"),
+      `NEXT_DEPLOYMENT_ID=${"a".repeat(40)}\nNEXT_PUBLIC_APP_RELEASE=${"a".repeat(40)}\n`],
+  ]);
+  const readFile = fs.readFileSync;
+  context.mock.method(fs, "readFileSync", (filename, ...options) =>
+    fixtureFiles.has(filename) ? fixtureFiles.get(filename) : readFile(filename, ...options),
+  );
+  const verificationModulePath = path.join(
+    deployRoot, "current", "backend", "src", "system", "pm2-release-verification.js",
+  );
   vm.runInNewContext(
     `(function (require, module, process) { ${source}\n})(require, module, process);`,
-    { require, module: moduleRecord, process: sandboxProcess },
+    {
+      require: (specifier) => specifier === verificationModulePath
+        ? require("./pm2-release-verification")
+        : require(specifier),
+      module: moduleRecord,
+      process: sandboxProcess,
+    },
     { filename },
   );
   return { config: moduleRecord.exports, source };
 }
 
-test("template PM2 mendaftarkan lima proses production tanpa credential", () => {
-  const { config, source } = loadPm2Template();
+test("template PM2 mendaftarkan lima proses production tanpa credential", (context) => {
+  const { config, source } = loadPm2Template(context);
   assert.equal(config.apps.length, 5);
   assert.deepEqual(
     Array.from(config.apps, (entry) => entry.name),
@@ -58,7 +82,12 @@ test("template PM2 mendaftarkan lima proses production tanpa credential", () => 
   );
   assert.equal(config.apps[0].env.NEXT_DEPLOYMENT_ID, "a".repeat(40));
   assert.equal(config.apps[0].env.NEXT_PUBLIC_APP_RELEASE, "a".repeat(40));
+  assert.equal(config.apps.every((entry) => entry.log_date_format === "YYYY-MM-DDTHH:mm:ss.SSSZ"), true);
   assert.doesNotMatch(source, /(?:password|private[_-]?key|api[_-]?key)\s*[:=]\s*["'][^"']+/i);
+});
+
+test("template PM2 menolak build frontend yang berbeda sebelum proses dijalankan", (context) => {
+  assert.throws(() => loadPm2Template(context, "b".repeat(40)), /Identitas frontend/);
 });
 
 test("template Nginx memisahkan origin publik dari port loopback dan tetap belum dirender", () => {
@@ -78,8 +107,9 @@ test("template Nginx memisahkan origin publik dari port loopback dan tetap belum
   assert.match(source, /location \/api\//);
   assert.match(source, /proxy_pass http:\/\/127\.0\.0\.1:__RUWANG_API_PORT__/);
   assert.match(source, /proxy_pass http:\/\/127\.0\.0\.1:__RUWANG_FRONTEND_PORT__/);
-  assert.match(source, /http2 on;/);
-  assert.doesNotMatch(source, /listen 443 ssl http2/);
+  assert.match(source, /listen 443 ssl http2;/);
+  assert.match(source, /listen \[::\]:443 ssl http2;/);
+  assert.doesNotMatch(source, /http2 on;/);
   assert.doesNotMatch(source, /\$host/);
   assert.doesNotMatch(source, /103\.118\.175\.59|vmbprs|@123/i);
 });

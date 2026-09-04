@@ -8,11 +8,14 @@ const { parseOptions, printResult, requireOption } = require("./atomic-release-c
 
 function run(argv = process.argv.slice(2)) {
   const options = parseOptions(argv);
+  const instance = requireOption(options, "instance");
+  const deployRoot = requireOption(options, "deploy-root");
+  const frontendCommitSha = requireOption(options, "frontend-commit-sha");
   const snapshotPath = options.snapshot
     ? path.resolve(options.snapshot)
     : null;
   const snapshot = readPm2Snapshot({ snapshotPath });
-  return verifyPm2Snapshot(snapshot, requireOption(options, "instance"));
+  return verifyPm2Snapshot(snapshot, instance, { deployRoot, frontendCommitSha });
 }
 
 if (require.main === module) {
