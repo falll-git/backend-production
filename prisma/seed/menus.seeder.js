@@ -1,5 +1,8 @@
 const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
+const {
+  SEPUTAR_JAMINAN_MENU_TREE,
+} = require("./seputar-jaminan-rbac.definition");
 
 const DASHBOARD_WIDGET_MENU = {
   menu_type: "DASHBOARD_WIDGET",
@@ -399,32 +402,7 @@ const menuTree = [
       },
     ],
   },
-  {
-    name: "Seputar Jaminan",
-    url: "/dashboard/seputar-jaminan",
-    icon: "lucide lucide-store",
-    order: 6,
-    children: [
-      {
-        name: "Katalog Aset",
-        url: "/dashboard/seputar-jaminan/katalog",
-        icon: "lucide lucide-layout-grid",
-        order: 1,
-      },
-      {
-        name: "Pemeriksaan",
-        url: "/dashboard/seputar-jaminan/pemeriksaan",
-        icon: "lucide lucide-badge-check",
-        order: 2,
-      },
-      {
-        name: "Profil & Kontak",
-        url: "/dashboard/seputar-jaminan/profil-kontak",
-        icon: "lucide lucide-building-2",
-        order: 3,
-      },
-    ],
-  },
+  SEPUTAR_JAMINAN_MENU_TREE,
   {
     name: "Pusat Log Aktivitas",
     url: "/dashboard/activity-centre",
