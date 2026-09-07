@@ -1,6 +1,7 @@
 const publicationService = require("./seputarJaminan.service");
 const profileContactService = require("./profileContact.service");
 const mediaService = require("./media.service");
+const { runWithDatabaseUserContext } = require("../../config/database-context");
 
 function errorResponse(res, error) {
   return res.status(error.statusCode || 500).json({
@@ -13,7 +14,12 @@ function errorResponse(res, error) {
 function action(service, message, statusCode = 200) {
   return async (req, res) => {
     try {
-      const data = await service(req);
+      // Middleware asynchronous seperti rate limiter dan parser multipart dapat
+      // berpindah async boundary. Pasang ulang identitas pengguna tepat sebelum
+      // service SJ menyentuh tabel ber-RLS agar konteks selalu deterministik.
+      const data = req.user?.id
+        ? await runWithDatabaseUserContext(req.user.id, () => service(req))
+        : await service(req);
       return res.status(statusCode).json({ status: true, success: true, message, data });
     } catch (error) {
       return errorResponse(res, error);
