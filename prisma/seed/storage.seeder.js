@@ -1,31 +1,36 @@
 const crypto = require("crypto");
 const prisma = require("../../src/config/prisma");
+const { resolveStorageSeedConfig } = require("./storage-seed.config");
 
-const storageOffices = [
-  {
-    code: "KPAM",
-    name: "Kantor Pusat Artha Madani",
-  },
-];
+function buildStorageSeedDefinition(env = process.env) {
+  const { officeCode, officeName } = resolveStorageSeedConfig(env);
 
-const storageCabinets = [
-  {
-    office_code: "KPAM",
-    code: "Lemari-1",
-  },
-];
+  return {
+    storageOffices: [
+      {
+        code: officeCode,
+        name: officeName,
+      },
+    ],
+    storageCabinets: [
+      {
+        office_code: officeCode,
+        code: "Lemari-1",
+      },
+    ],
+    storages: [
+      {
+        office_code: officeCode,
+        cabinet_code: "Lemari-1",
+        name: "Rak 1",
+        capacity: 100,
+        is_active: true,
+      },
+    ],
+  };
+}
 
-const storages = [
-  {
-    office_code: "KPAM",
-    cabinet_code: "Lemari-1",
-    name: "Rak 1",
-    capacity: 100,
-    is_active: true,
-  },
-];
-
-async function seedStorageOffices() {
+async function seedStorageOffices(storageOffices) {
   for (const office of storageOffices) {
     await prisma.storage_offices.upsert({
       where: { code: office.code },
@@ -41,7 +46,7 @@ async function seedStorageOffices() {
   }
 }
 
-async function seedStorageCabinets() {
+async function seedStorageCabinets(storageCabinets) {
   for (const cabinet of storageCabinets) {
     const office = await prisma.storage_offices.findUnique({
       where: { code: cabinet.office_code },
@@ -72,7 +77,7 @@ async function seedStorageCabinets() {
   }
 }
 
-async function seedStorages() {
+async function seedStorages(storages) {
   for (const storage of storages) {
     const office = await prisma.storage_offices.findUnique({
       where: { code: storage.office_code },
@@ -124,11 +129,14 @@ async function seedStorages() {
 async function seedStorage() {
   console.log("Seeding storage...");
 
-  await seedStorageOffices();
-  await seedStorageCabinets();
-  await seedStorages();
+  const { storageOffices, storageCabinets, storages } =
+    buildStorageSeedDefinition();
+
+  await seedStorageOffices(storageOffices);
+  await seedStorageCabinets(storageCabinets);
+  await seedStorages(storages);
 
   console.log("Storage seeded!");
 }
 
-module.exports = { seedStorage };
+module.exports = { buildStorageSeedDefinition, seedStorage };
