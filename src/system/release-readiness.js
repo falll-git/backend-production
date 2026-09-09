@@ -904,12 +904,20 @@ async function runProductionPreflight() {
   const releaseId = String(process.env.DEPLOY_RELEASE_ID || "").trim();
   let frontendDirectory;
   const { loadEnv, validateEnv } = require("../config/env");
+  const {
+    verifyVendoredContract,
+  } = require("../modules/seputar-jaminan/contracts");
   loadEnv();
   const initialChecks = await runNamedChecks([
     {
       id: "release_contract",
       stop_on_failure: true,
       run: async () => verifyReleaseContract(),
+    },
+    {
+      id: "seputar_jaminan_contract_integrity",
+      stop_on_failure: true,
+      run: async () => verifyVendoredContract(),
     },
     {
       id: "production_environment",
