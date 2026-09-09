@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 const { AppError } = require("../../utils/errors");
 const { getContracts } = require("./contracts");
 
@@ -453,7 +454,7 @@ async function assertSource(client, payload) {
 }
 
 async function createPublicationRecord(payload, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     const ownerDivisionId = payload.owner_division_id || user.division_id;
     await assertSource(client, payload);
@@ -578,7 +579,7 @@ async function cloneVersionToDraft(client, publication, userId) {
 }
 
 async function updatePublicationDraft(id, payload, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     let publication = await assertExpectedVersion(
       client,
@@ -695,7 +696,7 @@ async function buildPublicationPayload(client, publication, version, timestamps)
 }
 
 async function submitPublication(id, expectedVersion, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     await requireSettings(client, "review_enabled");
     const publication = await assertExpectedVersion(client, id, expectedVersion);
     const version = await client.sj_publication_versions.findUnique({
@@ -745,7 +746,7 @@ async function submitPublication(id, expectedVersion, user) {
 }
 
 async function requestRevision(id, payload, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     await requireSettings(client, "review_enabled");
     const publication = await assertExpectedVersion(
       client,
@@ -787,7 +788,7 @@ async function requestRevision(id, payload, user) {
 }
 
 async function approveAndPublish(id, expectedVersion, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "publish_enabled");
     if (!settings.sync_enabled || settings.connection_state !== "ACTIVE") {
       throw new AppError("Koneksi pusat belum aktif. Publikasi belum dapat diterbitkan.", 409);
@@ -874,7 +875,7 @@ async function approveAndPublish(id, expectedVersion, user) {
 }
 
 async function unpublish(id, payload, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "sync_enabled");
     const publication = await assertExpectedVersion(
       client,
@@ -918,7 +919,7 @@ async function unpublish(id, payload, user) {
 }
 
 async function reconfirm(id, expectedVersion, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "sync_enabled");
     const publication = await assertExpectedVersion(client, id, expectedVersion);
     if (publication.state !== "PUBLISHED" || !publication.published_version_id) {
@@ -972,7 +973,7 @@ async function reconfirm(id, expectedVersion, user) {
 }
 
 async function archive(id, expectedVersion, user) {
-  return prisma.$transaction(async (client) => {
+  return withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client);
     const publication = await assertExpectedVersion(client, id, expectedVersion);
     if (publication.state === "PUBLISHED") {

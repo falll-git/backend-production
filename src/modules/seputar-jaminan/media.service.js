@@ -3,6 +3,7 @@ const path = require("node:path");
 const sharp = require("sharp");
 
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 const { AppError } = require("../../utils/errors");
 const { createMediaStorage } = require("./mediaStorage");
 const { createOutbox, requireSettings } = require("./seputarJaminan.service");
@@ -136,7 +137,7 @@ exports.getStatus = async (id) => {
 };
 
 exports.revoke = async (id, payload) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     const [used, profileUsed, row] = await Promise.all([
       client.sj_publication_version_media.count({ where: { media_asset_id: id } }),
       client.sj_public_profiles.count({ where: { logo_media_id: id } }),

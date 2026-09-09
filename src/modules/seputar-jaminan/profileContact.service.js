@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 const { AppError } = require("../../utils/errors");
 const { getContracts } = require("./contracts");
 const {
@@ -129,7 +130,7 @@ exports.getProfile = async () =>
   );
 
 exports.saveProfileDraft = async (payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     const media = await client.sj_media_assets.findFirst({
       where: {
@@ -218,7 +219,7 @@ exports.saveProfileDraft = async (payload, user) =>
   });
 
 exports.submitProfile = async (payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "review_enabled");
     const profile = await client.sj_public_profiles.findFirst({
       include: profileInclude,
@@ -264,7 +265,7 @@ exports.submitProfile = async (payload, user) =>
   });
 
 exports.requestProfileRevision = async (payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "review_enabled");
     const profile = await client.sj_public_profiles.findFirst({ include: profileInclude });
     assertVersion(profile, payload.expected_version, "Profil BPRS");
@@ -291,7 +292,7 @@ exports.requestProfileRevision = async (payload, user) =>
   });
 
 exports.verifyProfile = async (payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "sync_enabled");
     const profile = await client.sj_public_profiles.findFirst({ include: profileInclude });
     assertVersion(profile, payload.expected_version, "Profil BPRS");
@@ -355,7 +356,7 @@ exports.listContacts = async () =>
   })).map(serializeContact);
 
 exports.createContact = async (payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     const contact = await client.sj_whatsapp_contacts.create({
       data: {
@@ -389,7 +390,7 @@ exports.createContact = async (payload, user) =>
   });
 
 exports.updateContact = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
@@ -433,7 +434,7 @@ exports.updateContact = async (id, payload, user) =>
   });
 
 exports.submitContact = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "review_enabled");
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
@@ -457,7 +458,7 @@ exports.submitContact = async (id, payload, user) =>
   });
 
 exports.requestContactRevision = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await requireSettings(client, "review_enabled");
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
@@ -484,7 +485,7 @@ exports.requestContactRevision = async (id, payload, user) =>
   });
 
 exports.verifyContact = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "sync_enabled");
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
@@ -533,7 +534,7 @@ exports.verifyContact = async (id, payload, user) =>
   });
 
 exports.revokeContact = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     const settings = await requireSettings(client, "sync_enabled");
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
@@ -581,7 +582,7 @@ exports.revokeContact = async (id, payload, user) =>
   });
 
 exports.setDefaultContact = async (id, payload, user) =>
-  prisma.$transaction(async (client) => {
+  withDatabaseTransaction(async (client) => {
     await clearOtherDefaultContacts(client, id);
     const contact = await contactWithLatest(client, id);
     assertVersion(contact, payload.expected_version, "Kontak WhatsApp");
