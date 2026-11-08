@@ -2,6 +2,57 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// A narrow check of the repository-authored job layouts, not an arbitrary
+// YAML/shell security parser. Frontend policy must precede its mutative npm ci.
+export function validateFrontendNpmPolicyWorkflow(source, jobId = "release-quality") {
+  const text = String(source || "").replace(/^\s*#.*$/gm, "");
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex(line => line === `  ${jobId}:`);
+  if (start < 0) throw new Error(`Workflow npm policy wajib memiliki job ${jobId}.`);
+  let end = start + 1;
+  while (end < lines.length && !/^  [A-Za-z_][A-Za-z0-9_-]*:\s*$/.test(lines[end])) end++;
+  const body = lines.slice(start + 1, end).join("\n");
+  const steps = body.split(/^      - /m).slice(1).map(block => `      - ${block}`);
+  const names = ["Bootstrap pinned npm in ephemeral runner", "Verify frontend package policy", "Install frontend dependencies"];
+  const positions = names.map(name => steps.findIndex(step => step.split("\n")[0] === `      - name: ${name}`));
+  const selected = positions.map(index => steps[index] || "");
+  const errors = [];
+  for (const name of names) if (steps.filter(step => step.split("\n")[0] === `      - name: ${name}`).length !== 1) errors.push(`Langkah wajib tepat sekali: ${name}.`);
+  const commands = step => {
+    const rows = step.split("\n"), run = rows.findIndex(line => /^        run: /.test(line));
+    if (run < 0) return [];
+    if (rows[run] !== "        run: |") return [rows[run].slice("        run: ".length)];
+    const result = [];
+    for (const line of rows.slice(run + 1)) {
+      if (!line.trim()) continue;
+      if (!line.startsWith("          ")) break;
+      result.push(line.slice(10));
+    }
+    return result;
+  };
+  const expected = [
+    ['set -euo pipefail', 'npm install --global npm@11.21.0 --ignore-scripts --no-audit --no-fund', 'test "$(npm --version)" = "11.21.0"'],
+    ['node scripts/verify-package-policy.mjs'],
+    ['node scripts/verify-dependency-age.mjs', 'npm ci'],
+  ];
+  if (!(positions[0] >= 0 && positions[0] < positions[1] && positions[1] < positions[2])) errors.push("Bootstrap npm, package policy dan frontend install wajib berurutan.");
+  for (let i = 0; i < selected.length; i++) {
+    if (JSON.stringify(commands(selected[i])) !== JSON.stringify(expected[i])) errors.push(`Perintah npm policy wajib exact dan fail-closed: ${names[i]}.`);
+    if (/^\s+(?:if|continue-on-error):/m.test(selected[i])) errors.push("Langkah npm policy tidak boleh dilewati atau mentoleransi kegagalan.");
+  }
+  if (!/^        working-directory: \$\{\{ runner\.temp \}\}\s*$/m.test(selected[0]) || !/^        shell: bash\s*$/m.test(selected[0])) errors.push("Bootstrap npm pinned wajib memakai bash di runner.temp.");
+  for (const step of selected.slice(1)) if (!/^        working-directory: frontend-production\s*$/m.test(step)) errors.push("Package policy dan install wajib memakai checkout frontend.");
+  const prefix = text.split(/^jobs:\s*$/m)[0];
+  if (/^    (?:if|continue-on-error):/m.test(body) || /^\s*defaults:\s*$/m.test(prefix + "\n" + body) || /^\s*npm_config_(?:force|engine_strict|min_release_age(?:_exclude)?|before)\s*:/im.test(prefix + "\n" + body)) errors.push("Job npm policy tidak boleh mempunyai skip, defaults tersembunyi atau override env npm.");
+  for (const [index, step] of steps.entries()) {
+    if (/\bnpm\s+ci\b/.test(step) && index < positions[0]) errors.push("npm ci tidak boleh mendahului bootstrap npm pinned.");
+    if (index !== positions[0] && /--(?:force|ignore-scripts|engine-strict|min-release-age(?:-exclude)?|before)\b/i.test(step)) errors.push("Langkah dependency tidak boleh melonggarkan policy npm.");
+    if (index !== positions[2] && (/for\s+repo\s+in\s+[^;\n]*\bfrontend-production\b/.test(step) || /\bnpm\s+ci[^\n]*--prefix(?:=|\s+)["']?frontend-production\b/.test(step))) errors.push("Frontend npm ci harus terpisah dari loop dependency peer.");
+  }
+  if (errors.length) throw new Error(`Workflow frontend npm policy tidak sesuai:\n- ${errors.join("\n- ")}`);
+  return { npm_version: "11.21.0", age_check_before_ci: true };
+}
+
 const REQUIRED_PATTERNS = Object.freeze([
   [/^name:\s*Quality\s*$/m, "nama workflow Quality"],
   [/^\s*pull_request:\s*$/m, "trigger pull_request"],
@@ -37,6 +88,8 @@ const FORBIDDEN_PATTERNS = Object.freeze([
 export function validateQualityWorkflow(source) {
   const text = String(source || "");
   const errors = [];
+
+  validateFrontendNpmPolicyWorkflow(text);
 
   for (const [pattern, label] of REQUIRED_PATTERNS) {
     if (!pattern.test(text)) errors.push(`Tidak ditemukan: ${label}.`);

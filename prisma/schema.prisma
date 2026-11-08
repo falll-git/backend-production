@@ -88,6 +88,7 @@ model users {
   sj_publication_versions_approved    sj_publication_versions[]          @relation("SjPublicationVersionApprover")
   sj_media_created                    sj_media_assets[]                  @relation("SjMediaCreator")
   sj_publication_reviews              sj_publication_reviews[]           @relation("SjPublicationReviewer")
+  sj_change_requests                  sj_control_change_requests[]       @relation("SjChangeRequestSubmitter")
 
   created_outgoing_mails outgoing_mails[] @relation("OutgoingMailsCreator")
   updated_outgoing_mails outgoing_mails[] @relation("OutgoingMailsUpdater")
@@ -2287,6 +2288,32 @@ enum sj_profile_states {
   IN_REVIEW
   VERIFIED
   REVISION_REQUIRED
+  HIDDEN
+}
+
+enum sj_change_request_actions {
+  UNPUBLISH_PUBLICATION
+  ARCHIVE_PUBLICATION
+  HIDE_PROFILE
+  REVOKE_CONTACT
+  REVOKE_MEDIA
+  RECONFIRM_PUBLICATION
+}
+
+enum sj_change_request_resource_kinds {
+  PUBLICATION
+  PROFILE
+  CONTACT
+  MEDIA
+}
+
+enum sj_change_request_states {
+  IN_REVIEW
+  REVISION_REQUIRED
+  REJECTED
+  APPLIED
+  COMPLETED
+  FAILED
 }
 
 enum sj_storage_backends {
@@ -2343,6 +2370,7 @@ model sj_integration_settings {
   publish_enabled           Boolean              @default(false)
   filesystem_upload_enabled Boolean              @default(false)
   s3_upload_enabled         Boolean              @default(false)
+  review_authority          String               @default("local")
   last_success_at           DateTime?
   last_error_at             DateTime?
   last_error_code           String?
@@ -2353,6 +2381,7 @@ model sj_integration_settings {
 }
 
 model sj_public_profiles {
+  public_observations sj_public_observations[]
   id                 String            @id @default(uuid())
   singleton_key      String            @unique @default("BPRS_PUBLIC_PROFILE")
   current_version_id String?           @unique
@@ -2386,18 +2415,19 @@ model sj_public_profiles {
 }
 
 model sj_public_profile_versions {
-  id               String             @id @default(uuid())
-  profile_id       String
-  version_number   Int
-  payload_json     Json
-  payload_checksum String
-  state            sj_snapshot_states @default(DRAFT)
-  created_by       String
-  submitted_at     DateTime?
-  approved_by      String?
-  approved_at      DateTime?
-  rejection_reason String?
-  created_at       DateTime           @default(now())
+  id                  String             @id @default(uuid())
+  profile_id          String
+  version_number      Int
+  payload_json        Json
+  payload_checksum    String
+  state               sj_snapshot_states @default(DRAFT)
+  created_by          String
+  submitted_at        DateTime?
+  approved_by         String?
+  approved_by_subject String?
+  approved_at         DateTime?
+  rejection_reason    String?
+  created_at          DateTime           @default(now())
 
   profile              sj_public_profiles        @relation("SjProfileVersions", fields: [profile_id], references: [id], onDelete: Restrict)
   current_for_profile  sj_public_profiles?       @relation("SjProfileCurrentVersion")
@@ -2452,6 +2482,7 @@ model sj_whatsapp_contact_versions {
   created_by               String
   submitted_at             DateTime?
   verified_by              String?
+  verified_by_subject      String?
   verified_at              DateTime?
   rejection_reason         String?
   checksum                 String
@@ -2470,6 +2501,7 @@ model sj_whatsapp_contact_versions {
 }
 
 model sj_publications {
+  public_observations sj_public_observations[]
   id                          String                      @id @default(uuid())
   public_reference_code       String                      @unique
   source_type                 sj_publication_source_types
@@ -2512,6 +2544,26 @@ model sj_publications {
   @@index([updated_by])
 }
 
+model sj_public_observations {
+  id String @id @db.Uuid
+  publication_id String?
+  profile_id String?
+  source_origin String
+  public_identity String
+  institution_slug String
+  started_at DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(6)
+  finished_at DateTime? @db.Timestamptz(6)
+  state String @default("PENDING")
+  failure_code String?
+  observed_version Int?
+  profile_snapshot Json?
+  publication_snapshot Json?
+  publication sj_publications? @relation(fields:[publication_id],references:[id],onDelete:Restrict)
+  profile sj_public_profiles? @relation(fields:[profile_id],references:[id],onDelete:Restrict)
+  @@index([publication_id,started_at(sort:Desc),id(sort:Desc)],map:"sj_public_observations_publication_idx")
+  @@index([profile_id,started_at(sort:Desc),id(sort:Desc)],map:"sj_public_observations_profile_idx")
+}
+
 model sj_publication_versions {
   id                          String                   @id @default(uuid())
   publication_id              String
@@ -2532,6 +2584,7 @@ model sj_publication_versions {
   submitted_by                String?
   submitted_at                DateTime?
   approved_by                 String?
+  approved_by_subject         String?
   approved_at                 DateTime?
   rejection_reason            String?
   created_at                  DateTime                 @default(now())
@@ -2658,18 +2711,84 @@ model sj_publication_reviews {
   publication_id         String
   publication_version_id String
   action                 sj_review_actions
-  reviewer_id            String
+  reviewer_id            String?
+  reviewer_subject       String?
   reason                 String?
   safe_metadata          Json?
   created_at             DateTime          @default(now())
 
   publication         sj_publications         @relation(fields: [publication_id], references: [id], onDelete: Restrict)
   publication_version sj_publication_versions @relation(fields: [publication_version_id], references: [id], onDelete: Restrict)
-  reviewer            users                   @relation("SjPublicationReviewer", fields: [reviewer_id], references: [id])
+  reviewer            users?                  @relation("SjPublicationReviewer", fields: [reviewer_id], references: [id], onDelete: SetNull)
 
   @@index([publication_id, created_at])
   @@index([publication_version_id])
   @@index([reviewer_id, created_at])
+}
+
+model sj_control_review_commands {
+  command_id          String    @id @db.Uuid
+  instance_id         String
+  key_id              String
+  command_digest      String
+  actor_subject       String
+  resource_kind       String
+  resource_id         String
+  decision            String
+  expected_version    Int
+  expected_checksum   String
+  request_payload     Json
+  acknowledgment_json Json?
+  status              String
+  result_code         String?
+  created_at          DateTime  @default(now())
+  processed_at        DateTime?
+  deliveries          sj_sync_outbox[]
+
+  @@index([instance_id, created_at])
+  @@index([resource_kind, resource_id, created_at])
+}
+
+model sj_control_change_requests {
+  id                         String                           @id @default(uuid())
+  action                     sj_change_request_actions
+  resource_kind              sj_change_request_resource_kinds
+  resource_id                String
+  reason                     String
+  state                      sj_change_request_states         @default(IN_REVIEW)
+  request_version            Int                              @default(1)
+  expected_resource_version  Int
+  expected_resource_checksum String
+  impact_json                Json
+  impact_checksum            String
+  submitted_by               String
+  submitted_at               DateTime                         @default(now())
+  reviewer_note              String?
+  decided_by_subject         String?
+  decided_at                 DateTime?
+  applied_at                 DateTime?
+  completed_at               DateTime?
+  sync_event_id              String?                          @unique
+  failure_code               String?
+  created_at                 DateTime                         @default(now())
+  updated_at                 DateTime                         @default(now()) @updatedAt
+
+  submitter users @relation("SjChangeRequestSubmitter", fields: [submitted_by], references: [id], onDelete: Restrict)
+
+  @@index([state, created_at])
+  @@index([resource_kind, resource_id, created_at])
+  @@index([submitted_by, created_at])
+}
+
+model sj_control_request_nonces {
+  instance_id String
+  key_id      String
+  nonce       String
+  expires_at  DateTime
+  created_at  DateTime @default(now())
+
+  @@id([instance_id, key_id, nonce])
+  @@index([expires_at])
 }
 
 model sj_sync_outbox {
@@ -2682,6 +2801,8 @@ model sj_sync_outbox {
   schema_version    Int            @default(1)
   payload_json      Json
   payload_checksum  String
+  target_binding_json Json?
+  source_command_id String? @db.Uuid
   state             sj_sync_states @default(QUEUED)
   priority          Int            @default(100)
   available_at      DateTime       @default(now())
@@ -2693,10 +2814,13 @@ model sj_sync_outbox {
   acknowledged_at   DateTime?
 
   attempts sj_sync_attempts[]
+  recovery_receipts sj_control_recovery_receipts[]
+  source_command sj_control_review_commands? @relation(fields: [source_command_id], references: [command_id], onDelete: Restrict, onUpdate: NoAction, map: "sj_outbox_source_command_fk")
 
   @@unique([aggregate_id, aggregate_version, event_type])
   @@index([state, available_at, priority])
   @@index([aggregate_id, aggregate_version])
+  @@index([source_command_id], map: "sj_outbox_source_command_idx")
 }
 
 model sj_sync_attempts {
@@ -2714,6 +2838,18 @@ model sj_sync_attempts {
 
   @@unique([outbox_id, attempt_number])
   @@index([outbox_id, started_at])
+}
+
+model sj_control_recovery_receipts {
+  request_id String @id @db.Uuid
+  instance_id String @db.Uuid
+  operator_id String @db.Uuid
+  job_id String
+  request_digest String @db.Char(64)
+  reason String @db.VarChar(500)
+  result_json Json
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  job sj_sync_outbox @relation(fields:[job_id],references:[id],onDelete:Restrict,onUpdate:NoAction)
 }
 
 model sj_reconciliation_runs {

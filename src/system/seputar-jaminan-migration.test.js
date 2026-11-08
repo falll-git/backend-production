@@ -38,6 +38,34 @@ const workerIdentityHardeningSql = fs.readFileSync(
   ),
   "utf8",
 );
+const controlReviewSnapshotOutboxSql = fs.readFileSync(
+  path.resolve(
+    __dirname,
+    "../../prisma/migrations/20260910123000_allow_control_review_snapshot_outbox_event/migration.sql",
+  ),
+  "utf8",
+);
+const navigationAlignmentSql = fs.readFileSync(
+  path.resolve(
+    __dirname,
+    "../../prisma/migrations/20260911100000_align_seputar_jaminan_bank_navigation/migration.sql",
+  ),
+  "utf8",
+);
+const childPermissionAlignmentSql = fs.readFileSync(
+  path.resolve(
+    __dirname,
+    "../../prisma/migrations/20260913143000_align_sj_rls_with_child_permissions/migration.sql",
+  ),
+  "utf8",
+);
+const changeRequestWorkerGrantSql = fs.readFileSync(
+  path.resolve(
+    __dirname,
+    "../../prisma/migrations/20260913144000_grant_sj_change_request_worker_access/migration.sql",
+  ),
+  "utf8",
+);
 const workflowIntegrationSource = fs.readFileSync(
   path.resolve(__dirname, "../integration/seputar-jaminan.workflow.test.js"),
   "utf8",
@@ -83,6 +111,36 @@ test("setiap tabel modul memakai FORCE RLS dan policy yang eksplisit", () => {
       new RegExp(`CREATE POLICY[\\s\\S]*?ON public\\.${table}\\s`, "i"),
     );
   }
+});
+
+test("RLS SJ mengikuti permission child karena parent hanya pengelompokan navigasi", () => {
+  for (const route of ["ringkasan", "profil", "kontak", "publikasi", "pengajuan"]) {
+    assert.match(
+      childPermissionAlignmentSql,
+      new RegExp(`/dashboard/seputar-jaminan/${route}`),
+    );
+  }
+  assert.match(
+    childPermissionAlignmentSql,
+    /CREATE OR REPLACE FUNCTION public\.ruwang_arsip_sj_has_global_access/i,
+  );
+  assert.match(
+    childPermissionAlignmentSql,
+    /CREATE OR REPLACE FUNCTION public\.ruwang_arsip_sj_can_access_division/i,
+  );
+  assert.match(childPermissionAlignmentSql, /'sj_manage_all'/i);
+});
+
+test("worker hanya memperoleh akses minimum untuk menyelesaikan change request", () => {
+  assert.match(
+    changeRequestWorkerGrantSql,
+    /GRANT SELECT ON public\.sj_control_change_requests TO ruwang_sj_worker/i,
+  );
+  assert.match(
+    changeRequestWorkerGrantSql,
+    /GRANT UPDATE \(state, completed_at, failure_code, updated_at\)/i,
+  );
+  assert.doesNotMatch(changeRequestWorkerGrantSql, /GRANT\s+(?:ALL|INSERT|DELETE)/i);
 });
 
 test("worker sinkronisasi wajib role terpisah tanpa bypass RLS", () => {
@@ -147,7 +205,7 @@ test("kontrak publikasi menolak field sensitif dan menjaga empat mata", () => {
   assert.match(protectionSql, /cover_count <> 1/i);
 });
 
-test("outbox hanya menerima tujuh event V1", () => {
+test("outbox hanya menerima delapan event V1", () => {
   const eventTypes = [
     "UPSERT_BPRS_PROFILE",
     "UPSERT_WHATSAPP_CONTACT",
@@ -165,6 +223,31 @@ test("outbox hanya menerima tujuh event V1", () => {
   );
   assert.ok(eventConstraint, "Constraint event V1 tidak ditemukan.");
   assert.equal((eventConstraint[1].match(/'[A-Z_]+'/g) || []).length, 7);
+});
+
+test("migration adapter menambahkan snapshot Control tanpa mengubah event V1 lain", () => {
+  const eventTypes = [
+    "UPSERT_BPRS_PROFILE",
+    "UPSERT_WHATSAPP_CONTACT",
+    "REVOKE_WHATSAPP_CONTACT",
+    "UPSERT_PUBLICATION_SNAPSHOT",
+    "UNPUBLISH_PUBLICATION",
+    "ARCHIVE_PUBLICATION",
+    "REVOKE_MEDIA",
+    "CONTROL_REVIEW_SNAPSHOT",
+  ];
+  for (const eventType of eventTypes) {
+    assert.ok(controlReviewSnapshotOutboxSql.includes(`'${eventType}'`));
+  }
+  assert.match(
+    controlReviewSnapshotOutboxSql,
+    /DROP CONSTRAINT sj_outbox_event_type_v1/i,
+  );
+  const eventConstraint = controlReviewSnapshotOutboxSql.match(
+    /sj_outbox_event_type_v1 CHECK \(event_type IN \(([\s\S]*?)\)\)/i,
+  );
+  assert.ok(eventConstraint, "Constraint event Control tidak ditemukan.");
+  assert.equal((eventConstraint[1].match(/'[A-Z_]+'/g) || []).length, 8);
 });
 
 test("versi edit lokal dipisahkan dari versi event pusat", () => {
@@ -197,4 +280,23 @@ test("database mengunci vocabulary atribut publik Opsi A", () => {
   }
   assert.doesNotMatch(vocabularySql, /LAINNYA/);
   assert.doesNotMatch(vocabularySql, /\b(?:DROP|TRUNCATE|DELETE\s+FROM)\b/i);
+});
+
+test("migration navigasi SJ mandiri, tepat lima child, dan tidak menghapus data domain", () => {
+  for (const url of [
+    "/dashboard/seputar-jaminan/ringkasan",
+    "/dashboard/seputar-jaminan/profil",
+    "/dashboard/seputar-jaminan/kontak",
+    "/dashboard/seputar-jaminan/publikasi",
+    "/dashboard/seputar-jaminan/pengajuan",
+  ]) {
+    assert.ok(navigationAlignmentSql.includes(`'${url}'`));
+  }
+  assert.match(navigationAlignmentSql, /Parent Seputar Jaminan wajib memiliki tepat lima child/i);
+  assert.match(navigationAlignmentSql, /WHERE NOT EXISTS[\s\S]*?\/dashboard\/seputar-jaminan/i);
+  assert.doesNotMatch(navigationAlignmentSql, /\b(?:DROP|TRUNCATE|CASCADE)\b/i);
+  assert.doesNotMatch(
+    navigationAlignmentSql,
+    /DELETE FROM "(?:sj_|users|roles|menus)"/i,
+  );
 });

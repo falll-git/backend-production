@@ -145,10 +145,13 @@ exports.createRefreshToken = (data, client = prisma) => {
   return client.refresh_tokens.create({ data });
 };
 
-exports.findActiveRefreshTokenByHash = (tokenHash) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+// userId comes from a verified token, never from request body/query. Keep the
+// explicit owner predicate as well as FORCE RLS; auth needs no system bypass.
+exports.findActiveRefreshTokenByHash = (tokenHash, userId) => {
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.findFirst({
     where: {
       token_hash: tokenHash,
+      user_id: userId,
       revoked_at: null,
       expires_at: {
         gt: new Date(),
@@ -165,10 +168,12 @@ exports.findActiveRefreshTokenByHash = (tokenHash) => {
 exports.findRecentlyReplacedRefreshTokenByHash = ({
   tokenHash,
   revokedAfter,
+  userId,
 }) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.findFirst({
     where: {
       token_hash: tokenHash,
+      user_id: userId,
       revoked_at: { gte: revokedAfter },
       replaced_by_token_id: { not: null },
       expires_at: { gt: new Date() },
@@ -182,7 +187,7 @@ exports.findRecentlyReplacedRefreshTokenByHash = ({
 };
 
 exports.findActiveRefreshTokenByIdAndUserId = ({ id, userId }) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.findFirst({
     where: {
       id,
       user_id: userId,
@@ -193,7 +198,7 @@ exports.findActiveRefreshTokenByIdAndUserId = ({ id, userId }) => {
 };
 
 exports.findRefreshTokenByIdAndUserId = ({ id, userId }) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.findFirst({
     where: {
       id,
       user_id: userId,
@@ -223,10 +228,11 @@ exports.revokeActiveRefreshTokensByUserId = (userId, revokedAt, client = prisma)
   });
 };
 
-exports.findActiveRefreshTokenIdentityByHash = (tokenHash) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.findFirst({
+exports.findActiveRefreshTokenIdentityByHash = (tokenHash, userId) => {
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.findFirst({
     where: {
       token_hash: tokenHash,
+      user_id: userId,
       revoked_at: null,
       expires_at: { gt: new Date() },
     },
@@ -237,10 +243,12 @@ exports.findActiveRefreshTokenIdentityByHash = (tokenHash) => {
 exports.revokeActiveRefreshTokenByHash = (
   tokenHash,
   revokedAt,
+  userId,
 ) => {
-  return withSystemDatabaseClient((client) => client.refresh_tokens.updateMany({
+  return withRlsUserContext(userId, (client) => client.refresh_tokens.updateMany({
     where: {
       token_hash: tokenHash,
+      user_id: userId,
       revoked_at: null,
     },
     data: {

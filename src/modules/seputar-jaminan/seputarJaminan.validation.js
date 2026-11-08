@@ -108,6 +108,48 @@ const mediaRevokeSchema = Joi.object({
   reason_code: controlledCode.required(),
 });
 
+const changeRequestReason = publicText(10, 1000).required();
+const publicationChangeRequestSchema = Joi.object({
+  action: Joi.string().valid(
+    "UNPUBLISH_PUBLICATION",
+    "ARCHIVE_PUBLICATION",
+    "RECONFIRM_PUBLICATION",
+  ).required(),
+  expected_version: expectedVersion,
+  reason: changeRequestReason,
+});
+const resourceChangeRequestSchema = Joi.object({
+  expected_version: expectedVersion,
+  reason: changeRequestReason,
+});
+const mediaChangeRequestSchema = Joi.object({ reason: changeRequestReason });
+const resubmitChangeRequestSchema = Joi.object({
+  expected_version: Joi.number().integer().min(1).required(),
+  reason: changeRequestReason,
+});
+const changeRequestListQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1).when('paged',{is:true,then:Joi.valid(1)}),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  state: Joi.string().valid(
+    "IN_REVIEW",
+    "REVISION_REQUIRED",
+    "REJECTED",
+    "APPLIED",
+    "COMPLETED",
+    "FAILED",
+  ),
+  action: Joi.string().valid(
+    "UNPUBLISH_PUBLICATION",
+    "ARCHIVE_PUBLICATION",
+    "HIDE_PROFILE",
+    "REVOKE_CONTACT",
+    "REVOKE_MEDIA",
+    "RECONFIRM_PUBLICATION",
+  ),
+  paged: Joi.boolean().valid(true),
+  cursor: Joi.string().max(1000).when('paged',{is:true,then:Joi.optional(),otherwise:Joi.forbidden()}),
+});
+
 const integrationSettingsSchema = Joi.object({
   institution_id: uuid,
   installation_id: uuid,
@@ -154,7 +196,8 @@ const contactUpdateSchema = Joi.object({
 }).min(2);
 
 const listQuerySchema = Joi.object({
-  page: Joi.number().integer().min(1).default(1),
+  confirmation: Joi.string().valid('soon'),
+  page: Joi.number().integer().min(1).default(1).when('paged',{is:true,then:Joi.valid(1)}),
   limit: Joi.number().integer().min(1).max(100).default(20),
   state: Joi.string().valid(
     "DRAFT",
@@ -167,19 +210,75 @@ const listQuerySchema = Joi.object({
   ),
   category: Joi.string().valid("LAND", "BUILDING", "MACHINE_EQUIPMENT", "VEHICLE"),
   search: Joi.string().trim().max(120),
+  paged: Joi.boolean().valid(true),
+  cursor: Joi.string().max(1000).when('paged',{is:true,then:Joi.optional(),otherwise:Joi.forbidden()}),
+});
+
+const submissionListQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1).when('paged',{is:true,then:Joi.valid(1)}),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  kind: Joi.string().valid("PROFILE", "CONTACT", "PUBLICATION"),
+  state: Joi.string().valid(
+    "IN_REVIEW",
+    "REVISION_REQUIRED",
+    "APPROVED",
+    "VERIFIED",
+  ),
+  paged: Joi.boolean().valid(true),
+  cursor: Joi.string().max(1000).when('paged',{is:true,then:Joi.optional(),otherwise:Joi.forbidden()}),
+});
+
+// Pagination is offset-based. Unsupported cursor/sort/filter must not vanish.
+const eligibleListQuerySchema = listQuerySchema.fork(['state','category','paged','cursor','confirmation'], field=>field.forbidden());
+const cursorFields={paged:Joi.boolean().valid(true),limit:Joi.number().integer().min(1).max(100).when('paged',{is:true,then:Joi.number().default(20),otherwise:Joi.forbidden()}),
+  cursor:Joi.string().max(1000).when('paged',{is:true,then:Joi.optional(),otherwise:Joi.forbidden()})};
+const mediaListQuerySchema = Joi.object({...cursorFields,purpose:Joi.string().valid('BPRS_PUBLIC_MARK','PUBLICATION_IMAGE')});
+const contactListQuerySchema=Joi.object({...cursorFields,state:Joi.string().valid('DRAFT','IN_REVIEW','VERIFIED','REJECTED'),search:Joi.string().trim().min(1).max(120)});
+const reviewListQuerySchema=Joi.object(cursorFields);
+const historyQuerySchema=Joi.object({limit:Joi.number().integer().min(1).max(100).default(20),cursor:Joi.string().max(1000),stream:Joi.string().valid('versions','reviews').default('versions')});
+const idParamsSchema = Joi.object({id:uuid.required()});
+const publicationDetailQuerySchema=Joi.object({history:Joi.string().valid('paged')});
+
+const saveOperationSchema = (kind) => Joi.object({
+  intent: Joi.string().valid('SAVE_DRAFT','SAVE_AND_SUBMIT').required(),
+  resource_id: kind === 'PROFILE' ? Joi.forbidden() : uuid,
+  draft: kind === 'PROFILE' ? profileDraftSchema.required() : Joi.when('resource_id', {
+    is: Joi.exist(),
+    then: (kind === 'CONTACT' ? contactUpdateSchema : updatePublicationDraftSchema).required(),
+    otherwise: (kind === 'CONTACT' ? contactDraftSchema : createPublicationSchema).required(),
+  }),
 });
 
 module.exports = {
+  saveOperationSchema,
+  syncEventListQuerySchema: Joi.object({
+    limit:Joi.number().integer().min(1).max(100).default(20),
+    cursor:Joi.string().max(1000),
+    state:Joi.string().valid('NEEDS_ATTENTION','QUEUED','SENDING','ACKNOWLEDGED','RETRYING','FAILED','QUARANTINED').default('NEEDS_ATTENTION'),
+    event_id:uuid,
+  }),
+  publicationDetailQuerySchema,
+  historyQuerySchema,
+  contactListQuerySchema,reviewListQuerySchema,
+  eligibleListQuerySchema,
+  mediaListQuerySchema,
+  idParamsSchema,
+  changeRequestListQuerySchema,
   contactDraftSchema,
   contactUpdateSchema,
   createPublicationSchema,
   integrationSettingsSchema,
   listQuerySchema,
   mediaRevokeSchema,
+  mediaChangeRequestSchema,
+  publicationChangeRequestSchema,
   profileCommandSchema,
   profileDraftSchema,
   reasonCodeCommandSchema,
   reasonCommandSchema,
+  resourceChangeRequestSchema,
+  resubmitChangeRequestSchema,
+  submissionListQuerySchema,
   updatePublicationDraftSchema,
   versionCommandSchema,
 };

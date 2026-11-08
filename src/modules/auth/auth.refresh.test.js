@@ -88,8 +88,14 @@ test("refresh bersamaan memakai kembali token pengganti yang sama dalam grace wi
       repository.findRefreshTokenByIdAndUserId,
   };
 
-  repository.findActiveRefreshTokenByHash = async () => null;
-  repository.findRecentlyReplacedRefreshTokenByHash = async () => ({
+  repository.findActiveRefreshTokenByHash = async (hash, userId) => {
+    assert.equal(hash, hashToken(oldToken));
+    assert.equal(userId, user.id);
+    return null;
+  };
+  repository.findRecentlyReplacedRefreshTokenByHash = async ({ userId }) => {
+    assert.equal(userId, user.id);
+    return ({
     id: "session-old",
     user_id: user.id,
     token_hash: hashToken(oldToken),
@@ -99,7 +105,8 @@ test("refresh bersamaan memakai kembali token pengganti yang sama dalam grace wi
     ip_address: context.ipAddress,
     user_agent: context.userAgent,
     user,
-  });
+    });
+  };
   repository.findRefreshTokenByIdAndUserId = async () => ({
     id: "session-replacement",
     user_id: user.id,

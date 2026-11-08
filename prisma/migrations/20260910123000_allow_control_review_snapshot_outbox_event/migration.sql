@@ -1,0 +1,14 @@
+ALTER TABLE public.sj_sync_outbox
+  DROP CONSTRAINT sj_outbox_event_type_v1;
+
+ALTER TABLE public.sj_sync_outbox
+  ADD CONSTRAINT sj_outbox_event_type_v1 CHECK (event_type IN (
+    'UPSERT_BPRS_PROFILE',
+    'UPSERT_WHATSAPP_CONTACT',
+    'REVOKE_WHATSAPP_CONTACT',
+    'UPSERT_PUBLICATION_SNAPSHOT',
+    'UNPUBLISH_PUBLICATION',
+    'ARCHIVE_PUBLICATION',
+    'REVOKE_MEDIA',
+    'CONTROL_REVIEW_SNAPSHOT'
+  ));

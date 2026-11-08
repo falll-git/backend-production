@@ -107,6 +107,7 @@ async function startServer() {
       await closeWorkerHeartbeatHealth();
       await closeApplicationCache();
       await closeRateLimitStore();
+      await require('./modules/seputar-jaminan/reviewDatabase').disconnect();
       if (systemPrisma !== prisma) await systemPrisma.$disconnect();
       await prisma.$disconnect();
       await shutdownObservability();

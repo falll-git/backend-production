@@ -121,6 +121,7 @@ async function safeRecordDebtorActivity(db = prisma, payload = {}) {
 
 module.exports = {
   auditSnapshot,
+  recordDebtorActivity,
   requestMetadata,
   safeRecordDebtorActivity,
 };

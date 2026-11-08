@@ -171,6 +171,7 @@ function validateSemantics(event) {
 
   const aggregateIdFieldByEvent = {
     UPSERT_BPRS_PROFILE: "institution_id",
+    HIDE_BPRS_PROFILE: "institution_id",
     UPSERT_WHATSAPP_CONTACT: "whatsapp_contact_id",
     REVOKE_WHATSAPP_CONTACT: "whatsapp_contact_id",
     UPSERT_PUBLICATION_SNAPSHOT: "publication_id",

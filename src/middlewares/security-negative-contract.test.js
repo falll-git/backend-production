@@ -26,6 +26,9 @@ const BODYLESS_MUTATIONS = new Set([
   "POST /seputar-jaminan/media",
   "POST /seputar-jaminan/reconciliation",
   "POST /seputar-jaminan/sync-events/:id/retry",
+  // Pemeriksaan publik bank menerima identitas dari URL/instansi, bukan body.
+  "POST /seputar-jaminan/profile/public-observation",
+  "POST /seputar-jaminan/publications/:id/public-observation",
 ]);
 
 function routePaths(layer) {
@@ -61,7 +64,9 @@ function mutationEntries() {
 
 test("seluruh mutation route memakai schema body atau termasuk action tanpa body yang diaudit", () => {
   const entries = mutationEntries();
-  assert.equal(entries.length, 127);
+  // Termasuk 3 save-operation, 4 lifecycle, 1 resubmit dan 2 observation
+  // yang sekarang terdaftar di seputarJaminan.route.js.
+  assert.equal(entries.length, 137);
   const withoutValidation = entries
     .filter((entry) => entry.bodyValidations.length === 0)
     .map((entry) => entry.key)
@@ -89,7 +94,7 @@ test("seluruh schema mutation menolak atau membuang field mass-assignment asing"
       );
     }
   }
-  assert.equal(validatedRoutes, 112);
+  assert.equal(validatedRoutes, 120);
 });
 
 test("middleware validasi membuang field audit yang tidak ada di schema", async () => {

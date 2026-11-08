@@ -21,6 +21,7 @@
     "event_type": {
       "enum": [
         "UPSERT_BPRS_PROFILE",
+        "HIDE_BPRS_PROFILE",
         "UPSERT_WHATSAPP_CONTACT",
         "REVOKE_WHATSAPP_CONTACT",
         "UPSERT_PUBLICATION_SNAPSHOT",
@@ -41,6 +42,12 @@
       "properties": {
         "event_type": { "const": "UPSERT_BPRS_PROFILE" },
         "payload": { "$ref": "profile.schema.json" }
+      }
+    },
+    {
+      "properties": {
+        "event_type": { "const": "HIDE_BPRS_PROFILE" },
+        "payload": { "$ref": "profile-hidden.schema.json" }
       }
     },
     {

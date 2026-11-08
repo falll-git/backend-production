@@ -1,0 +1,119 @@
+name: SJ disposable integration
+
+# Deliberate exact peer revisions: never silently test a moving peer main.
+# This is a required companion gate for an SJ release candidate, not deployment.
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: Frontend candidate commit SHA (40 hex)
+        required: true
+        type: string
+      control_ref:
+        description: Control candidate commit SHA (40 hex)
+        required: true
+        type: string
+      central_ref:
+        description: SJ central candidate commit SHA (40 hex)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      frontend_ref:
+        required: true
+        type: string
+      control_ref:
+        required: true
+        type: string
+      central_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sj-disposable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  owned-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FRONTEND_REF: ${{ inputs.frontend_ref }}
+      CONTROL_REF: ${{ inputs.control_ref }}
+      CENTRAL_REF: ${{ inputs.central_ref }}
+      DATABASE_URL: postgresql://generate:generate@127.0.0.1:1/generate_only
+    steps:
+      - name: Reject unspecified or moving peer references
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ref in "$FRONTEND_REF" "$CONTROL_REF" "$CENTRAL_REF"; do
+            [[ "$ref" =~ ^[a-fA-F0-9]{40}$ ]] || exit 1
+          done
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: backend-production
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: falll-git/frontend-production
+          ref: ${{ inputs.frontend_ref }}
+          path: frontend-production
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: falll-git/ruwang-control
+          ref: ${{ inputs.control_ref }}
+          path: ruwang-control
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: falll-git/seputarjaminan
+          ref: ${{ inputs.central_ref }}
+          path: seputarjaminan-production
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - name: Bootstrap pinned npm in ephemeral runner
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.21.0 --ignore-scripts --no-audit --no-fund
+          test "$(npm --version)" = "11.21.0"
+      - name: Verify frontend package policy
+        working-directory: frontend-production
+        run: node scripts/verify-package-policy.mjs
+      - name: Install locked dependencies in fresh CI checkouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in backend-production ruwang-control seputarjaminan-production; do
+            npm ci --prefix "$repo"
+          done
+          cd backend-production
+          npm run prisma:generate
+      - name: Install frontend dependencies
+        working-directory: frontend-production
+        run: |
+          node scripts/verify-dependency-age.mjs
+          npm ci
+      - name: Validate harness guards and companion workflow
+        working-directory: backend-production
+        run: node --test src/integration/support/sj-ci-portability.test.js src/integration/support/sj-disposable-guard.test.js src/integration/support/sj-contract-double.test.js
+      - name: Run all five owned-resource suites with real scanner
+        id: gate
+        working-directory: backend-production
+        run: node scripts/run-sj-ci-gate.js
+      - name: Retain sanitized results including cleanup receipts
+        if: ${{ always() && steps.gate.outputs.summary != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sj-disposable-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.gate.outputs.summary }}
+          if-no-files-found: error
+          retention-days: 7

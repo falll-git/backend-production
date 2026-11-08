@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { withDatabaseTransaction } = require("../../config/database-rls");
 const { USER_SELECT } = require("../debtors/debtors.repository");
 
 const CONTRACT_INCLUDE = {
@@ -53,8 +54,8 @@ function count(where) {
   return prisma.debtor_contracts.count({ where });
 }
 
-function findById(id, where = {}) {
-  return prisma.debtor_contracts.findFirst({
+function findById(id, where = {}, db = prisma) {
+  return db.debtor_contracts.findFirst({
     where: {
       id,
       ...where,
@@ -76,6 +77,17 @@ function update(id, data) {
     data,
     include: CONTRACT_INCLUDE,
   });
+}
+
+function softDelete(current, data, db) {
+  return db.debtor_contracts.updateMany({
+    where: { id: current.id, deleted_at: null, updated_at: current.updated_at },
+    data,
+  });
+}
+
+function transaction(callback, options) {
+  return withDatabaseTransaction(callback, options);
 }
 
 function findDebtorById(id) {
@@ -147,5 +159,7 @@ module.exports = {
   findDebtorByIdWithWhere,
   findMany,
   findProductById,
+  softDelete,
+  transaction,
   update,
 };

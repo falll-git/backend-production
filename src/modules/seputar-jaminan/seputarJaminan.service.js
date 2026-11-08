@@ -4,6 +4,8 @@ const prisma = require("../../config/prisma");
 const { withDatabaseTransaction } = require("../../config/database-rls");
 const { AppError } = require("../../utils/errors");
 const { getContracts } = require("./contracts");
+const { queueReviewSnapshot } = require("./controlReviewSnapshot.service");
+const { assertCurrentSubmissionDependencies } = require('./submissionDependencies');
 
 const ROOT_MENU_URL = "/dashboard/seputar-jaminan";
 const PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -15,6 +17,7 @@ const CATEGORY_TO_PUBLIC = Object.freeze({
 });
 const PUBLIC_STATE_BY_EVENT = Object.freeze({
   UPSERT_BPRS_PROFILE: "ACTIVE",
+  HIDE_BPRS_PROFILE: "HIDDEN",
   UPSERT_WHATSAPP_CONTACT: "VERIFIED",
   REVOKE_WHATSAPP_CONTACT: "REVOKED",
   UPSERT_PUBLICATION_SNAPSHOT: "PUBLISHED",
@@ -62,8 +65,11 @@ function decimalNumber(value) {
 function serializeMediaLink(link) {
   return {
     id: link.media_asset.id,
+    purpose: link.media_asset.purpose,
+    file_name: link.media_asset.source_file_name_sanitized,
+    created_at: link.media_asset.created_at,
     state: link.media_asset.state,
-    central_ready: Boolean(link.media_asset.central_media_id),
+    central_ready: require('./mediaReadiness').isMediaReady(link.media_asset),
     mime_type: link.media_asset.detected_mime,
     size_bytes: Number(link.media_asset.size_bytes),
     width: link.media_asset.width,
@@ -106,7 +112,7 @@ function serializeVersion(version) {
   };
 }
 
-function serializePublication(publication) {
+function serializePublication(publication, settings = {}) {
   const current = publication.current_version || publication.published_version;
   return {
     id: publication.id,
@@ -130,6 +136,11 @@ function serializePublication(publication) {
       : null,
     current_version: serializeVersion(publication.current_version),
     published_version: serializeVersion(publication.published_version),
+    version_semantics: require('./readContract').versionSemantics,
+    public_observation: require('./readContract').publicObservation,
+    workflow_eligibility: {
+      withdrawal: require('./publicationLifecycle').withdrawalEligibility(publication),
+    },
     created_at: publication.created_at,
     updated_at: publication.updated_at,
   };
@@ -151,7 +162,7 @@ function detailAttributes(version) {
         ? { land_area_m2: decimalNumber(version.building_detail.land_area_m2) }
         : {}),
       building_area_m2: decimalNumber(version.building_detail.building_area_m2),
-      ...(version.building_detail.floor_count
+      ...(version.building_detail.floor_count !== null && version.building_detail.floor_count !== undefined
         ? { floor_count: version.building_detail.floor_count }
         : {}),
       ...(version.building_detail.public_usage
@@ -204,6 +215,7 @@ async function requireSettings(client = prisma, flag = null) {
 }
 
 async function assertExpectedVersion(client, publicationId, expectedVersion) {
+  await require('./workflowLock').lockPublication(client, publicationId);
   const publication = await client.sj_publications.findUnique({
     where: { id: publicationId },
   });
@@ -252,6 +264,7 @@ async function createOutbox(
       schema_version: 1,
       payload_json: payload,
       payload_checksum: checksum,
+      target_binding_json: require('./outboxTarget').captureTarget(eventType, settings),
       priority,
       state: "QUEUED",
     },
@@ -453,8 +466,9 @@ async function assertSource(client, payload) {
   }
 }
 
-async function createPublicationRecord(payload, user) {
-  return withDatabaseTransaction(async (client) => {
+async function createPublicationRecord(payload, user, transaction = withDatabaseTransaction) {
+  return transaction(async (client) => {
+    await require('./workflowLock').lockContactReferences(client);
     await requireSettings(client, "draft_enabled");
     const ownerDivisionId = payload.owner_division_id || user.division_id;
     await assertSource(client, payload);
@@ -462,6 +476,7 @@ async function createPublicationRecord(payload, user) {
 
     let publication;
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      await client.$executeRawUnsafe('SAVEPOINT sj_publication_create');
       try {
         publication = await client.sj_publications.create({
           data: {
@@ -477,9 +492,18 @@ async function createPublicationRecord(payload, user) {
             updated_by: user.id,
           },
         });
+        await client.$executeRawUnsafe('RELEASE SAVEPOINT sj_publication_create');
         break;
       } catch (error) {
-        if (error.code !== "P2002" || attempt === 4) throw error;
+        await client.$executeRawUnsafe('ROLLBACK TO SAVEPOINT sj_publication_create');
+        await client.$executeRawUnsafe('RELEASE SAVEPOINT sj_publication_create');
+        if (error.code !== 'P2002') throw error;
+        const target = JSON.stringify(error.meta?.target || '');
+        if (payload.source_collateral_id && await client.sj_publications.findFirst({where:{source_collateral_id:payload.source_collateral_id,archived_at:null},select:{id:true}})) {
+          throw new AppError('Agunan ini sudah memiliki publikasi aktif. Buka publikasi yang sudah ada.', 409);
+        }
+        if (target && target !== '""' && !target.includes('public_reference_code')) throw error;
+        if (attempt === 4) throw new AppError('Kode publikasi belum berhasil dibuat. Silakan coba lagi.', 409);
       }
     }
 
@@ -578,8 +602,8 @@ async function cloneVersionToDraft(client, publication, userId) {
   });
 }
 
-async function updatePublicationDraft(id, payload, user) {
-  return withDatabaseTransaction(async (client) => {
+async function updatePublicationDraft(id, payload, user, transaction = withDatabaseTransaction) {
+  return transaction(async (client) => {
     await requireSettings(client, "draft_enabled");
     let publication = await assertExpectedVersion(
       client,
@@ -591,6 +615,12 @@ async function updatePublicationDraft(id, payload, user) {
       include: versionInclude,
     });
     if (!version) throw new AppError("Versi publikasi tidak ditemukan.", 409);
+    if (version.state === "IN_REVIEW") {
+      throw new AppError(
+        "Publikasi sedang diperiksa. Tunggu keputusan sebelum membuat perubahan baru.",
+        409,
+      );
+    }
     if (version.state !== "DRAFT") {
       version = await cloneVersionToDraft(client, publication, user.id);
       publication = await client.sj_publications.findUnique({ where: { id } });
@@ -695,9 +725,9 @@ async function buildPublicationPayload(client, publication, version, timestamps)
   return { payload, settings, complete };
 }
 
-async function submitPublication(id, expectedVersion, user) {
-  return withDatabaseTransaction(async (client) => {
-    await requireSettings(client, "review_enabled");
+async function submitPublication(id, expectedVersion, user, transaction = withDatabaseTransaction) {
+  return transaction(async (client) => {
+    const settings = await requireSettings(client, "review_enabled");
     const publication = await assertExpectedVersion(client, id, expectedVersion);
     const version = await client.sj_publication_versions.findUnique({
       where: { id: publication.current_version_id },
@@ -706,6 +736,7 @@ async function submitPublication(id, expectedVersion, user) {
     if (!version || version.state !== "DRAFT") {
       throw new AppError("Hanya draf yang dapat diajukan untuk diperiksa.", 409);
     }
+    assertCurrentSubmissionDependencies(version);
     if (
       version.media.some(
         (link) =>
@@ -715,10 +746,12 @@ async function submitPublication(id, expectedVersion, user) {
       version.whatsapp_contact_version.contact.sync_state !== "ACKNOWLEDGED" ||
       version.profile_version.profile.sync_state !== "ACKNOWLEDGED"
     ) {
-      throw new AppError(
+      const error = new AppError(
         "Profil, kontak, dan seluruh gambar harus selesai disinkronkan sebelum katalog diajukan.",
         409,
       );
+      error.code = 'SJ_SUBMISSION_DEPENDENCIES_NOT_READY';
+      throw error;
     }
     const now = new Date();
     await client.sj_publication_versions.update({
@@ -733,7 +766,7 @@ async function submitPublication(id, expectedVersion, user) {
         reviewer_id: user.id,
       },
     });
-    return client.sj_publications.update({
+    const submitted = await client.sj_publications.update({
       where: { id },
       data: {
         state: "IN_REVIEW",
@@ -742,12 +775,27 @@ async function submitPublication(id, expectedVersion, user) {
       },
       include: publicationInclude,
     });
+    await queueReviewSnapshot(client, settings, "publication", id);
+    return submitted;
   });
 }
 
-async function requestRevision(id, payload, user) {
-  return withDatabaseTransaction(async (client) => {
-    await requireSettings(client, "review_enabled");
+function assertReviewAuthority(settings, central) {
+  const authority = settings.review_authority || "local";
+  if ((central && authority !== "central") || (!central && authority !== "local")) {
+    throw new AppError(central ? "Pemeriksaan pusat belum diaktifkan." : "Keputusan pemeriksaan hanya dapat dilakukan melalui Ruwang Control.", 409);
+  }
+}
+
+function reviewActorData(actor) {
+  return actor.type === "control"
+    ? { reviewer_id: null, reviewer_subject: actor.subject }
+    : { reviewer_id: actor.id, reviewer_subject: null };
+}
+
+async function requestRevisionInTransaction(client, id, payload, actor) {
+    const settings = await requireSettings(client, "review_enabled");
+    assertReviewAuthority(settings, actor.type === "control");
     const publication = await assertExpectedVersion(
       client,
       id,
@@ -759,7 +807,7 @@ async function requestRevision(id, payload, user) {
     if (!version || version.state !== "IN_REVIEW") {
       throw new AppError("Publikasi ini tidak sedang menunggu pemeriksaan.", 409);
     }
-    if (version.last_edited_by === user.id || version.submitted_by === user.id) {
+    if (actor.type === "bank" && (version.last_edited_by === actor.id || version.submitted_by === actor.id)) {
       throw new AppError("Pemeriksa harus berbeda dari pembuat/pengaju.", 409);
     }
     await client.sj_publication_versions.update({
@@ -771,7 +819,7 @@ async function requestRevision(id, payload, user) {
         publication_id: id,
         publication_version_id: version.id,
         action: "REVISION_REQUESTED",
-        reviewer_id: user.id,
+        ...reviewActorData(actor),
         reason: payload.reason,
       },
     });
@@ -780,16 +828,19 @@ async function requestRevision(id, payload, user) {
       data: {
         state: "REVISION_REQUIRED",
         lock_version: { increment: 1 },
-        updated_by: user.id,
+        ...(actor.type === "bank" ? { updated_by: actor.id } : {}),
       },
       include: publicationInclude,
     });
-  });
 }
 
-async function approveAndPublish(id, expectedVersion, user) {
-  return withDatabaseTransaction(async (client) => {
+async function requestRevision(id, payload, user) {
+  return withDatabaseTransaction((client) => requestRevisionInTransaction(client, id, payload, { type: "bank", id: user.id }));
+}
+
+async function approveAndPublishInTransaction(client, id, expectedVersion, actor) {
     const settings = await requireSettings(client, "publish_enabled");
+    assertReviewAuthority(settings, actor.type === "control");
     if (!settings.sync_enabled || settings.connection_state !== "ACTIVE") {
       throw new AppError("Koneksi pusat belum aktif. Publikasi belum dapat diterbitkan.", 409);
     }
@@ -801,7 +852,7 @@ async function approveAndPublish(id, expectedVersion, user) {
     if (!version || version.state !== "IN_REVIEW") {
       throw new AppError("Publikasi ini tidak sedang menunggu pemeriksaan.", 409);
     }
-    if (version.last_edited_by === user.id || version.submitted_by === user.id) {
+    if (actor.type === "bank" && (version.last_edited_by === actor.id || version.submitted_by === actor.id)) {
       throw new AppError("Pemeriksa harus berbeda dari pembuat/pengaju.", 409);
     }
     if (
@@ -830,7 +881,8 @@ async function approveAndPublish(id, expectedVersion, user) {
       where: { id: version.id },
       data: {
         state: "APPROVED",
-        approved_by: user.id,
+        approved_by: actor.type === "bank" ? actor.id : null,
+        approved_by_subject: actor.type === "control" ? actor.subject : null,
         approved_at: now,
         public_payload_json: payload,
         payload_checksum: contracts.payloadChecksum(payload),
@@ -847,7 +899,7 @@ async function approveAndPublish(id, expectedVersion, user) {
         lock_version: { increment: 1 },
         last_confirmed_at: now,
         next_reconfirmation_at: nextAt,
-        updated_by: user.id,
+        ...(actor.type === "bank" ? { updated_by: actor.id } : {}),
         last_sync_error_code: null,
       },
     });
@@ -856,7 +908,7 @@ async function approveAndPublish(id, expectedVersion, user) {
         publication_id: id,
         publication_version_id: version.id,
         action: "APPROVED",
-        reviewer_id: user.id,
+        ...reviewActorData(actor),
       },
     });
     await createOutbox(client, settings, {
@@ -871,19 +923,23 @@ async function approveAndPublish(id, expectedVersion, user) {
       where: { id },
       include: publicationInclude,
     });
-  });
 }
 
-async function unpublish(id, payload, user) {
-  return withDatabaseTransaction(async (client) => {
+async function approveAndPublish(id, expectedVersion, user) {
+  return withDatabaseTransaction((client) => approveAndPublishInTransaction(client, id, expectedVersion, { type: "bank", id: user.id }));
+}
+
+async function unpublishInTransaction(client, id, payload, actor) {
     const settings = await requireSettings(client, "sync_enabled");
+    assertReviewAuthority(settings, actor.type === "control");
     const publication = await assertExpectedVersion(
       client,
       id,
       payload.expected_version,
     );
-    if (publication.state !== "PUBLISHED") {
-      throw new AppError("Hanya publikasi tayang yang dapat diturunkan.", 409);
+    const withdrawal = require('./publicationLifecycle').withdrawalEligibility(publication);
+    if (!withdrawal.eligible) {
+      throw new AppError(withdrawal.reason, 409);
     }
     const now = new Date();
     const aggregateVersion = publication.aggregate_version + 1;
@@ -900,7 +956,7 @@ async function unpublish(id, payload, user) {
         sync_state: "QUEUED",
         aggregate_version: aggregateVersion,
         lock_version: { increment: 1 },
-        updated_by: user.id,
+        ...(actor.type === "bank" ? { updated_by: actor.id } : {}),
       },
     });
     await createOutbox(client, settings, {
@@ -915,12 +971,16 @@ async function unpublish(id, payload, user) {
       where: { id },
       include: publicationInclude,
     });
-  });
 }
 
-async function reconfirm(id, expectedVersion, user) {
-  return withDatabaseTransaction(async (client) => {
+async function unpublish(id, payload, user) {
+  return withDatabaseTransaction((client) =>
+    unpublishInTransaction(client, id, payload, { type: "bank", id: user.id }));
+}
+
+async function reconfirmInTransaction(client, id, expectedVersion, actor) {
     const settings = await requireSettings(client, "sync_enabled");
+    assertReviewAuthority(settings, actor.type === "control");
     const publication = await assertExpectedVersion(client, id, expectedVersion);
     if (publication.state !== "PUBLISHED" || !publication.published_version_id) {
       throw new AppError("Hanya publikasi tayang yang dapat dikonfirmasi.", 409);
@@ -946,7 +1006,7 @@ async function reconfirm(id, expectedVersion, user) {
         sync_state: "QUEUED",
         last_confirmed_at: now,
         next_reconfirmation_at: nextAt,
-        updated_by: user.id,
+        ...(actor.type === "bank" ? { updated_by: actor.id } : {}),
       },
     });
     await client.sj_publication_reviews.create({
@@ -954,7 +1014,7 @@ async function reconfirm(id, expectedVersion, user) {
         publication_id: id,
         publication_version_id: version.id,
         action: "RECONFIRMED",
-        reviewer_id: user.id,
+        ...reviewActorData(actor),
       },
     });
     await createOutbox(client, settings, {
@@ -969,14 +1029,18 @@ async function reconfirm(id, expectedVersion, user) {
       where: { id },
       include: publicationInclude,
     });
-  });
 }
 
-async function archive(id, expectedVersion, user) {
-  return withDatabaseTransaction(async (client) => {
+async function reconfirm(id, expectedVersion, user) {
+  return withDatabaseTransaction((client) =>
+    reconfirmInTransaction(client, id, expectedVersion, { type: "bank", id: user.id }));
+}
+
+async function archiveInTransaction(client, id, expectedVersion, actor) {
     const settings = await requireSettings(client);
+    assertReviewAuthority(settings, actor.type === "control");
     const publication = await assertExpectedVersion(client, id, expectedVersion);
-    if (publication.state === "PUBLISHED") {
+    if (publication.state === "PUBLISHED" && actor.type !== "control") {
       throw new AppError("Turunkan publikasi sebelum mengarsipkannya.", 409);
     }
     if (publication.state === "ARCHIVED") return publication;
@@ -991,7 +1055,7 @@ async function archive(id, expectedVersion, user) {
         aggregate_version: aggregateVersion,
         lock_version: { increment: 1 },
         sync_state: shouldSync ? "QUEUED" : publication.sync_state,
-        updated_by: user.id,
+        ...(actor.type === "bank" ? { updated_by: actor.id } : {}),
       },
     });
     if (shouldSync) {
@@ -1012,7 +1076,11 @@ async function archive(id, expectedVersion, user) {
       where: { id },
       include: publicationInclude,
     });
-  });
+}
+
+async function archive(id, expectedVersion, user) {
+  return withDatabaseTransaction((client) =>
+    archiveInTransaction(client, id, expectedVersion, { type: "bank", id: user.id }));
 }
 
 function safeSettings(settings) {
@@ -1028,6 +1096,11 @@ function safeSettings(settings) {
     module_visible: settings.module_visible,
     draft_enabled: settings.draft_enabled,
     review_enabled: settings.review_enabled,
+    review_authority: settings.review_authority || "local",
+    review_submission_ready:
+      (settings.review_authority || "local") === "local" ||
+      (String(process.env.SJ_CONTROL_SNAPSHOT_ENABLED || "false").toLowerCase() === "true" &&
+        String(process.env.SJ_CONTROL_INSTANCE_ID || "").trim() === settings.installation_id),
     sync_enabled: settings.sync_enabled,
     publish_enabled: settings.publish_enabled,
     filesystem_upload_enabled: settings.filesystem_upload_enabled,
@@ -1038,7 +1111,11 @@ function safeSettings(settings) {
   };
 }
 
-exports.getSettings = async () => safeSettings(await prisma.sj_integration_settings.findFirst());
+exports.getSettings = async () => {
+  const settings=safeSettings(await prisma.sj_integration_settings.findFirst());
+  if(!settings)return null;
+  return {...settings,entry_actions:await require('./actionRead').readEntryActions(prisma)};
+};
 
 exports.listTaxonomy = async () => {
   const contracts = await getContracts();
@@ -1075,6 +1152,8 @@ exports.listTaxonomy = async () => {
 };
 
 exports.updateSettings = async (payload) => {
+  const authority=String(process.env.SJ_CONTROL_REVIEW_AUTHORITY || 'local').trim().toLowerCase();
+  if(!['local','central'].includes(authority))throw new AppError('Konfigurasi pemeriksaan belum sesuai.',503);
   if (
     process.env.NODE_ENV === "production" &&
     payload.central_base_url &&
@@ -1111,7 +1190,7 @@ exports.updateSettings = async (payload) => {
         where: { id: existing.id },
         data: payload,
       })
-    : await prisma.sj_integration_settings.create({ data: payload });
+    : await prisma.sj_integration_settings.create({ data: {...payload, review_authority:authority} });
   return safeSettings(next);
 };
 
@@ -1131,6 +1210,9 @@ exports.getDashboard = async () => {
   ]);
   return {
     connection: safeSettings(settings),
+    count_scope: 'ACCESSIBLE_BANK_RECORDS',
+    synchronization_scope: 'SJ_AND_CONTROL_OUTBOX',
+    public_observation: require('./readContract').publicObservation,
     publications: Object.fromEntries(
       stateRows.map((row) => [row.state, row._count._all]),
     ),
@@ -1156,6 +1238,7 @@ exports.getSyncSummary = async () => {
 
 exports.listPublications = async (query) => {
   const where = {
+    ...(query.confirmation === 'soon' ? {AND:[{state:'PUBLISHED'},{next_reconfirmation_at:{lte:new Date(Date.now()+7*24*60*60*1000)}}]} : {}),
     ...(query.state ? { state: query.state } : {}),
     ...(query.category ? { asset_category: query.category } : {}),
     ...(query.search
@@ -1172,34 +1255,33 @@ exports.listPublications = async (query) => {
       : {}),
   };
   const skip = (query.page - 1) * query.limit;
-  const [rows, total] = await Promise.all([
+  const cursor=require('./readCursor');
+  const cursorFilter={state:query.state||null,category:query.category||null,search:query.search||null,...(query.confirmation?{confirmation:query.confirmation}:{})};
+  const position=query.paged?cursor.decodeBy(query.cursor,cursorFilter,'created_at'):null;
+  const [rows, total, settings] = await Promise.all([
     prisma.sj_publications.findMany({
-      where,
+      where: position ? { AND: [where, position] } : where,
       include: publicationInclude,
-      orderBy: [{ updated_at: "desc" }, { id: "desc" }],
-      skip,
-      take: query.limit,
+      orderBy: [{ [query.paged ? 'created_at' : 'updated_at']: "desc" }, { id: "desc" }],
+      ...(query.paged?{take:query.limit+1}:{skip,take:query.limit}),
     }),
-    prisma.sj_publications.count({ where }),
+    query.paged ? null : prisma.sj_publications.count({ where }),
+    prisma.sj_integration_settings.findFirst(),
   ]);
-  return {
-    items: rows.map(serializePublication),
-    pagination: {
-      page: query.page,
-      limit: query.limit,
-      total,
-      total_pages: Math.ceil(total / query.limit),
-    },
-  };
+  const actions=require('./actionRead'),context=await actions.context(prisma,rows,'publication');
+  const summaries=await require('./publicObservation.service').publicationSummaries(rows,settings);
+  const serialize=row=>({...serializePublication(row,settings||{}),action_availability:actions.publication(row,context),observation_summary:summaries.get(row.id)??null});
+  if(query.paged)return cursor.pageBy(rows,query.limit,cursorFilter,serialize,'created_at');
+  return {items: rows.map(serialize),pagination: require('./readContract').pagination(query.page,query.limit,total)};
 };
 
-exports.getPublication = async (id) => {
-  const publication = await prisma.sj_publications.findUnique({
+exports.getPublication = async (id, query={}) => {
+  const [publication, settings] = await Promise.all([prisma.sj_publications.findUnique({
     where: { id },
     include: {
       ...publicationInclude,
-      reviews: {
-        orderBy: { created_at: "desc" },
+      reviews: query.history==='paged'?false:{
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
         select: {
           id: true,
           action: true,
@@ -1209,17 +1291,25 @@ exports.getPublication = async (id) => {
         },
       },
     },
-  });
+  }), prisma.sj_integration_settings.findFirst()]);
   if (!publication) throw new AppError("Publikasi tidak ditemukan.", 404);
-  return { ...serializePublication(publication), reviews: publication.reviews };
+  const actions=require('./actionRead'),context=await actions.context(prisma,[publication],'publication');
+  const mediaRows=[...new Map([publication.current_version,publication.published_version].flatMap(v=>(v?.media||[]).map(l=>[l.media_asset.id,l.media_asset]))).values()];
+  const mediaContext=await actions.context(prisma,mediaRows,'media');
+  const dto=serializePublication(publication,settings||{});
+  return { ...dto,
+    // User-specific controls are not part of immutable approved content.
+    media_actions:Object.fromEntries(mediaRows.map(row=>[row.id,actions.media(row,mediaContext)])),
+    ...(query.history==='paged'?{review_history:{mode:'PAGED',loaded:false}}:{reviews:publication.reviews}),
+    action_availability:actions.publication(publication,context) };
 };
 
-exports.createPublication = async (payload, user) =>
-  serializePublication(await createPublicationRecord(payload, user));
-exports.updatePublicationDraft = async (id, payload, user) =>
-  serializePublication(await updatePublicationDraft(id, payload, user));
-exports.submitPublication = async (id, payload, user) =>
-  serializePublication(await submitPublication(id, payload.expected_version, user));
+exports.createPublication = async (payload, user, transaction) =>
+  serializePublication(await createPublicationRecord(payload, user, transaction));
+exports.updatePublicationDraft = async (id, payload, user, transaction) =>
+  serializePublication(await updatePublicationDraft(id, payload, user, transaction));
+exports.submitPublication = async (id, payload, user, transaction) =>
+  serializePublication(await submitPublication(id, payload.expected_version, user, transaction));
 exports.requestRevision = async (id, payload, user) =>
   serializePublication(await requestRevision(id, payload, user));
 exports.approveAndPublish = async (id, payload, user) =>
@@ -1262,14 +1352,16 @@ exports.listEligibleCollaterals = async ({ page = 1, limit = 20, search = "" }) 
     }),
     prisma.debtor_collaterals.count({ where }),
   ]);
-  return { items: rows, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } };
+  return { items: rows, pagination: require('./readContract').pagination(page,limit,total) };
 };
 
-exports.listReviews = async () => {
+exports.listReviews = async (query={}) => {
+  const cursor=require('./readCursor'),filter=['reviews'];
   const rows = await prisma.sj_publications.findMany({
-    where: { state: "IN_REVIEW" },
+    where: { state: "IN_REVIEW",...(query.paged?cursor.decode(query.cursor,filter):{}) },
     include: publicationInclude,
-    orderBy: { updated_at: "asc" },
+    orderBy: query.paged?[{created_at:'desc'},{id:'desc'}]:[{ updated_at: "asc" }, { id: "asc" }],
+    ...(query.paged?{take:query.limit+1}:{}),
   });
   const evidenceIds = rows
     .filter((row) => row.source_type === "MANUAL" && row.manual_evidence_document_id)
@@ -1305,8 +1397,11 @@ exports.listReviews = async () => {
   ]);
   const evidenceById = new Map(evidenceDocuments.map((row) => [row.id, row]));
   const collateralById = new Map(collaterals.map((row) => [row.id, row]));
-  return rows.map((row) => ({
+  const actionRead = require('./actionRead');
+  const actionContext = await actionRead.context(prisma, rows, 'publication');
+  const serializeReview=(row) => ({
     ...serializePublication(row),
+    action_availability: actionRead.publication(row, actionContext),
     review_source:
       row.source_type === "MANUAL"
         ? {
@@ -1318,8 +1413,35 @@ exports.listReviews = async () => {
             type: "COLLATERAL",
             collateral: collateralById.get(row.source_collateral_id) || null,
           },
-  }));
+  });
+  return query.paged?cursor.page(rows,query.limit,filter,serializeReview):rows.map(serializeReview);
 };
+
+// Deliberately excludes payloads, signatures, nonce and lease internals.
+function syncEventSummary(row, context) {
+  return {
+    id:row.id,event_id:row.event_id,aggregate_type:row.aggregate_type,
+    aggregate_id:row.aggregate_id,aggregate_version:row.aggregate_version,event_type:row.event_type,
+    state:row.state,attempt_count:row.attempt_count,last_error_code:row.last_error_code,
+    available_at:row.available_at,created_at:row.created_at,acknowledged_at:row.acknowledged_at,
+    action_availability:require('./actionRead').syncEvent(row,context),
+  };
+}
+exports.listSyncEvents = async (query) => {
+  const cursor=require('./readCursor');
+  const filter={state:query.state||'NEEDS_ATTENTION',event_id:query.event_id||null};
+  const where={state:filter.state==='NEEDS_ATTENTION'?{in:['FAILED','QUARANTINED']}:filter.state,
+    ...(filter.event_id?{event_id:filter.event_id}:{})};
+  const position=cursor.decodeBy(query.cursor,filter);
+  const rows=await prisma.sj_sync_outbox.findMany({where:position?{AND:[where,position]}:where,
+    orderBy:[{created_at:'desc'},{id:'desc'}],take:query.limit+1});
+  const context=await require('./actionRead').context(prisma,rows,'sync');
+  return cursor.pageBy(rows,query.limit,filter,row=>syncEventSummary(row,context));
+};
+exports.getLatestReconciliation = () => prisma.sj_reconciliation_runs.findFirst({
+  orderBy:[{started_at:'desc'},{id:'desc'}],
+  select:{id:true,state:true,count_checked:true,count_mismatch:true,started_at:true,finished_at:true},
+});
 
 exports.getSyncEvent = async (id) => {
   const row = await prisma.sj_sync_outbox.findUnique({
@@ -1340,7 +1462,9 @@ exports.getSyncEvent = async (id) => {
     },
   });
   if (!row) throw new AppError("Catatan sinkronisasi tidak ditemukan.", 404);
+  const actions=require('./actionRead'),context=await actions.context(prisma,[row],'sync');
   return {
+    action_availability:actions.syncEvent(row,context),
     id: row.id,
     event_id: row.event_id,
     aggregate_type: row.aggregate_type,
@@ -1358,13 +1482,17 @@ exports.getSyncEvent = async (id) => {
 };
 
 exports.retrySyncEvent = async (id) => {
-  const row = await prisma.sj_sync_outbox.findUnique({ where: { id } });
+  await withDatabaseTransaction(async client=>{
+  const row = await client.sj_sync_outbox.findUnique({ where: { id } });
   if (!row) throw new AppError("Catatan sinkronisasi tidak ditemukan.", 404);
   if (!["FAILED", "QUARANTINED", "RETRYING"].includes(row.state)) {
     throw new AppError("Sinkronisasi ini belum dapat diulangi.", 409);
   }
-  await prisma.sj_sync_outbox.update({
-    where: { id },
+  const settings = await client.sj_integration_settings.findFirst();
+  const targetBlock = require('./outboxTarget').outboxTargetBlock(row, settings);
+  if (targetBlock) throw new AppError(targetBlock.reason, 409);
+  const changed=await client.sj_sync_outbox.updateMany({
+    where: { id, state:row.state,attempt_count:row.attempt_count,locked_at:row.locked_at,locked_by:row.locked_by },
     data: {
       state: "QUEUED",
       available_at: new Date(),
@@ -1373,14 +1501,25 @@ exports.retrySyncEvent = async (id) => {
       locked_by: null,
     },
   });
+  if(changed.count!==1)throw new AppError('Status sinkronisasi sudah berubah. Muat ulang sebelum mencoba lagi.',409);
+  // Bank lifecycle already applied; only its delivery is being retried.
+  await client.sj_control_change_requests.updateMany({where:{sync_event_id:row.event_id,state:'FAILED'},data:{state:'APPLIED',failure_code:null}});
+  });
   return exports.getSyncEvent(id);
 };
 
-exports.createReconciliation = async (user) => {
-  const settings = await requireSettings(prisma, "sync_enabled");
+exports.createReconciliation = async (user) => withDatabaseTransaction(async client => {
+  const settings = await requireSettings(client, "sync_enabled");
+  // Two tabs or a timed-out response reuse the active run, not a duplicate job.
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('ruwang:sj:reconciliation-create'))`;
+  const active = await client.sj_reconciliation_runs.findFirst({
+    where:{state:{in:['PENDING','RUNNING']}},orderBy:[{started_at:'desc'},{id:'desc'}],
+    select:{id:true,state:true,count_checked:true,count_mismatch:true,started_at:true,finished_at:true},
+  });
+  if(active)return active;
   const contracts = await getContracts();
-  const events = await prisma.sj_sync_outbox.findMany({
-    where: { aggregate_version: { gt: 0 } },
+  const events = await client.sj_sync_outbox.findMany({
+    where: { aggregate_version: { gt: 0 }, event_type: { in: Object.keys(PUBLIC_STATE_BY_EVENT) } },
     orderBy: [{ aggregate_id: "asc" }, { aggregate_version: "desc" }],
     select: {
       aggregate_type: true,
@@ -1422,7 +1561,7 @@ exports.createReconciliation = async (user) => {
     throw new AppError("Manifest rekonsiliasi lokal tidak valid.", 422);
   }
   const checksum = contracts.payloadChecksum(manifest);
-  return prisma.sj_reconciliation_runs.create({
+  return client.sj_reconciliation_runs.create({
     data: {
       initiated_by_type: "USER",
       initiated_by: user.id,
@@ -1438,10 +1577,30 @@ exports.createReconciliation = async (user) => {
       started_at: true,
     },
   });
-};
+});
 
 exports.ROOT_MENU_URL = ROOT_MENU_URL;
 exports.createOutbox = createOutbox;
 exports.requireSettings = requireSettings;
 exports.serializePublication = serializePublication;
 exports.PUBLIC_STATE_BY_EVENT = PUBLIC_STATE_BY_EVENT;
+exports.applyControlPublicationDecision = async (client, command) => {
+  const actor = { type: "control", subject: command.actor_subject };
+  const row = command.decision === "approve"
+    ? await approveAndPublishInTransaction(client, command.resource.id, command.expected_version, actor)
+    : await requestRevisionInTransaction(client, command.resource.id, { expected_version: command.expected_version, reason: command.reason }, actor);
+  return serializePublication(row);
+};
+exports.applyControlPublicationLifecycle = async (client, action, id, expectedVersion, actorSubject) => {
+  const actor = { type: "control", subject: actorSubject };
+  if (action === "UNPUBLISH_PUBLICATION") {
+    return unpublishInTransaction(client, id, { expected_version: expectedVersion, reason_code: "OWNER_REQUEST" }, actor);
+  }
+  if (action === "RECONFIRM_PUBLICATION") {
+    return reconfirmInTransaction(client, id, expectedVersion, actor);
+  }
+  if (action === "ARCHIVE_PUBLICATION") {
+    return archiveInTransaction(client, id, expectedVersion, actor);
+  }
+  throw new AppError("Tindakan publikasi tidak didukung.", 422);
+};

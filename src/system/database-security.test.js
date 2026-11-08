@@ -131,6 +131,17 @@ test("tabel baru wajib masuk daftar RLS atau pengecualian eksplisit", () => {
   );
 
   assert.ok(Object.keys(RLS_TABLE_EXEMPTIONS).includes("users"));
+  assert.ok(MANDATORY_RLS_TABLES.includes("sj_control_change_requests"));
+  assert.ok(MANDATORY_RLS_TABLES.includes("sj_public_observations"));
+  assert.ok(MANDATORY_RLS_TABLES.includes("sj_save_operations"));
+  assert.equal(
+    RLS_TABLE_EXEMPTIONS.sj_control_request_nonces,
+    "system_only_control_integration",
+  );
+  assert.equal(
+    RLS_TABLE_EXEMPTIONS.sj_control_review_commands,
+    "system_only_control_integration",
+  );
   assert.ok(result.failures.includes("rls_table_unclassified:new_sensitive_table"));
 });
 

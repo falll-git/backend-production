@@ -5,7 +5,8 @@ const jwt = require("jsonwebtoken");
 
 const repository = require("./auth.repository");
 const service = require("./auth.service");
-const { generateAccessToken } = require("../../utils/jwt");
+const { generateAccessToken, generateRefreshToken } = require("../../utils/jwt");
+const { hashToken } = require("../../utils/auth-onboarding");
 
 test("logout Bearer-only mencabut sesi dari klaim access token", async () => {
   const originalRevoke = repository.revokeActiveRefreshTokenByIdAndUserId;
@@ -37,18 +38,50 @@ test("logout Bearer-only mencabut sesi dari klaim access token", async () => {
 test("logout cookie-only mengembalikan pelaku untuk audit tanpa mengekspos token", async () => {
   const originalFind = repository.findActiveRefreshTokenIdentityByHash;
   const originalRevoke = repository.revokeActiveRefreshTokenByHash;
-  repository.findActiveRefreshTokenIdentityByHash = async () => ({
-    user_id: "user-cookie",
-  });
-  repository.revokeActiveRefreshTokenByHash = async () => ({ count: 1 });
+  const refreshToken = generateRefreshToken({ id: "user-cookie", jti: "session-cookie" });
+  repository.findActiveRefreshTokenIdentityByHash = async (hash, userId) => {
+    assert.equal(hash, hashToken(refreshToken));
+    assert.equal(userId, "user-cookie");
+    return { user_id: "user-cookie" };
+  };
+  repository.revokeActiveRefreshTokenByHash = async (hash, at, userId) => {
+    assert.equal(hash, hashToken(refreshToken));
+    assert.ok(at instanceof Date);
+    assert.equal(userId, "user-cookie");
+    return { count: 1 };
+  };
 
   try {
-    const result = await service.logout({ refreshToken: "refresh-cookie" });
+    const result = await service.logout({ refreshToken });
     assert.deepEqual(result, { actor_id: "user-cookie" });
     assert.equal(Object.hasOwn(result, "refreshToken"), false);
   } finally {
     repository.findActiveRefreshTokenIdentityByHash = originalFind;
     repository.revokeActiveRefreshTokenByHash = originalRevoke;
+  }
+});
+
+test("logout cookie tidak valid tidak mencari atau mencabut identitas dari token tak tepercaya", async () => {
+  const originalFind = repository.findActiveRefreshTokenIdentityByHash;
+  const originalRevoke = repository.revokeActiveRefreshTokenByHash;
+  repository.findActiveRefreshTokenIdentityByHash = async () => assert.fail("unverified lookup");
+  repository.revokeActiveRefreshTokenByHash = async () => assert.fail("unverified revoke");
+  try {
+    assert.deepEqual(await service.logout({ refreshToken: "forged-cookie" }), { actor_id: null });
+  } finally {
+    repository.findActiveRefreshTokenIdentityByHash = originalFind;
+    repository.revokeActiveRefreshTokenByHash = originalRevoke;
+  }
+});
+
+test("logout tidak menyembunyikan kegagalan penyimpanan pencabutan", async () => {
+  const originalRevoke = repository.revokeActiveRefreshTokenByIdAndUserId;
+  repository.revokeActiveRefreshTokenByIdAndUserId = async () => { throw Error("OWNED_DB_FAILURE"); };
+  try {
+    const accessToken = generateAccessToken({ id: "user-test", session_id: "session-test" });
+    await assert.rejects(service.logout({ accessToken }), /OWNED_DB_FAILURE/);
+  } finally {
+    repository.revokeActiveRefreshTokenByIdAndUserId = originalRevoke;
   }
 });
 

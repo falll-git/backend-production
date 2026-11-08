@@ -193,9 +193,10 @@ function summarizeProvisionState(state) {
 
   for (const expected of REQUIRED_MENUS) {
     const current = state.menusByUrl.get(expected.url);
+    const policy = ADMIN_POLICY_BY_URL.get(expected.url);
     if (!current) {
       missingMenus.push(expected.url);
-      missingAdminPermissions.push(expected.url);
+      if (policy) missingAdminPermissions.push(expected.url);
       continue;
     }
 
@@ -204,12 +205,14 @@ function summarizeProvisionState(state) {
       driftedMenus.push(expected.url);
     }
 
+    if (!policy) continue;
+
     const currentPermission = state.roleMenusByMenuId.get(current.id);
     if (!currentPermission) {
       missingAdminPermissions.push(expected.url);
       continue;
     }
-    const expectedPermission = permissionData(ADMIN_POLICY_BY_URL.get(expected.url));
+    const expectedPermission = permissionData(policy);
     if (!permissionMeetsPolicy(currentPermission, expectedPermission)) {
       preservedRestrictedAdminPermissions.push(expected.url);
     }
@@ -280,11 +283,13 @@ async function applyProvisioning(client) {
     }
 
     for (const expected of REQUIRED_MENUS) {
+      const policy = ADMIN_POLICY_BY_URL.get(expected.url);
+      if (!policy) continue;
       const menuId = menuIdsByUrl.get(expected.url);
       const currentPermission = initialState.roleMenusByMenuId.get(menuId);
       if (currentPermission) continue;
 
-      const permission = permissionData(ADMIN_POLICY_BY_URL.get(expected.url));
+      const permission = permissionData(policy);
       const result = await client.query(
         `INSERT INTO role_menus
            (id, role_id, menu_id, can_create, can_read, can_update, can_delete,

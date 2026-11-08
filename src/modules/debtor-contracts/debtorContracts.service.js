@@ -18,6 +18,7 @@ const {
 } = require("../../utils/slik-reference-dictionary");
 const {
   auditSnapshot,
+  recordDebtorActivity,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
 
@@ -440,12 +441,12 @@ function canManageContractRecord(contract, scope) {
   );
 }
 
-async function getManageableContract(id, userId) {
+async function getManageableContract(id, userId, db) {
   const scope = await getDebtorAccessScope(userId);
   const contract = await repository.findById(id, {
     deleted_at: null,
     ...buildContractVisibilityWhere(scope),
-  });
+  }, db);
   if (!contract) throw new AppError("Kontrak debitur tidak ditemukan.", 404);
   if (!canManageContractRecord(contract, scope)) {
     throw new AppError("Anda tidak memiliki izin mengelola kontrak ini.", 403);
@@ -485,22 +486,30 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  const current = await getManageableContract(id, userId);
-  const deleted = await repository.update(id, {
-    status: "INACTIVE",
-    deleted_at: new Date(),
-    deleted_by: userId || null,
-  });
-  await safeRecordDebtorActivity(undefined, {
-    actor_id: userId || null,
-    action: "DELETE",
-    source: "MANUAL",
-    entity_type: "debtor_contracts",
-    entity_id: deleted.id,
-    debtor_id: deleted.debtor_id,
-    contract_id: deleted.id,
-    title: `Nonaktifkan kontrak ${deleted.no_kontrak}`,
-    before_data: auditSnapshot(current, CONTRACT_AUDIT_FIELDS),
-    after_data: auditSnapshot(deleted, CONTRACT_AUDIT_FIELDS),
+  await repository.transaction(async (tx) => {
+    const current = await getManageableContract(id, userId, tx);
+    const changes = {
+      status: "INACTIVE",
+      deleted_at: new Date(),
+      deleted_by: userId || null,
+    };
+    // RLS may hide the tombstone immediately; do not request its RETURNING row.
+    const result = await repository.softDelete(current, changes, tx);
+    if (result.count !== 1) {
+      throw new AppError("Kontrak berubah atau sudah dinonaktifkan. Muat ulang data.", 409);
+    }
+    const deleted = { ...current, ...changes };
+    await recordDebtorActivity(tx, {
+      actor_id: userId || null,
+      action: "DELETE",
+      source: "MANUAL",
+      entity_type: "debtor_contracts",
+      entity_id: current.id,
+      debtor_id: current.debtor_id,
+      contract_id: current.id,
+      title: `Nonaktifkan kontrak ${current.no_kontrak}`,
+      before_data: auditSnapshot(current, CONTRACT_AUDIT_FIELDS),
+      after_data: auditSnapshot(deleted, CONTRACT_AUDIT_FIELDS),
+    });
   });
 };

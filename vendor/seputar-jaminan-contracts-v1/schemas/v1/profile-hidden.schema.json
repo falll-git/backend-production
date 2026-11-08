@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seputarjaminan.com/contracts/v1/profile-hidden.schema.json",
+  "title": "Profil BPRS Disembunyikan V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["institution_id", "reason_code", "hidden_at"],
+  "properties": {
+    "institution_id": { "type": "string", "format": "uuid" },
+    "reason_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,79}$" },
+    "hidden_at": { "type": "string", "format": "date-time" }
+  }
+}

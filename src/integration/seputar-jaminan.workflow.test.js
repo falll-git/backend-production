@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
+// Fail before dotenv, app imports, connections, fixture writes or legacy cleanup.
+require("./support/sj-disposable-guard").rejectLegacyRun();
 const pg = require("pg");
 const sharp = require("sharp");
 const request = require("supertest");
@@ -8,6 +10,7 @@ const request = require("supertest");
 const { loadEnv } = require("../config/env");
 
 loadEnv();
+require("./support/sj-disposable-guard").rejectLegacyRun();
 
 const {
   buildAuthorization,
@@ -73,33 +76,40 @@ async function grantTestCapabilities(prisma, user, features, snapshots) {
     where: { url: { startsWith: "/dashboard/seputar-jaminan" } },
   });
   const permissionByUrl = {
-    "/dashboard/seputar-jaminan": {
-      can_create: true,
-      can_read: true,
-      can_update: true,
-      can_delete: true,
-      features,
-    },
-    "/dashboard/seputar-jaminan/katalog": {
-      can_create: true,
-      can_read: true,
-      can_update: true,
-      can_delete: true,
-      features: [],
-    },
-    "/dashboard/seputar-jaminan/pemeriksaan": {
+    "/dashboard/seputar-jaminan/ringkasan": {
       can_create: false,
+      can_read: true,
+      can_update: true,
+      can_delete: false,
+      features: features.filter((feature) => ["sj_reconfirm", "sj_sync_retry"].includes(feature)),
+    },
+    "/dashboard/seputar-jaminan/profil": {
+      can_create: true,
       can_read: true,
       can_update: true,
       can_delete: false,
       features: [],
     },
-    "/dashboard/seputar-jaminan/profil-kontak": {
+    "/dashboard/seputar-jaminan/kontak": {
       can_create: true,
       can_read: true,
       can_update: true,
-      can_delete: true,
+      can_delete: false,
       features: [],
+    },
+    "/dashboard/seputar-jaminan/publikasi": {
+      can_create: true,
+      can_read: true,
+      can_update: true,
+      can_delete: false,
+      features: [],
+    },
+    "/dashboard/seputar-jaminan/pengajuan": {
+      can_create: false,
+      can_read: true,
+      can_update: true,
+      can_delete: false,
+      features: features.filter((feature) => !["sj_reconfirm", "sj_sync_retry"].includes(feature)),
     },
   };
   for (const menu of menus) {

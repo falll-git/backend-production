@@ -3,12 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { validateQualityWorkflow } from "./verify-ci-workflow.mjs";
+import { validateQualityWorkflow, validateFrontendNpmPolicyWorkflow } from "./verify-ci-workflow.mjs";
 
 const workflow = fs.readFileSync(
   path.resolve(".github", "workflows", "quality.yml"),
   "utf8",
-);
+).replaceAll("\r\n", "\n");
 
 test("workflow Quality memenuhi kebijakan CI quality-only", () => {
   assert.deepEqual(validateQualityWorkflow(workflow), {
@@ -96,4 +96,25 @@ test("workflow Quality menolak action yang tidak dipin", () => {
       ),
     /commit SHA 40 karakter/,
   );
+});
+
+test("frontend dependency policy pins native npm before package policy and lock-age before ci", () => {
+  assert.deepEqual(validateFrontendNpmPolicyWorkflow(workflow), { npm_version: "11.21.0", age_check_before_ci: true });
+});
+
+test("frontend dependency policy rejects missing bootstrap, wrong npm, or missing version assertion", () => {
+  for (const changed of [workflow.replace(/\n      - name: Bootstrap pinned npm in ephemeral runner[\s\S]*?(?=\n      - name:)/, ""), workflow.replace("npm@11.21.0", "npm@11.8.0"), workflow.replace('          test "$(npm --version)" = "11.21.0"\n', "")]) assert.throws(() => validateFrontendNpmPolicyWorkflow(changed), /npm policy|Bootstrap/);
+});
+
+test("frontend dependency policy rejects absent, late or tolerated age verification", () => {
+  for (const changed of [workflow.replace("          node scripts/verify-dependency-age.mjs\n", ""), workflow.replace("          node scripts/verify-dependency-age.mjs\n          npm ci", "          npm ci\n          node scripts/verify-dependency-age.mjs"), workflow.replace("node scripts/verify-dependency-age.mjs", "node scripts/verify-dependency-age.mjs || true"), workflow.replace("      - name: Install frontend dependencies", "      - name: Install frontend dependencies\n        continue-on-error: true")]) assert.throws(() => validateFrontendNpmPolicyWorkflow(changed), /npm policy/);
+});
+
+test("frontend dependency policy rejects missing package policy or wrong working directory", () => {
+  const policy = "      - name: Verify frontend package policy\n        working-directory: frontend-production\n        run: node scripts/verify-package-policy.mjs";
+  for (const changed of [workflow.replace(policy, ""), workflow.replace(policy, policy.replace("working-directory: frontend-production", "working-directory: backend-production"))]) assert.throws(() => validateFrontendNpmPolicyWorkflow(changed), /npm policy/);
+});
+
+test("frontend dependency policy rejects early ci, hidden defaults and policy overrides", () => {
+  for (const changed of [workflow.replace("    steps:\n", "    steps:\n      - run: npm ci\n"), workflow.replace("    steps:\n", "    defaults:\n      run:\n        working-directory: backend-production\n    steps:\n"), workflow.replace('      CI: "true"', '      CI: "true"\n      NPM_CONFIG_MIN_RELEASE_AGE: "0"'), workflow.replace("          npm ci\n", "          npm ci --ignore-scripts\n")]) assert.throws(() => validateFrontendNpmPolicyWorkflow(changed), /npm policy/);
 });

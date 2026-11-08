@@ -15,13 +15,14 @@ test("snapshot kontrak V1 terverifikasi dan dapat memvalidasi event", async () =
 
   const contracts = await getContracts();
   assert.equal(contracts.CONTRACT_VERSION, 1);
-  assert.equal(contracts.EVENT_TYPES.length, 7);
+  assert.equal(contracts.EVENT_TYPES.length, 8);
   assert.equal(typeof contracts.validateIntegrationEvent, "function");
 });
 
-test("rekonsiliasi memetakan tepat tujuh event ke state publik pusat", () => {
+test("rekonsiliasi memetakan tepat delapan event ke state publik pusat", () => {
   assert.deepEqual(PUBLIC_STATE_BY_EVENT, {
     UPSERT_BPRS_PROFILE: "ACTIVE",
+    HIDE_BPRS_PROFILE: "HIDDEN",
     UPSERT_WHATSAPP_CONTACT: "VERIFIED",
     REVOKE_WHATSAPP_CONTACT: "REVOKED",
     UPSERT_PUBLICATION_SNAPSHOT: "PUBLISHED",

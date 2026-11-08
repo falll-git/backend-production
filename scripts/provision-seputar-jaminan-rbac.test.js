@@ -89,9 +89,9 @@ test("apply memerlukan persetujuan dan nama database yang cocok", () => {
   );
 });
 
-test("definisi provisioning memuat tepat empat menu dan kebijakan Admin", () => {
-  assert.equal(REQUIRED_MENUS.length, 4);
-  assert.equal(ADMIN_POLICY_BY_URL.size, 4);
+test("definisi provisioning memuat satu parent, tepat lima child, dan kebijakan Admin per child", () => {
+  assert.equal(REQUIRED_MENUS.length, 6);
+  assert.equal(ADMIN_POLICY_BY_URL.size, 5);
   assert.equal(REQUIRED_MENUS[0].parentUrl, null);
   assert.equal(
     REQUIRED_MENUS.slice(1).every(
@@ -101,22 +101,23 @@ test("definisi provisioning memuat tepat empat menu dan kebijakan Admin", () => 
   );
 });
 
-test("state kosong merencanakan empat menu dan empat permission Admin", () => {
+test("state kosong merencanakan enam menu dan lima permission Admin", () => {
   const summary = summarizeProvisionState({
     menusByUrl: new Map(),
     roleMenusByMenuId: new Map(),
   });
-  assert.equal(summary.missingMenus.length, 4);
-  assert.equal(summary.missingAdminPermissions.length, 4);
+  assert.equal(summary.missingMenus.length, 6);
+  assert.equal(summary.missingAdminPermissions.length, 5);
   assert.deepEqual(summary.driftedMenus, []);
 });
 
 test("state lengkap bersih dan idempotent", () => {
   const menus = REQUIRED_MENUS.map(menuRow);
+  const childMenus = menus.slice(1);
   const summary = summarizeProvisionState({
     menusByUrl: new Map(menus.map((menu) => [menu.url, menu])),
     roleMenusByMenuId: new Map(
-      menus.map((menu, index) => [menu.id, roleMenuRow(menu, index)]),
+      childMenus.map((menu, index) => [menu.id, roleMenuRow(menu, index + 1)]),
     ),
   });
   assert.deepEqual(summary.missingMenus, []);
@@ -127,7 +128,7 @@ test("state lengkap bersih dan idempotent", () => {
 
 test("permission yang sudah ada tidak ditimpa dan dilaporkan jika dibatasi", () => {
   const menus = REQUIRED_MENUS.map(menuRow);
-  const permissions = menus.map((menu, index) => roleMenuRow(menu, index));
+  const permissions = menus.slice(1).map((menu, index) => roleMenuRow(menu, index + 1));
   permissions[0] = {
     ...permissions[0],
     can_read: false,
@@ -141,7 +142,7 @@ test("permission yang sudah ada tidak ditimpa dan dilaporkan jika dibatasi", () 
   });
   assert.deepEqual(summary.missingAdminPermissions, []);
   assert.deepEqual(summary.preservedRestrictedAdminPermissions, [
-    REQUIRED_MENUS[0].url,
+    REQUIRED_MENUS[1].url,
   ]);
 });
 
@@ -162,10 +163,11 @@ test("drift metadata dan hierarchy terdeteksi tanpa mengubah URL", () => {
   );
 });
 
-test("kebijakan Admin mengharuskan read dan seluruh fitur khusus root", () => {
-  const expected = permissionData(ADMIN_POLICY_BY_URL.get(REQUIRED_MENUS[0].url));
+test("parent tidak menjadi jalur izin dan kebijakan Admin diterapkan pada child", () => {
+  assert.equal(ADMIN_POLICY_BY_URL.has(REQUIRED_MENUS[0].url), false);
+  const expected = permissionData(ADMIN_POLICY_BY_URL.get(REQUIRED_MENUS[1].url));
   assert.equal(expected.can_read, true);
-  assert.equal(expected.features.length, 9);
+  assert.equal(expected.features.length, 3);
   assert.equal(permissionMeetsPolicy(expected, expected), true);
   assert.equal(permissionMeetsPolicy({ ...expected, features: [] }, expected), false);
 });

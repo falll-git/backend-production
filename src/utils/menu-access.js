@@ -21,9 +21,11 @@ const FIELD_CAPABILITIES = Object.fromEntries(
   ]),
 );
 
+const NO_CAPABILITIES = [];
 const READ_ONLY = ["read"];
 const CRUD = ["create", "read", "update", "delete"];
 const READ_CREATE = ["create", "read"];
+const READ_CREATE_UPDATE = ["create", "read", "update"];
 const READ_UPDATE = ["read", "update"];
 const READ_CREATE_UPDATE_DELETE = CRUD;
 const REPORT_ALL_FEATURE = "report_all";
@@ -79,10 +81,12 @@ const MENU_CAPABILITIES = {
   "/dashboard/storage-usage": READ_ONLY,
   "/dashboard/account/security": READ_ONLY,
 
-  "/dashboard/seputar-jaminan": CRUD,
-  "/dashboard/seputar-jaminan/katalog": CRUD,
-  "/dashboard/seputar-jaminan/pemeriksaan": READ_UPDATE,
-  "/dashboard/seputar-jaminan/profil-kontak": CRUD,
+  "/dashboard/seputar-jaminan": NO_CAPABILITIES,
+  "/dashboard/seputar-jaminan/ringkasan": READ_UPDATE,
+  "/dashboard/seputar-jaminan/profil": READ_CREATE_UPDATE,
+  "/dashboard/seputar-jaminan/kontak": READ_CREATE_UPDATE,
+  "/dashboard/seputar-jaminan/publikasi": READ_CREATE_UPDATE,
+  "/dashboard/seputar-jaminan/pengajuan": READ_UPDATE,
 
   "/dashboard/arsip-digital/input-dokumen": READ_CREATE,
   "/dashboard/arsip-digital/ruang-arsip/tempat-penyimpanan": READ_ONLY,
@@ -154,16 +158,18 @@ const MENU_CAPABILITIES = {
 };
 
 const MENU_FEATURES = {
-  "/dashboard/seputar-jaminan": [
+  "/dashboard/seputar-jaminan/ringkasan": [
+    SJ_RECONFIRM_FEATURE,
+    SJ_SYNC_RETRY_FEATURE,
+    SJ_MANAGE_ALL_FEATURE,
+  ],
+  "/dashboard/seputar-jaminan/pengajuan": [
     SJ_REVIEW_FEATURE,
     SJ_PUBLISH_FEATURE,
     SJ_UNPUBLISH_FEATURE,
     SJ_ARCHIVE_FEATURE,
-    SJ_RECONFIRM_FEATURE,
     SJ_CONTACT_VERIFY_FEATURE,
     SJ_PROFILE_VERIFY_FEATURE,
-    SJ_SYNC_RETRY_FEATURE,
-    SJ_MANAGE_ALL_FEATURE,
   ],
   "/dashboard/arsip-digital/input-dokumen": [
     VIEW_DIVISION_FEATURE,

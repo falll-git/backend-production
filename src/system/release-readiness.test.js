@@ -224,7 +224,26 @@ test("topologi menolak auto-deploy, backup otomatis, dan runtime development", (
   assert.match(result.errors.join(" "), /Backup dan restore data/i);
   assert.match(result.errors.join(" "), /RPO dan RTO/i);
   assert.match(result.errors.join(" "), /runtime development/i);
-  assert.match(result.errors.join(" "), /Engine Node.js backend wajib \^22\.12 \|\| 24\.x/i);
+  assert.match(result.errors.join(" "), /Engine Node.js backend wajib \^22\.13 \|\| 24\.x/i);
+});
+
+test("joint release contract rejects the pre-policy Node22.12 range for either repository", () => {
+  const topology = JSON.parse(fs.readFileSync(TOPOLOGY_PATH, "utf8"));
+  const backendPackage = JSON.parse(fs.readFileSync(path.join(REPOSITORY_DIRECTORY, "package.json"), "utf8"));
+  const frontendPackage = JSON.parse(fs.readFileSync(path.resolve(REPOSITORY_DIRECTORY, "..", "frontend-production", "package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.join(REPOSITORY_DIRECTORY, "package-lock.json"), "utf8"));
+  assert.equal(topology.node.supported_engine_range, "^22.13 || 24.x");
+  assert.equal(backendPackage.engines.node, topology.node.supported_engine_range);
+  assert.equal(lock.packages[""].engines.node, topology.node.supported_engine_range);
+  assert.equal(frontendPackage.engines.node, topology.node.supported_engine_range);
+  const envExampleKeys = parseEnvExampleKeys(fs.readFileSync(path.join(REPOSITORY_DIRECTORY, ".env.example"), "utf8"));
+  for (const repository of ["backend", "frontend"]) {
+    const changedBackend = structuredClone(backendPackage), changedFrontend = structuredClone(frontendPackage);
+    (repository === "backend" ? changedBackend : changedFrontend).engines.node = "^22.12 || 24.x";
+    const result = validateRuntimeTopology({topology, backendPackage: changedBackend, frontendPackage: changedFrontend, envExampleKeys});
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.includes(`Engine Node.js ${repository} wajib ^22.13 || 24.x sesuai topologi runtime.`));
+  }
 });
 
 test("topologi menolak range engine Node.js yang tidak valid", () => {

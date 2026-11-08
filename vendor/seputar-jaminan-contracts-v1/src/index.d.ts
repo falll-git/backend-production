@@ -4,6 +4,13 @@ export type ContractError = {
   message: string;
 };
 
+import type { components } from "../generated/openapi.js";
+
+export type PublicAssetCard = components["schemas"]["PublicAssetCard"];
+export type PublicAssetDetail = components["schemas"]["PublicAssetDetail"];
+export type PublicInstitution = components["schemas"]["PublicInstitution"];
+export type PublicTaxonomy = components["schemas"]["PublicTaxonomy"];
+
 export const CONTRACT_VERSION: 1;
 export const INTEGRATION_HEADERS: Readonly<{
   institutionId: "X-SJ-Institution-Id";

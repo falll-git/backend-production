@@ -5,6 +5,7 @@ const { attachEmitterErrorLogging } = require("./infrastructure-events");
 
 const DEFAULT_PREFIX = "ruwang-arsip:worker-heartbeat";
 const WATERMARK_WORKER_ROLE = "watermark-worker";
+const SEPUTAR_JAMINAN_WORKER_ROLE = "seputar-jaminan-worker";
 const RECORD_HEARTBEAT_SCRIPT = `
 redis.call("ZADD", KEYS[1], ARGV[1], ARGV[2])
 redis.call("PEXPIRE", KEYS[1], ARGV[3])
@@ -336,6 +337,14 @@ function createWatermarkWorkerHeartbeat({
   };
 }
 
+function createSeputarJaminanWorkerHeartbeat({
+  store = createRedisWorkerHeartbeatStore({ client: createRedisClient() }),
+  ...options
+} = {}) {
+  const heartbeat = createWorkerHeartbeat({ role: SEPUTAR_JAMINAN_WORKER_ROLE, store, ...options });
+  return { ...heartbeat, async stop() { await heartbeat.stop(); await store.close(); } };
+}
+
 let sharedHealthStore;
 
 function getWorkerHeartbeatHealthStore() {
@@ -357,6 +366,11 @@ async function checkWatermarkWorkerHealth() {
   return { enabled: true, ...details };
 }
 
+async function checkSeputarJaminanWorkerHealth() {
+  const details = await getWorkerHeartbeatHealthStore().inspect({ role: SEPUTAR_JAMINAN_WORKER_ROLE });
+  return { enabled: true, ...details };
+}
+
 async function closeWorkerHeartbeatHealth() {
   if (!sharedHealthStore) return;
   const store = sharedHealthStore;
@@ -370,11 +384,14 @@ module.exports = {
   RECORD_HEARTBEAT_SCRIPT,
   RELEASE_HEARTBEAT_SCRIPT,
   WATERMARK_WORKER_ROLE,
+  SEPUTAR_JAMINAN_WORKER_ROLE,
+  checkSeputarJaminanWorkerHealth,
   checkWatermarkWorkerHealth,
   closeWorkerHeartbeatHealth,
   createMemoryWorkerHeartbeatStore,
   createRedisWorkerHeartbeatStore,
   createWatermarkWorkerHeartbeat,
+  createSeputarJaminanWorkerHeartbeat,
   createWorkerHeartbeat,
   isWatermarkWorkerHeartbeatEnabled,
   resolveWorkerHeartbeatRedisUrl,

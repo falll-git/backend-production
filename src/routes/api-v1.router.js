@@ -5,6 +5,8 @@ const { API_VERSION } = require("../utils/api-version");
 const {
   apiGeneralRateLimit,
 } = require("../middlewares/rate-limit.middleware");
+const controlReviewRouter = require("../modules/seputar-jaminan/controlReview.route");
+const controlMonitoringRouter = require("../modules/seputar-jaminan/controlMonitoring.route");
 
 function createApiV1Router() {
   const router = express.Router();
@@ -30,6 +32,8 @@ function createApiV1Router() {
   router.get("/health", healthController.liveness);
   router.get("/ready", healthController.readiness);
   router.use(apiGeneralRateLimit);
+  router.use("/internal/ruwang-control/sj-review", controlReviewRouter);
+  router.use("/internal/ruwang-control/sj-monitoring", controlMonitoringRouter);
 
   for (const apiModule of apiModules) {
     router.use(apiModule.path, apiModule.router);

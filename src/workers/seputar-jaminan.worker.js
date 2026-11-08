@@ -5,8 +5,9 @@ loadEnv();
 validateEnv();
 
 const prisma = require("../config/prisma");
-const { runSyncCycle } = require("../modules/seputar-jaminan/syncWorker.service");
+const { runSyncCycle, safeLocalErrorCode } = require("../modules/seputar-jaminan/syncWorker.service");
 const { logger } = require("../system/logger");
+const { createSeputarJaminanWorkerHeartbeat } = require("../system/worker-heartbeat");
 
 const workerLogger = logger.child({ component: "seputar_jaminan_worker" });
 
@@ -34,15 +35,23 @@ async function assertDedicatedWorkerRole() {
 async function startSeputarJaminanWorker({ registerSignals = true } = {}) {
   await prisma.$connect();
   await assertDedicatedWorkerRole();
+  const heartbeat = createSeputarJaminanWorkerHeartbeat();
+  await heartbeat.start();
   const pollMs = positiveInt("SJ_OUTBOX_POLL_INTERVAL_MS", 2000);
   const batchSize = positiveInt("SJ_OUTBOX_BATCH_SIZE", 10);
   let stopping = false;
   const loop = (async () => {
     workerLogger.info({ event: "sj_worker_ready", poll_ms: pollMs, batch_size: batchSize }, "Seputar Jaminan worker ready");
     while (!stopping) {
-      const result = await runSyncCycle({ batchSize });
-      if (!result.processed_count) await wait(pollMs);
-      else await new Promise((resolve) => setImmediate(resolve));
+      try{
+        const result = await runSyncCycle({ batchSize });
+        workerLogger.info({event:'sj_worker_cycle',...result},'SJ worker cycle completed; not public visibility evidence');
+        if (!result.processed_count) await wait(pollMs);
+        else await new Promise((resolve) => setImmediate(resolve));
+      }catch(error){
+        workerLogger.warn({event:'sj_worker_cycle_failed',code:safeLocalErrorCode(error)},'SJ worker cycle failed; unfinished claims await lease recovery');
+        if(!stopping)await wait(pollMs);
+      }
     }
   })();
   const shutdown = async (signal = "SHUTDOWN") => {
@@ -50,6 +59,7 @@ async function startSeputarJaminanWorker({ registerSignals = true } = {}) {
     stopping = true;
     workerLogger.info({ event: "sj_worker_shutdown", signal }, "Seputar Jaminan worker shutting down");
     await loop;
+    await heartbeat.stop();
     await prisma.$disconnect();
   };
   if (registerSignals) {

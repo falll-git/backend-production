@@ -14,6 +14,7 @@ const FILE_BACKED_ENV_KEYS = Object.freeze([
   "DATABASE_SYSTEM_URL",
   "MIGRATION_DATABASE_URL",
   "SJ_WORKER_DATABASE_URL",
+  "SJ_REVIEW_DATABASE_URL",
   "REDIS_URL",
   "JOB_QUEUE_REDIS_URL",
   "RATE_LIMIT_REDIS_URL",
@@ -24,6 +25,8 @@ const FILE_BACKED_ENV_KEYS = Object.freeze([
   "RATE_LIMIT_KEY_SECRET",
   "RESEND_API_KEY",
   "SJ_INTEGRATION_PRIVATE_KEY",
+  "SJ_CONTROL_PUBLIC_KEY",
+  "SJ_CONTROL_ACK_PRIVATE_KEY",
   "SJ_MEDIA_S3_ACCESS_KEY_ID",
   "SJ_MEDIA_S3_SECRET_ACCESS_KEY",
 ]);
@@ -439,6 +442,29 @@ function validateEnv() {
   const errors = [];
   const warnings = [];
   const isProduction = readEnv("NODE_ENV") === PRODUCTION_ENV;
+
+  validateOptionalEnum("SJ_CONTROL_REVIEW_AUTHORITY", ["local", "central"], errors);
+  validateOptionalPositiveInt("SJ_CONTROL_MAX_CLOCK_SKEW_SECONDS", errors);
+  validateOptionalPositiveInt("SJ_CONTROL_NONCE_TTL_SECONDS", errors);
+  validateOptionalBoolean("SJ_CONTROL_SNAPSHOT_ENABLED", errors);
+  validateOptionalTelemetryEndpoint("SJ_CONTROL_BASE_URL", errors);
+  validateOptionalBoolean("SJ_CONTROL_MONITORING_ENABLED", errors);
+  validateOptionalPositiveInt("SJ_CONTROL_MONITORING_PROBE_TIMEOUT_MS", errors);
+  if (readEnv("SJ_CONTROL_REVIEW_AUTHORITY").toLowerCase() === "central" || isEnabledBoolean(readEnv("SJ_CONTROL_MONITORING_ENABLED"))) {
+    ["SJ_CONTROL_INSTANCE_ID", "SJ_CONTROL_KEY_ID", "SJ_CONTROL_ACK_KEY_ID", "SJ_CONTROL_AUDIENCE"].forEach((key) => requireEnv(key, errors));
+    requireSecret("SJ_CONTROL_PUBLIC_KEY", errors);
+    requireSecret("SJ_CONTROL_ACK_PRIVATE_KEY", errors);
+  }
+  if (readEnv("SJ_CONTROL_REVIEW_AUTHORITY").toLowerCase() === "central") {
+    if (!isEnabledBoolean(readEnv("SJ_CONTROL_SNAPSHOT_ENABLED"))) {
+      errors.push("SJ_CONTROL_SNAPSHOT_ENABLED wajib true saat pemeriksaan pusat aktif.");
+    }
+    requireEnv("SJ_CONTROL_BASE_URL", errors);
+  }
+  if (isEnabledBoolean(readEnv("SJ_CONTROL_MONITORING_ENABLED"))) {
+    requireEnv("SJ_CONTROL_MONITORING_FRONTEND_URL", errors);
+    if (isProduction) validateProductionUrl("SJ_CONTROL_MONITORING_FRONTEND_URL", errors);
+  }
   const instanceKey = isProduction
     ? requireEnv("APP_INSTANCE_KEY", errors)
     : readEnv("APP_INSTANCE_KEY");

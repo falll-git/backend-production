@@ -233,6 +233,7 @@ async function recoverRecentlyRotatedRefreshToken({
     await repository.findRecentlyReplacedRefreshTokenByHash({
       tokenHash,
       revokedAfter,
+      userId: decoded.id,
     });
 
   if (
@@ -376,7 +377,7 @@ exports.refreshToken = async (token, sessionContext = {}) => {
   }
 
   const tokenHash = hashToken(token);
-  const tokenRecord = await repository.findActiveRefreshTokenByHash(tokenHash);
+  const tokenRecord = await repository.findActiveRefreshTokenByHash(tokenHash, decoded.id);
   const user = tokenRecord?.user || null;
   const oldRefreshTokenId = tokenRecord?.id || null;
 
@@ -590,26 +591,39 @@ exports.logout = async ({ refreshToken = null, accessToken = null } = {}) => {
   let actorId = null;
 
   if (refreshToken) {
-    const refreshTokenHash = hashToken(refreshToken);
-    const session = await repository.findActiveRefreshTokenIdentityByHash(
-      refreshTokenHash,
-    );
-    actorId = session?.user_id || null;
-    await repository.revokeActiveRefreshTokenByHash(refreshTokenHash, now);
+    let decodedRefresh;
+    try {
+      decodedRefresh = verifyRefreshToken(refreshToken);
+    } catch {
+      // Invalid/expired cookies are cleared by the controller, not trusted as
+      // an RLS identity. A valid access token can still revoke its own session.
+    }
+    if (decodedRefresh?.id && decodedRefresh?.jti) {
+      const refreshTokenHash = hashToken(refreshToken);
+      const session = await repository.findActiveRefreshTokenIdentityByHash(
+        refreshTokenHash,
+        decodedRefresh.id,
+      );
+      actorId = session?.user_id || null;
+      await repository.revokeActiveRefreshTokenByHash(refreshTokenHash, now, decodedRefresh.id);
+    }
   }
 
+  let decodedAccess;
   try {
-    const decoded = verifyAccessToken(String(accessToken || ""));
-    if (decoded.session_id && decoded.id) {
-      actorId = decoded.id;
-      await repository.revokeActiveRefreshTokenByIdAndUserId(
-        decoded.session_id,
-        decoded.id,
-        now,
-      );
-    }
+    decodedAccess = verifyAccessToken(String(accessToken || ""));
   } catch {
     // Logout tetap idempoten saat access token tidak tersedia/tidak valid/kedaluwarsa.
+  }
+  if (decodedAccess?.session_id && decodedAccess?.id) {
+    actorId = decodedAccess.id;
+    // Persistence errors must propagate; do not report a completed revocation
+    // when the database could not record it.
+    await repository.revokeActiveRefreshTokenByIdAndUserId(
+      decodedAccess.session_id,
+      decodedAccess.id,
+      now,
+    );
   }
 
   return { actor_id: actorId };

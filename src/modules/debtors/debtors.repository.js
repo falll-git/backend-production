@@ -426,6 +426,13 @@ function update(id, data, db = prisma) {
   });
 }
 
+function softDelete(current, data, db) {
+  return db.digital_debtors.updateMany({
+    where: { id: current.id, deleted_at: null, updated_at: current.updated_at },
+    data,
+  });
+}
+
 function transaction(callback, options) {
   return withDatabaseTransaction(callback, options);
 }
@@ -970,6 +977,7 @@ module.exports = {
   findListAggregates,
   findMany,
   transaction,
+  softDelete,
   update,
   updateCollateral,
   upsertIndividualProfile,

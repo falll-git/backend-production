@@ -23,6 +23,9 @@ const migrationNames = [
   "20260820101000_grant_debtor_read_scope_helpers",
   "20260822111000_protect_seputar_jaminan_module",
   "20260823120000_harden_seputar_jaminan_worker_identity",
+  "20260911130000_add_sj_control_change_requests",
+  "20260920020000_record_sj_public_observations",
+  "20260927010000_sj_save_operation_receipts",
 ];
 
 const migrationSql = migrationNames

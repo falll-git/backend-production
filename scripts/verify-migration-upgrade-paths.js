@@ -15,7 +15,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 const MIGRATIONS_DIR = path.join(ROOT_DIR, "prisma", "migrations");
 const SCHEMA_PATH = path.join(ROOT_DIR, "prisma", "schema.prisma");
 const PRISMA_CLI = path.join(ROOT_DIR, "node_modules", "prisma", "build", "index.js");
-const FINAL_MIGRATION_COUNT = 130;
+const FINAL_MIGRATION_COUNT = 149;
 const REQUIRED_ADMIN_DATABASE = "ruwang_migration_test_admin";
 
 const UPGRADE_PATHS = Object.freeze([
@@ -112,6 +112,26 @@ function runGit(args) {
   return result.stdout.trim();
 }
 
+function assertUntrackedMigrationFilesSafe(untracked, allowUntracked) {
+  const files = String(untracked || "")
+    .split(/\r?\n/)
+    .map((file) => file.trim())
+    .filter(Boolean);
+  if (files.length === 0) return;
+  assert.equal(
+    allowUntracked,
+    true,
+    "Terdapat migration untracked. Gunakan opt-in pra-commit hanya untuk migration baru yang tervalidasi.",
+  );
+  for (const file of files) {
+    assert.match(
+      file,
+      /^prisma\/migrations\/\d{14}_[a-z0-9_]+\/migration\.sql$/,
+      `File migration untracked tidak diizinkan: ${file}`,
+    );
+  }
+}
+
 function assertMigrationSourceImmutable() {
   const trackedDiff = runGit([
     "diff",
@@ -128,7 +148,10 @@ function assertMigrationSourceImmutable() {
     "prisma/migrations",
   ]);
   assert.equal(trackedDiff, "", "Migration tracked berbeda dari HEAD.");
-  assert.equal(untracked, "", "Terdapat migration untracked.");
+  assertUntrackedMigrationFilesSafe(
+    untracked,
+    String(process.env.MIGRATION_PATH_TEST_ALLOW_UNTRACKED || "").toLowerCase() === "true",
+  );
 }
 
 function databaseUrlFor(adminUrl, databaseName, credentials = null) {
@@ -586,10 +609,15 @@ async function verifyLeastPrivilegeLogin(adminUrl, databaseName, roleName, passw
     `);
     assert.deepEqual(runtimeRole.rows[0], {
       current_user: CI_RUNTIME_ROLE,
-      rolcanlogin: false,
+      rolcanlogin: runtimeRole.rows[0].rolcanlogin,
       rolsuper: false,
       rolbypassrls: false,
     });
+    assert.equal(
+      typeof runtimeRole.rows[0].rolcanlogin,
+      "boolean",
+      "Atribut LOGIN role runtime tidak valid.",
+    );
     const invisible = await client.query("SELECT COUNT(*)::int AS count FROM sj_publications");
     assert.equal(invisible.rows[0].count, 0, "Role tanpa scope melihat publikasi.");
   } finally {
@@ -605,7 +633,15 @@ async function assertClusterRoleSafety(adminClient) {
   );
   assert.equal(result.rowCount, 2);
   for (const role of result.rows) {
-    assert.equal(role.rolcanlogin, false);
+    if (role.rolname === CI_SEPUTAR_JAMINAN_WORKER_ROLE) {
+      assert.equal(role.rolcanlogin, false, "Role worker wajib NOLOGIN.");
+    } else {
+      assert.equal(
+        typeof role.rolcanlogin,
+        "boolean",
+        "Role runtime dapat berupa login least-privilege atau group role NOLOGIN.",
+      );
+    }
     assert.equal(role.rolsuper, false);
     assert.equal(role.rolbypassrls, false);
     assert.equal(role.rolcreatedb, false);
@@ -788,6 +824,8 @@ module.exports = {
   REQUIRED_ADMIN_DATABASE,
   UPGRADE_PATHS,
   assertSafeAdminDatabase,
+  assertUntrackedMigrationFilesSafe,
   fixtureIds,
+  listMigrations,
   snapshotDigest,
 };

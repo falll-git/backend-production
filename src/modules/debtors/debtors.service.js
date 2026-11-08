@@ -34,6 +34,7 @@ const {
 } = require("../../utils/ideb-report");
 const {
   auditSnapshot,
+  recordDebtorActivity,
   requestMetadata,
   safeRecordDebtorActivity,
 } = require("../../utils/debtor-audit-log");
@@ -1763,12 +1764,12 @@ function canManageDebtorRecord(debtor, scope) {
   return debtor.created_by === scope.userId || debtor.marketing_user_id === scope.userId;
 }
 
-async function getManageableDebtor(id, userId) {
+async function getManageableDebtor(id, userId, db) {
   const scope = await getDebtorAccessScope(userId);
   const debtor = await repository.findById(id, {
     deleted_at: null,
     ...buildDebtorManageWhere(scope),
-  });
+  }, db);
   if (!debtor) throw new AppError("Debitur tidak ditemukan.", 404);
   if (!canManageDebtorRecord(debtor, scope)) {
     throw new AppError("Anda tidak memiliki izin mengelola debitur ini.", 403);
@@ -1812,22 +1813,30 @@ exports.update = async ({ id, payload, userId }) => {
 };
 
 exports.delete = async ({ id, userId }) => {
-  const current = await getManageableDebtor(id, userId);
-  const deleted = await repository.update(id, {
-    status: "INACTIVE",
-    deleted_at: new Date(),
-    deleted_by: userId || null,
-  });
-  await safeRecordDebtorActivity(undefined, {
-    actor_id: userId || null,
-    action: "DELETE",
-    source: "MANUAL",
-    entity_type: "digital_debtors",
-    entity_id: deleted.id,
-    debtor_id: deleted.id,
-    title: `Nonaktifkan debitur ${deleted.name || deleted.debtor_number || deleted.id}`,
-    before_data: auditSnapshot(current, DEBTOR_AUDIT_FIELDS),
-    after_data: auditSnapshot(deleted, DEBTOR_AUDIT_FIELDS),
+  await repository.transaction(async (tx) => {
+    const current = await getManageableDebtor(id, userId, tx);
+    const changes = {
+      status: "INACTIVE",
+      deleted_at: new Date(),
+      deleted_by: userId || null,
+    };
+    // Keep the audit atomic without selecting a newly RLS-hidden tombstone.
+    const result = await repository.softDelete(current, changes, tx);
+    if (result.count !== 1) {
+      throw new AppError("Debitur berubah atau sudah dinonaktifkan. Muat ulang data.", 409);
+    }
+    const deleted = { ...current, ...changes };
+    await recordDebtorActivity(tx, {
+      actor_id: userId || null,
+      action: "DELETE",
+      source: "MANUAL",
+      entity_type: "digital_debtors",
+      entity_id: current.id,
+      debtor_id: current.id,
+      title: `Nonaktifkan debitur ${current.name || current.debtor_number || current.id}`,
+      before_data: auditSnapshot(current, DEBTOR_AUDIT_FIELDS),
+      after_data: auditSnapshot(deleted, DEBTOR_AUDIT_FIELDS),
+    });
   });
 };
 

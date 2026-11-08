@@ -63,7 +63,7 @@ function serialize(row) {
     size_bytes: Number(row.size_bytes),
     width: row.width,
     height: row.height,
-    central_ready: Boolean(row.central_media_id),
+    central_ready: require('./mediaReadiness').isMediaReady(row),
     preview_url: `/api/v1/seputar-jaminan/media/${row.id}/content`,
     created_at: row.created_at,
   };
@@ -107,7 +107,17 @@ exports.upload = async ({ file, purpose, user }) => {
   }
 };
 
-exports.getContent = async (id) => {
+async function createThumbnail(buffer) {
+  if (buffer.length > MAX_BYTES) throw new AppError("Gambar terlalu besar.", 422);
+  return sharp(buffer, { failOn: "warning", limitInputPixels: 100000000 })
+    .rotate().resize(320, 320, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 80, effort: 3 }).toBuffer();
+}
+
+exports.getContent = async (id, variant) => {
+  if (variant !== undefined && variant !== "thumbnail") {
+    throw new AppError("Pilihan pratinjau tidak valid.", 422);
+  }
   const row = await prisma.sj_media_assets.findFirst({
     where: { id, revoked_at: null, state: { notIn: ["DELETED", "REVOKED"] } },
   });
@@ -116,45 +126,80 @@ exports.getContent = async (id) => {
     ...process.env,
     SJ_MEDIA_STORAGE_PROVIDER: row.storage_backend,
   });
-  return { row, buffer: await storage.read(row.logical_object_key) };
+  const original = await storage.read(row.logical_object_key);
+  // Authorization/RLS and revocation checks above apply to both representations.
+  // Never overwrite the original or expose private media via a public optimizer.
+  return { row, buffer: variant === "thumbnail" ? await createThumbnail(original) : original,
+    mime: variant === "thumbnail" ? "image/webp" : row.detected_mime };
 };
 
-exports.list = async ({ purpose } = {}) =>
-  (await prisma.sj_media_assets.findMany({
+exports.list = async ({ purpose, paged, cursor:position, limit=20 } = {}) => {
+  const cursor=require('./readCursor'),filter=['media',purpose||''];
+  const rows=await prisma.sj_media_assets.findMany({
     where: {
       revoked_at: null,
       ...(purpose && PURPOSES.has(purpose) ? { purpose } : {}),
       state: { notIn: ["DELETED", "REVOKED"] },
+      ...(paged?cursor.decode(position,filter):{}),
     },
-    orderBy: { created_at: "desc" },
-    take: 100,
-  })).map(serialize);
+    orderBy: [{ created_at: "desc" }, { id: "desc" }],
+    take: paged?limit+1:100,
+  });
+  return paged?cursor.page(rows,limit,filter,serialize):rows.map(serialize);
+};
 
 exports.getStatus = async (id) => {
   const row = await prisma.sj_media_assets.findUnique({ where: { id } });
   if (!row) throw new AppError("Gambar tidak ditemukan.", 404);
-  return serialize(row);
+  const actions=require('./actionRead'),context=await actions.context(prisma,[row],'media');
+  return {...serialize(row),action_availability:actions.media(row,context)};
 };
 
-exports.revoke = async (id, payload) =>
-  withDatabaseTransaction(async (client) => {
-    const [used, profileUsed, row] = await Promise.all([
-      client.sj_publication_version_media.count({ where: { media_asset_id: id } }),
-      client.sj_public_profiles.count({ where: { logo_media_id: id } }),
-      client.sj_media_assets.findUnique({ where: { id } }),
-    ]);
-    if (used > 0 || profileUsed > 0) {
-      throw new AppError("Gambar masih dipakai. Lepaskan dari katalog atau profil terlebih dahulu.", 409);
+async function getActiveMediaUsage(client, id) {
+  const [publicationUses, profileUses, reference] = await Promise.all([
+    client.sj_publication_version_media.count({
+      where: {
+        media_asset_id: id,
+        publication_version: {
+          OR: [
+            { current_for_publication: { is: { state: { not: "ARCHIVED" } } } },
+            { published_for_publication: { is: { state: { not: "ARCHIVED" } } } },
+          ],
+        },
+      },
+    }),
+    client.sj_public_profiles.count({
+      where: { logo_media_id: id, state: { not: "HIDDEN" } },
+    }),
+    client.$queryRaw`SELECT public.ruwang_arsip_sj_media_referenced(${id}::text) AS used`,
+  ]);
+  if(reference.length!==1||typeof reference[0].used!=='boolean')throw new AppError('Penggunaan gambar belum bisa diperiksa. Coba lagi.',503);
+  return { publicationUses, profileUses, referenced:reference[0].used };
+}
+
+async function revokeInTransaction(client, id, payload, central) {
+    await require('./workflowLock').lockContactReferences(client);
+    const settings = await requireSettings(client);
+    const authority = settings.review_authority || "local";
+    if ((central && authority !== "central") || (!central && authority !== "local")) {
+      throw new AppError(central
+        ? "Pemeriksaan pusat belum diaktifkan."
+        : "Pencabutan media hanya dapat diputuskan melalui Ruwang Control.", 409);
     }
+    const row=await client.sj_media_assets.findUnique({where:{id}});
     if (!row) throw new AppError("Gambar tidak ditemukan.", 404);
     if (row.revoked_at) return serialize(row);
+    const usage=await getActiveMediaUsage(client,id);
+    if (usage.referenced) {
+      throw new AppError("Gambar masih dipakai draf atau versi yang disetujui, atau pengirimannya belum selesai.", 409);
+    }
     const now = new Date();
     const updated = await client.sj_media_assets.update({
       where: { id },
       data: { state: "REVOKED", revoked_at: now, rejection_code: payload.reason_code },
     });
     if (row.central_media_id) {
-      const settings = await requireSettings(client, "sync_enabled");
+      if (!settings.sync_enabled) throw new AppError("Fitur sinkronisasi belum diaktifkan oleh administrator BPRS.", 409);
       await createOutbox(client, settings, {
         eventType: "REVOKE_MEDIA",
         aggregateType: "MEDIA",
@@ -170,6 +215,14 @@ exports.revoke = async (id, payload) =>
       });
     }
     return serialize(updated);
-  });
+}
 
+exports.revoke = async (id, payload) =>
+  withDatabaseTransaction(async (client) => revokeInTransaction(client, id, payload, false));
+
+exports.applyControlMediaLifecycle = async (client, id) =>
+  revokeInTransaction(client, id, { reason_code: "OWNER_REQUEST" }, true);
+
+exports.getActiveMediaUsage = getActiveMediaUsage;
 exports.sanitizeImage = sanitizeImage;
+exports.createThumbnail = createThumbnail;
