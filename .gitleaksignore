@@ -1,0 +1,3 @@
+# Exact historical synthetic redaction-test fixture, not an operational key.
+# Current test generates its capability at runtime. Keep all other history scanned.
+62fc4c27be2e2ee1db6f279cacda509fc57fe606:src/integration/support/sj-owned-ui-logs.test.js:generic-api-key:15

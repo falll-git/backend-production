@@ -8,17 +8,62 @@ const path = require("node:path");
 const Joi = require("joi");
 const messages = require("joi/lib/messages");
 const sharp = require("sharp");
+const express = require("express");
+const request = require("supertest");
 const expressRequire = createRequire(require.resolve("express/package.json"));
+const uploadRequire = createRequire(require.resolve("../src/middlewares/watermark-upload.middleware"));
 const proxyaddr = expressRequire("proxy-addr");
+const { uploadWatermarkImage } = require("../src/middlewares/watermark-upload.middleware");
 
 test("dependency keamanan yang dipin dipakai oleh consumer runtime sebenarnya", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
-  assert.equal(manifest.dependencies.joi, "18.2.9");
+  assert.equal(manifest.dependencies.joi, "18.3.2");
+  assert.equal(manifest.dependencies.multer, "2.5.0");
   assert.equal(manifest.dependencies.sharp, "0.35.5");
   assert.equal(manifest.overrides["proxy-addr"], "2.0.8");
+  assert.equal(manifest.overrides.express["body-parser"], "2.4.0");
   assert.equal(Joi.version, manifest.dependencies.joi);
   assert.equal(sharp.versions.sharp, manifest.dependencies.sharp);
   assert.equal(expressRequire("proxy-addr/package.json").version, manifest.overrides["proxy-addr"]);
+  assert.equal(expressRequire("body-parser/package.json").version, manifest.overrides.express["body-parser"]);
+  assert.equal(uploadRequire("multer/package.json").version, manifest.dependencies.multer);
+});
+
+test("Express memakai parser patch untuk JSON dan form serta tetap membatasi payload", async () => {
+  const app = express();
+  app.use(express.json({ limit: "1kb" }));
+  app.use(express.urlencoded({ extended: true, limit: "1kb", parameterLimit: 4 }));
+  app.post("/parse", (req, res) => res.json(req.body));
+  app.use((error, req, res, next) => res.status(error.status || 500).json({ type: error.type }));
+
+  const json = await request(app).post("/parse").send({ document: { name: "CI-001" } });
+  assert.equal(json.status, 200);
+  assert.deepEqual(json.body, { document: { name: "CI-001" } });
+  const form = await request(app).post("/parse").type("form").send("document[name]=CI-001&tags[0]=arsip");
+  assert.equal(form.status, 200);
+  assert.deepEqual(form.body, { document: { name: "CI-001" }, tags: ["arsip"] });
+  const tooLarge = await request(app).post("/parse").send({ value: "x".repeat(2048) });
+  assert.equal(tooLarge.status, 413);
+  assert.equal(tooLarge.body.type, "entity.too.large");
+  const tooMany = await request(app).post("/parse").type("form").send("a=1&b=2&c=3&d=4&e=5");
+  assert.equal(tooMany.status, 413);
+  assert.equal(tooMany.body.type, "parameters.too.many");
+});
+
+test("Multer patch tetap menjalankan upload watermark aplikasi di memori dengan batas file asli", async () => {
+  const image = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#445566" } }).png().toBuffer();
+  const app = express();
+  app.post("/upload", uploadWatermarkImage(), (req, res) => res.json({
+    name: req.file.originalname, size: req.file.size, caption: req.body.caption,
+  }));
+
+  const accepted = await request(app).post("/upload").field("caption", "CI watermark").attach("image", image, "watermark.png");
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.body, { name: "watermark.png", size: image.length, caption: "CI watermark" });
+  const wrongField = await request(app).post("/upload").attach("other", image, "watermark.png");
+  assert.equal(wrongField.status, 400);
+  const tooLarge = await request(app).post("/upload").attach("image", Buffer.alloc(2 * 1024 * 1024 + 1), "watermark.png");
+  assert.equal(tooLarge.status, 413);
 });
 
 test("Joi menolak kode pesan __proto__ pada compile, merge, dan API schema", () => {

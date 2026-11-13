@@ -12,7 +12,7 @@ function fixture(callback){
   }
 }
 test('literal random capability is redacted across every byte boundary with UTF8 intact',()=>fixture(root=>{
-  const secret='synthetic-Owned-Secret-1234567890',source=Buffer.from('préfix:'+secret+':尾部\n');
+  const secret=crypto.randomBytes(24).toString('base64url'),source=Buffer.from('préfix:'+secret+':尾部\n');
   const logs=createOwnedUiLogs({directory:root,label:'redacted',secrets:[secret]});
   for(const byte of source)logs.stdout(Buffer.from([byte]));logs.stderr(Buffer.from('separate stream\n'));
   const receipt=logs.close(),text=fs.readFileSync(receipt.stdout.path,'utf8');

@@ -8,6 +8,7 @@ const bankRequire=createRequire(bankPath('package.json')),sjRequire=createRequir
 const {safeHarnessError}=bankRequire('./src/integration/support/sj-harness-error');
 const {observeOwnedUiChild}=bankRequire('./src/integration/support/sj-owned-ui-child');
 const {createOwnedUiLogs}=bankRequire('./src/integration/support/sj-owned-ui-logs');
+const {probeOwnedUiHealth}=bankRequire('./src/integration/support/sj-owned-ui-health');
 registerHooks({resolve(specifier,context,next){if(specifier==='next/server'||specifier==='next/headers')return next(specifier+'.js',context);if(specifier.startsWith('@/')){const base=path.join(controlPath(),specifier.slice(2));return {shortCircuit:true,url:pathToFileURL(fs.existsSync(base)?base:base+'.ts').href};}return next(specifier,context);}});
 const load=p=>import(pathToFileURL(p).href);
 let server,db,workerDb,limiter,worker,settings,actor,actorToken,browserServer,browserOwned,recoveryRuntime,closePromise;
@@ -309,7 +310,7 @@ process.on('message',async message=>{
       try{browserServer=spawn(process.execPath,[controlPath("node_modules/next/dist/bin/next"),'start','--hostname','127.0.0.1','--port',String(port)],{cwd:path.join(settings.cross.browserRoot,'app'),env:{...process.env,NODE_ENV:'production',CONTROL_PUBLIC_ORIGIN:origin},windowsHide:true,stdio:['ignore','pipe','pipe']});}
       catch(error){logs.close();throw error;}
       browserOwned={observer:observeOwnedUiChild(browserServer,{onStdout:logs.stdout,onStderr:logs.stderr}),logs,out};
-      for(let i=0;i<100;i++){assert.equal(browserServer.exitCode,null,'Control browser runtime exited');try{if((await fetch(origin+'/api/health')).ok){reply(message.id,{origin});return;}}catch{}await new Promise(r=>setTimeout(r,200));}throw Error('CONTROL_BROWSER_NOT_READY');
+      for(let i=0;i<100;i++){assert.equal(browserServer.exitCode,null,'Control browser runtime exited');try{const status=await probeOwnedUiHealth(port);if(status>=200&&status<300){reply(message.id,{origin});return;}}catch{}await new Promise(r=>setTimeout(r,200));}throw Error('CONTROL_BROWSER_NOT_READY');
     }else if(message.method==='stop'){await close();reply(message.id,true);process.disconnect();process.exit(0);}
     else throw Error('UNKNOWN_IPC_ACTION');
   }catch(e){const failure=safeHarnessError(e);process.send({id:message.id,pass:false,code:failure.code||failure.name,reason:'Peer operation failed; safe diagnostic retained',failure});}

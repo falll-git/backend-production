@@ -98,8 +98,22 @@ export function validateQualityWorkflow(source) {
   const checkoutCount = (
     text.match(/uses:\s*actions\/checkout@[0-9a-f]{40}/gi) || []
   ).length;
-  if (checkoutCount < 2) {
-    errors.push("Workflow wajib checkout frontend dan backend dengan action terpin.");
+  if (checkoutCount < 3) {
+    errors.push("Workflow wajib checkout frontend, backend, dan Control dengan action terpin.");
+  }
+
+  const qualityJob = text.replace(/^\s*#.*$/gm, "").split(/^  release-quality:\s*$/m)[1]?.split(/^  [A-Za-z_][A-Za-z0-9_-]*:\s*$/m)[0] || "";
+  const steps = qualityJob.split(/^      - /m).slice(1).map(block => `      - ${block}`);
+  const controlCheckout = steps.findIndex(step => /^\s+repository:\s*falll-git\/ruwang-control\s*$/m.test(step));
+  const controlInstall = steps.findIndex(step => /^      - name: Install Control domain peer dependencies\s*$/m.test(step));
+  const bootstrap = steps.findIndex(step => /^      - name: Bootstrap pinned npm in ephemeral runner\s*$/m.test(step));
+  const gate = steps.findIndex(step => /^\s+run:\s*npm run quality:release\s*$/m.test(step));
+  if (controlCheckout < 0 || !/^\s+path:\s*ruwang-control\s*$/m.test(steps[controlCheckout]) ||
+      controlInstall <= bootstrap || controlInstall <= controlCheckout || controlInstall >= gate ||
+      !/^        working-directory: ruwang-control\s*$/m.test(steps[controlInstall] || "") ||
+      !/^        run: npm ci --omit=dev\s*$/m.test(steps[controlInstall] || "") ||
+      /^\s+(?:if|continue-on-error):/m.test((steps[controlCheckout] || "") + "\n" + (steps[controlInstall] || ""))) {
+    errors.push("Pure backend tests wajib membaca checkout Control asli beserta dependency runtime sebelum quality gate.");
   }
 
   const detachedCheckoutCount = (

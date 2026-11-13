@@ -80,10 +80,10 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "ioredis": "^5.11.0",
-    "joi": "18.2.9",
+    "joi": "18.3.2",
     "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.3",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "pdf-lib": "^1.17.1",
     "pg": "8.18.0",
     "pino": "^10.3.1",
@@ -102,12 +102,18 @@
     },
     "brace-expansion": "5.0.12",
     "deepmerge-ts": "8.0.1",
-    "fast-uri": "3.1.8",
+    "fast-uri": "3.1.9",
     "find-my-way": "9.7.0",
     "uuid": "11.1.1",
     "mysql2": "3.24.3",
-    "qs": "6.16.0",
-    "proxy-addr": "2.0.8"
+    "qs": "6.17.0",
+    "proxy-addr": "2.0.8",
+    "express": {
+      "body-parser": "2.4.0"
+    },
+    "readdir-glob": {
+      "minimatch": "11.0.4"
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

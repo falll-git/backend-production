@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(
 
 test("workflow Quality memenuhi kebijakan CI quality-only", () => {
   assert.deepEqual(validateQualityWorkflow(workflow), {
-    checkout_count: 2,
+    checkout_count: 3,
     deployment_capability: false,
   });
 });
@@ -22,6 +22,17 @@ test("workflow Quality menolak permission write", () => {
     () => validateQualityWorkflow(workflow.replace("contents: read", "contents: write")),
     /permission write/,
   );
+});
+
+test("Quality mewajibkan Control peer beserta dependency runtime bagi pure backend tests", () => {
+  for (const changed of [
+    workflow.replace("repository: falll-git/ruwang-control", "repository: falll-git/different-peer"),
+    workflow.replace("path: ruwang-control", "path: misplaced-control"),
+    workflow.replace("run: npm ci --omit=dev", "run: echo no-control-dependencies"),
+    workflow.replace("      - name: Install Control domain peer dependencies", "      - name: Install Control domain peer dependencies\n        if: false"),
+  ]) {
+    assert.throws(() => validateQualityWorkflow(changed), /Pure backend tests/);
+  }
 });
 
 test("workflow Quality menolak permission write pada scope lain", () => {
