@@ -9,6 +9,7 @@ const { docker, digest, assertContainer, pinLocalDocker, cleanupStorage } = requ
 const {createOwnedContainer,cleanupOwnedContainer} = require('../src/integration/support/sj-owned-container-create');
 const repo = path.resolve(__dirname, '..');
 const {controlPath, centralPath} = require('../src/integration/support/sj-peer-paths');
+const {readOwnedFileSync}=require('../src/integration/support/sj-owned-file');
 const {scannerSelection, prepareScanner, startScanner, cleanupScanner, recoverScanner} = require('../src/integration/support/sj-scanner-proof');
 const {observeOwnedScenario}=require('../src/integration/support/sj-owned-scenario');
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -74,7 +75,7 @@ function sourceManifest() {
 function peerManifest(){
   const files=[];
   for(const [root,entries] of [[controlPath(),['src','app','components','contracts','migrations','scripts','package.json','package-lock.json']],[centralPath(),['apps/api/src','apps/worker/src','packages','prisma','infra/postgres','package.json','package-lock.json']]]){
-    const walk=relative=>{const p=path.join(root,relative);if(fs.statSync(p).isDirectory()){for(const n of fs.readdirSync(p).sort())if(!['node_modules','dist'].includes(n))walk(relative+'/'+n);}else if(!/\.env(?:\.|$)/.test(relative))files.push({root,file:relative,sha256:digest(fs.readFileSync(p))});};
+    const walk=relative=>{const p=path.join(root,relative);if(fs.lstatSync(p).isDirectory()){for(const n of fs.readdirSync(p).sort())if(!['node_modules','dist'].includes(n))walk(relative+'/'+n);}else if(!/\.env(?:\.|$)/.test(relative))files.push({root,file:relative,sha256:digest(readOwnedFileSync(p).bytes)});};
     entries.forEach(walk);
   }return files;
 }

@@ -133,17 +133,18 @@ function bootstrapFixture() {
     tokenHash: crypto.createHash('sha256').update(token).digest('hex') };
   const files = new Map([[path.join(root, 'proof.json'), proof], [path.join(root, 'owner.json'), { runId, tokenHash: proof.tokenHash }],
     [path.join(root, 'report.json'), { runId, root, status: 'running' }]]);
-  const calls = [], lines = [], host = new EventEmitter(); let pending = '';
+  const calls = [], lines = [], host = new EventEmitter(), descriptors=new Map(),offsets=new Map(); let pending = '',nextDescriptor=20;
   host.kill = (pid, signal) => { calls.push(['kill', pid, signal]); };
-  const io = { lstatSync: file => ({ isSymbolicLink: () => false, isFile: () => files.has(file), isDirectory: () => file === root, size: 100 }),
-    realpathSync: file => file, readFileSync: file => JSON.stringify(files.get(file)), existsSync: () => false,
-    openSync: (...args) => { calls.push(['open', ...args]); return 9; },
+  const stat=file=>({isSymbolicLink:()=>false,isFile:()=>files.has(file),isDirectory:()=>file===root,size:BigInt(files.has(file)?Buffer.byteLength(JSON.stringify(files.get(file))):0),dev:1n,ino:BigInt([...files.keys()].indexOf(file)+1),mtimeNs:1n,ctimeNs:1n});
+  const io = { lstatSync: stat, fstatSync:fd=>stat(descriptors.get(fd)),
+    realpathSync: file => file, readSync: (fd,buffer,offset,length)=>{const bytes=Buffer.from(JSON.stringify(files.get(descriptors.get(fd))));const position=offsets.get(fd)||0;const count=bytes.copy(buffer,offset,position,position+length);offsets.set(fd,position+count);return count;}, existsSync: () => false,
+    openSync: (...args) => { if(typeof args[1]==='number'){if(!files.has(args[0]))throw Object.assign(Error('missing'),{code:'ENOENT'});const fd=nextDescriptor++;descriptors.set(fd,args[0]);return fd;}calls.push(['open', ...args]); return 9; },
     writeSync: (fd, bytes, offset, length) => {
       assert.equal(fd, 9); assert.ok(Buffer.isBuffer(bytes));
       pending += bytes.subarray(offset, offset + length).toString('utf8');
       let index; while ((index = pending.indexOf('\n')) !== -1) { lines.push(JSON.parse(pending.slice(0, index))); pending = pending.slice(index + 1); }
       return length;
-    }, closeSync: fd => calls.push(['close', fd]) };
+    }, closeSync: fd => {if(fd===9)calls.push(['close', fd]);else {descriptors.delete(fd);offsets.delete(fd);}} };
   const env = { SJ_TEST_HTTP_STREAM_DIAGNOSTIC_ENABLE: '1', SJ_TEST_HTTP_STREAM_DIAGNOSTIC_PROOF: path.join(root, 'proof.json'),
     SJ_TEST_HTTP_STREAM_DIAGNOSTIC_PATH: path.join(root, 'catalog-http-stream-diagnostic.jsonl'), SJ_TEST_HTTP_STREAM_DIAGNOSTIC_TOKEN: token,
     SJ_TEST_HTTP_STREAM_DIAGNOSTIC_ORIGIN: 'http://127.0.0.1:4411' };
@@ -193,7 +194,7 @@ test('wrong target/identity/capability/stale run/symlink/origin denied before fd
 });
 
 test('unavailable output fails before installing; later fd fault remains explicit, not app error', () => {
-  const b = bootstrapFixture(), f = streamFixture(), before = f.target.emit; b.io.openSync = () => { throw Error('secret file'); };
+  const b = bootstrapFixture(), f = streamFixture(), before = f.target.emit,nativeOpen=b.io.openSync; b.io.openSync = (...args) => { if(typeof args[1]==='number')return nativeOpen(...args);throw Error('secret file'); };
   assert.throws(() => bootstrapHttpStreamDiagnostic({ env: b.env, fs: b.io, process: b.host, target: f.target }), /^Error: HTTPStreamDiagnosticOutputUnavailable$/);
   assert.equal(f.target.emit, before);
   const c = bootstrapFixture(), g = streamFixture(), observer = bootstrapHttpStreamDiagnostic({ env: c.env, fs: c.io, process: c.host, target: g.target });

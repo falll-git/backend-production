@@ -35,7 +35,7 @@ function withTree(run) {
     const missing = [];
     while (!fs.existsSync(parent)) { missing.push(parent); parent = path.dirname(parent); }
     for (const item of missing.reverse()) { fs.mkdirSync(item); ownedDirectories.add(item); }
-    if (!fs.existsSync(filename)) ownedFiles.add(filename);
+    ownedFiles.add(filename);
     fs.writeFileSync(filename, contents);
     return filename;
   };
@@ -82,7 +82,7 @@ function withTree(run) {
     }
     for (const filename of [...ownedFiles].reverse()) {
       assert.ok(filename.startsWith(realDirectory + path.sep), 'fixture cleanup refuses outside target');
-      if (fs.existsSync(filename)) fs.unlinkSync(filename);
+      try { fs.unlinkSync(filename); } catch(error) { if(error.code!=='ENOENT')throw error; }
     }
     for (const item of [...ownedDirectories].sort((a, b) => b.length - a.length)) fs.rmdirSync(item);
   }

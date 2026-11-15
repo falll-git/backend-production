@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { createRequire } = require('node:module');
 const assert = require('node:assert/strict');
+const { readOwnedFileSync } = require('./sj-owned-file');
 
 const files = Object.freeze({
   cliPackage: '@playwright/cli/package.json',
@@ -54,8 +55,7 @@ function resolveCliToolchain({ root, pin } = {}) {
     try {
       resolved[key] = fs.realpathSync(expected);
       assert.equal(resolved[key], expected, 'TOOLCHAIN_FILE_OUTSIDE_TREE');
-      assert.ok(fs.statSync(expected).isFile(), 'TOOLCHAIN_FILE_NOT_REGULAR');
-      contents[key] = fs.readFileSync(expected);
+      contents[key] = readOwnedFileSync(expected).bytes;
     } catch {
       throw new Error('TOOLCHAIN_FILE_UNAVAILABLE_OR_OUTSIDE_TREE');
     }

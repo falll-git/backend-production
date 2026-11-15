@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { runBrowserCode } = require('./sj-browser-code-file');
+const { readOwnedFileSync } = require('./sj-owned-file');
 
 async function withDirectory(run) {
   const out = await fs.mkdtemp(path.join(os.tmpdir(), 'sj-browser-code-test-'));
@@ -76,7 +77,7 @@ test('foreign evidence files remain untouched on success and failure', async () 
     const foreign = path.join(out, 'existing-evidence.txt');
     owned.add(foreign);
     await fs.writeFile(foreign, 'retain exact evidence', { flag: 'wx' });
-    const identity = await fs.stat(foreign);
+    const identity = readOwnedFileSync(foreign).identity;
     for (const fail of [false, true]) {
       const promise = runBrowserCode({ out, source: 'async(page)=>{}', execute: async () => {
         if (fail) throw new Error('callback failure');
@@ -84,8 +85,9 @@ test('foreign evidence files remain untouched on success and failure', async () 
       if (fail) await assert.rejects(promise, /callback failure/);
       else await promise;
       assert.deepEqual(await fs.readdir(out), ['existing-evidence.txt']);
-      assert.equal(await fs.readFile(foreign, 'utf8'), 'retain exact evidence');
-      const current = await fs.stat(foreign);
+      const read = readOwnedFileSync(foreign);
+      assert.equal(read.bytes.toString('utf8'), 'retain exact evidence');
+      const current = read.identity;
       assert.equal(current.dev, identity.dev);
       assert.equal(current.ino, identity.ino);
     }

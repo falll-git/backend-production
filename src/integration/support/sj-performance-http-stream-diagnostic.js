@@ -136,11 +136,7 @@ function bootstrapHttpStreamDiagnostic(options = {}) {
   try {
     if (typeof proofPath !== 'string' || !path.isAbsolute(proofPath) || typeof destination !== 'string' || !path.isAbsolute(destination) ||
         typeof token !== 'string' || token.length < 32) fail('TargetNotOwned');
-    const read = file => {
-      const stat = io.lstatSync(file);
-      if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 64 * 1024) fail('TargetNotOwned');
-      return JSON.parse(io.readFileSync(file, 'utf8'));
-    };
+    const read = (file, maxBytes=64*1024) => JSON.parse(require('./sj-owned-file').readOwnedFileSync(file,{maxBytes,io}).bytes);
     proof = read(proofPath); root = path.resolve(proof.root || '');
     if (proof.kind !== 'RA-SJ-02-disposable-v1' || !/^[a-f0-9]{32}$/.test(proof.runId || '') ||
         !/^[a-f0-9]{64}$/.test(proof.tokenHash || '') || typeof proof.root !== 'string' || !path.isAbsolute(proof.root) ||
@@ -153,8 +149,7 @@ function bootstrapHttpStreamDiagnostic(options = {}) {
     if (path.dirname(path.resolve(destination)) !== root || !/^(?:catalog-)?http-stream-diagnostic(?:-[a-z0-9-]{1,32})?\.jsonl$/.test(path.basename(destination)) ||
         io.existsSync(destination)) fail('TargetNotOwned');
     const reportPath = path.join(root, 'report.json');
-    if (io.lstatSync(reportPath).isSymbolicLink() || !io.lstatSync(reportPath).isFile() || io.lstatSync(reportPath).size > 2 * 1024 * 1024) fail('TargetNotOwned');
-    report = JSON.parse(io.readFileSync(reportPath, 'utf8'));
+    report = read(reportPath,2*1024*1024);
     if (report.runId !== proof.runId || path.resolve(report.root || '') !== root || report.status !== 'running' || report.finishedAt != null) fail('TargetNotOwned');
     host.kill(proof.parentPid, 0);
   } catch { fail('TargetNotOwned'); }

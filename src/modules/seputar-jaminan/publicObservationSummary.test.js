@@ -15,7 +15,7 @@ test('bounded summary query binds current IDs, identity, environment and slug; n
  const result=await publicationSummaries(rows,{central_base_url:'https://sj.example'});
  assert.equal(calls,1);assert.match(query,/LEFT JOIN LATERAL/);assert.match(query,/ORDER BY started_at DESC,id DESC/);
  assert.deepEqual(JSON.parse(bindings[0]),rows.map(r=>({id:r.id,identity:r.public_reference_code})));
- assert.ok(bindings.includes('https://sj.example'));assert.ok(bindings.includes('bank-uji'));
+ assert.deepEqual(bindings.slice(1),['https://sj.example','bank-uji','https://sj.example','bank-uji']);
  assert.equal(result.get('one').last_success.state,'AVAILABLE');assert.equal(result.get('one').latest_attempt.state,'FAILED');
  assert.deepEqual(Object.keys(result.get('one').last_success).sort(),['checked_at','observed_version','started_at','state']);
  assert.equal(result.get('two').last_success,null);

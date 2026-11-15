@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createHash, randomUUID } = require('node:crypto');
+const { readOwnedFileSync } = require('./sj-owned-file');
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const arrow = /^(?:async\s*)?(?:\(\s*(?:[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*)?\s*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{[\s\S]*\}$/;
@@ -23,13 +24,13 @@ function compile(source) {
 async function cleanup(filename, identity, checksum) {
   let current;
   try {
-    current = await fs.lstat(filename);
+    current = readOwnedFileSync(filename);
   } catch (error) {
     if (error.code === 'ENOENT') return;
     throw error;
   }
-  if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino ||
-      (checksum !== undefined && hash(await fs.readFile(filename)) !== checksum)) {
+  if (current.identity.dev !== identity.dev || current.identity.ino !== identity.ino ||
+      (checksum !== undefined && hash(current.bytes) !== checksum)) {
     throw new Error('Browser instrumentation cleanup refused: file ownership changed.');
   }
   await fs.unlink(filename);
@@ -52,7 +53,7 @@ async function runBrowserCode({ out, source, execute }) {
   try {
     // mode 0600 applies on POSIX; NTFS access remains governed by directory ACLs.
     handle = await fs.open(filename, 'wx', 0o600);
-    identity = await handle.stat();
+    identity = await handle.stat({ bigint: true });
     await handle.writeFile(source, 'utf8');
     checksum = hash(Buffer.from(source, 'utf8'));
     await handle.close();

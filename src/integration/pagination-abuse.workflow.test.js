@@ -14,7 +14,8 @@ const {
 } = require("./support/integration-test-helpers");
 
 const SAFE_UUID = "00000000-0000-4000-8000-000000000001";
-const EXPECTED_GET_ROUTE_COUNT = 131;
+// Exact current API_MODULES inventory, including the active Seputar Jaminan routes.
+const EXPECTED_GET_ROUTE_COUNT = 142;
 
 function concretePath(modulePath, routePath) {
   return `${modulePath}${routePath}`
@@ -38,6 +39,12 @@ function getRoutePaths() {
   }
   return routes;
 }
+
+test("GET API inventory tetap mencakup tepat seluruh route aktif", () => {
+  const routes = getRoutePaths();
+  assert.equal(routes.length, EXPECTED_GET_ROUTE_COUNT);
+  assert.equal(new Set(routes).size, routes.length, "GET API inventory berisi route duplikat");
+});
 
 test(
   "pagination abuse pada seluruh GET API tidak memicu 5xx atau limit tak terbatas",

@@ -14,12 +14,14 @@ const MIME_BY_FORMAT = Object.freeze({ jpeg: "image/jpeg", png: "image/png", web
 
 function safeName(value) {
   const extension = path.extname(String(value || "")).toLowerCase();
-  const stem = path
+  const candidate = path
     .basename(String(value || "gambar"), extension)
     .normalize("NFKD")
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/^[.-]+|[.-]+$/g, "")
-    .slice(0, 100) || "gambar";
+    .replace(/[^A-Za-z0-9._-]+/g, "-");
+  let first = 0, last = candidate.length;
+  while (first < last && (candidate[first] === '.' || candidate[first] === '-')) first++;
+  while (last > first && (candidate[last - 1] === '.' || candidate[last - 1] === '-')) last--;
+  const stem = candidate.slice(first, last).slice(0, 100) || "gambar";
   return `${stem}.webp`;
 }
 
