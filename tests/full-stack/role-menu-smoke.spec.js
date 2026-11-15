@@ -10,14 +10,18 @@ const {
   resolveFrontendDirectory,
 } = require("../../scripts/release-quality-gate");
 const {
+  SEPUTAR_JAMINAN_URLS,
+} = require("../../prisma/seed/seputar-jaminan-rbac.definition");
+const {
   assertSafeIntegrationDatabase,
   createActiveUser,
   createIntegrationFixture,
 } = require("../../src/integration/support/integration-test-helpers");
 
 const ROLE_NAMES = ["Admin", "Staf", "Supervisor", "Manager"];
+const EXPECTED_STATIC_ROUTE_COUNT = 69;
 const EXPECTED_ROUTE_COUNTS = {
-  Admin: 65,
+  Admin: 66,
   Staf: 36,
   Supervisor: 35,
   Manager: 36,
@@ -204,7 +208,8 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
   const roleNames = resolveRoleNames();
 
   try {
-    expect(staticRoutes.size).toBe(65);
+    expect(staticRoutes.size).toBe(EXPECTED_STATIC_ROUTE_COUNT);
+    expect(staticRoutes.has(SEPUTAR_JAMINAN_URLS.summary)).toBe(false);
 
     const [roles, division] = await Promise.all([
       prisma.roles.findMany({
@@ -236,9 +241,20 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
       const nonPageMenus = readableMenus.filter(
         (menu) => !staticRoutes.has(menu.url),
       );
+      // The retired summary retains a permission record. The frontend hides
+      // it from navigation and the four active SJ pages run in the normal loop.
+      const permissionOnlyMenus = nonPageMenus.filter(
+        (menu) => menu.url === SEPUTAR_JAMINAN_URLS.summary,
+      );
+      const widgetMenus = nonPageMenus.filter(
+        (menu) => menu.url !== SEPUTAR_JAMINAN_URLS.summary,
+      );
 
       expect(pageRoutes).toHaveLength(EXPECTED_ROUTE_COUNTS[roleName]);
-      for (const menu of nonPageMenus) {
+      expect(permissionOnlyMenus.map((menu) => menu.url)).toEqual(
+        roleName === "Admin" ? [SEPUTAR_JAMINAN_URLS.summary] : [],
+      );
+      for (const menu of widgetMenus) {
         expect(menu.menu_type, `${menu.url} bukan route halaman`).toBe(
           "DASHBOARD_WIDGET",
         );
@@ -348,11 +364,12 @@ test("seluruh role dapat membuka setiap menu halaman yang memiliki izin baca", a
         page_routes: pageRoutes.length,
         redirect_routes: pageRoutes.filter((route) => staticPages.get(route))
           .length,
-        dashboard_widgets: nonPageMenus.length,
+        dashboard_widgets: widgetMenus.length,
+        permission_only_menus: permissionOnlyMenus.map((menu) => menu.url),
         recovered_refresh_unavailable: recoveredRefreshUnavailable.length,
       });
       console.log(
-        `[role-menu-smoke] ${roleName}: ${pageRoutes.length} route halaman, ${nonPageMenus.length} widget`,
+        `[role-menu-smoke] ${roleName}: ${pageRoutes.length} route halaman, ${widgetMenus.length} widget, ${permissionOnlyMenus.length} izin tanpa halaman`,
       );
     }
 
