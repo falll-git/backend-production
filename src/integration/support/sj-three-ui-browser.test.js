@@ -4,10 +4,31 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
-const { captureBaselinePage } = require('./sj-three-ui-browser');
+const { captureBaselinePage, readPublicProfileArtifact } = require('./sj-three-ui-browser');
 const { collectVisibleMedia } = require('./sj-step6-visible-media');
 
 const widths = [360, 390, 768, 1024, 1440];
+
+test('public profile artifact accepts only the bounded public response for the owned profile', async () => {
+  const expected = { slug: 'bank-uji', name: 'Bank Uji' };
+  const body = {
+    public_slug: expected.slug,
+    public_name: expected.name,
+    public_mark_url: 'http://127.0.0.1:4000/v1/public/media/logo',
+    short_description: 'Profil uji',
+    office_city_regency: 'Bandung',
+    office_province: 'Jawa Barat',
+    published_asset_count: 0,
+    public_profile_version: 1,
+    public_page_url: null,
+  };
+  assert.deepEqual(await readPublicProfileArtifact(Response.json(body), expected), { status: 200, body });
+  await assert.rejects(readPublicProfileArtifact(Response.json(body, { status: 404 }), expected), /EVIDENCE_STATUS/);
+  await assert.rejects(readPublicProfileArtifact(Response.json({ ...body, public_slug: 'bank-lain' }), expected), /EVIDENCE_CONTRACT/);
+  await assert.rejects(readPublicProfileArtifact(Response.json({ ...body, internal_field: 'excluded' }), expected), /EVIDENCE_CONTRACT/);
+  await assert.rejects(readPublicProfileArtifact(Response.json({ ...body, short_description: { internal_field: 'excluded' } }), expected), /EVIDENCE_CONTRACT/);
+  await assert.rejects(readPublicProfileArtifact(Response.json({ ...body, short_description: 'x'.repeat(65536) }), expected), /BODY_TOO_LARGE/);
+});
 const options = (changes = {}) => ({
   widths, target: 'http://127.0.0.1:4411/assets/test-owned',
   expected: 'Owned fixture', out: 'C:/owned-test-evidence',

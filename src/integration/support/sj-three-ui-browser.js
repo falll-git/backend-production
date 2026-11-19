@@ -11,6 +11,32 @@ const {createOwnedUiKey}=require('./sj-owned-ui-key');
 const {installBrowserObserver,readBrowserObserver}=require('./sj-step6-browser-observer');
 const {decideThroughUi}=require('./sj-step6-review-ui');
 const {collectVisibleMedia}=require('./sj-step6-visible-media');
+const {readEvidenceBody}=require('../../modules/seputar-jaminan/deliveryEvidence');
+
+const PUBLIC_PROFILE_FIELDS = [
+  'public_slug', 'public_name', 'public_mark_url', 'short_description',
+  'office_city_regency', 'office_province', 'published_asset_count',
+];
+const OPTIONAL_PUBLIC_PROFILE_FIELDS = ['public_profile_version', 'public_page_url'];
+
+async function readPublicProfileArtifact(response, { slug, name }) {
+  if (response.status !== 200) {
+    await response.body?.cancel().catch(() => {});
+    throw Error('PUBLIC_PROFILE_EVIDENCE_STATUS');
+  }
+  const body = await readEvidenceBody(response);
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+    !PUBLIC_PROFILE_FIELDS.every(key => Object.hasOwn(body, key)) ||
+    !Object.keys(body).every(key => PUBLIC_PROFILE_FIELDS.includes(key) || OPTIONAL_PUBLIC_PROFILE_FIELDS.includes(key)) ||
+    body.public_slug !== slug || body.public_name !== name ||
+    !['public_mark_url', 'short_description', 'office_city_regency', 'office_province'].every(key => typeof body[key] === 'string') ||
+    !Number.isSafeInteger(body.published_asset_count) || body.published_asset_count < 0 ||
+    (Object.hasOwn(body, 'public_profile_version') && (!Number.isSafeInteger(body.public_profile_version) || body.public_profile_version < 1)) ||
+    (body.public_page_url != null && typeof body.public_page_url !== 'string')) {
+    throw Error('PUBLIC_PROFILE_EVIDENCE_CONTRACT');
+  }
+  return { status: response.status, body };
+}
 // Serialized into the existing CLI; only reads/scrolls/focuses the actual UI.
 // A heading alone is not a settled image or observation proof.
 async function captureBaselinePage(page,{widths,target,expected,out,label,publicDetail,bankDetail}){
@@ -104,6 +130,7 @@ async function captureBaselinePage(page,{widths,target,expected,out,label,public
   return JSON.stringify(results);
 }
 exports.captureBaselinePage=captureBaselinePage;
+exports.readPublicProfileArtifact=readPublicProfileArtifact;
 exports.run=async({proof,cross,diagnosticToken,bankOrigin,controlOrigin,publicApiOrigin,profileId,publications,slug,cycle,rpc,httpApi,upload,renewHttpActors})=>{
   assertContainer(proof,proof.pg);
   assert.equal(Boolean(cross.uiInitialProfileMode&&cross.uiFinalLifecycleMode),false,'mutually exclusive UI key modes');
@@ -244,10 +271,11 @@ exports.run=async({proof,cross,diagnosticToken,bankOrigin,controlOrigin,publicAp
     await code(`async(page)=>{await page.getByRole('button',{name:'Ajukan perubahan',exact:true}).click();await page.locator('#sj-profile-name').fill(${JSON.stringify(profileName)});await page.getByRole('button',{name:'Simpan dan ajukan',exact:true}).click();await page.getByText('Profil disimpan dan diajukan untuk diperiksa.',{exact:true}).waitFor();return JSON.stringify({submitted:true});}`);
     phase='profile-control-decision';await approve('profile',profileId);
     phase='public-profile';
-    const profileResponse=await fetch(publicApiOrigin+'/v1/public/institutions/'+encodeURIComponent(slug));
-    const publicProfile=await profileResponse.json();
-    fs.writeFileSync(path.join(out,'public-profile-api.json'),JSON.stringify({status:profileResponse.status,body:publicProfile},null,2));
-    assert.equal(profileResponse.status,200);assert.equal(publicProfile.public_name,profileName);
+    const profileResponse=await fetch(publicApiOrigin+'/v1/public/institutions/'+encodeURIComponent(slug),{
+      redirect:'error',signal:AbortSignal.timeout(8000),
+    });
+    const publicProfileArtifact=await readPublicProfileArtifact(profileResponse,{slug,name:profileName});
+    fs.writeFileSync(path.join(out,'public-profile-api.json'),JSON.stringify(publicProfileArtifact,null,2),{flag:'wx'});
     // Keep the bank worker's fetch egress guard confined to the real SJ API.
     // This diagnostic, like the readiness probe above, only reads our live
     // child website at the fixed loopback URL; no redirects or arbitrary URL.
