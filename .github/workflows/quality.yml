@@ -38,8 +38,6 @@ jobs:
       CI: "true"
       APP_INSTANCE_KEY: demoruwangarsip
       NEXT_PUBLIC_APP_BRAND: demoruwangarsip
-      NEXT_DEPLOYMENT_ID: ${{ github.sha }}
-      NEXT_PUBLIC_APP_RELEASE: ${{ github.sha }}
       NODE_ENV: development
       HOST: 127.0.0.1
       PORT: "7111"
@@ -130,6 +128,14 @@ jobs:
           ref: main
           path: ruwang-control
           persist-credentials: false
+
+      - name: Bind frontend build identity to checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          frontend_sha=$(git -C frontend-production rev-parse --verify HEAD)
+          [[ "$frontend_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected frontend commit SHA'; exit 1; }
+          printf 'NEXT_DEPLOYMENT_ID=%s\nNEXT_PUBLIC_APP_RELEASE=%s\n' "$frontend_sha" "$frontend_sha" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6

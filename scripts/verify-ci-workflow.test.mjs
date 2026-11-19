@@ -17,6 +17,17 @@ test("workflow Quality memenuhi kebijakan CI quality-only", () => {
   });
 });
 
+test("identitas build frontend mengikuti checkout frontend dan tidak memakai SHA backend", () => {
+  for (const changed of [
+    workflow.replace("frontend_sha=$(git -C frontend-production rev-parse --verify HEAD)", "frontend_sha=${{ github.sha }}"),
+    workflow.replace("frontend_sha=$(git -C frontend-production rev-parse --verify HEAD)", "frontend_sha=$(git -C backend-production rev-parse --verify HEAD)"),
+    workflow.replace("          repository: falll-git/frontend-production\n", ""),
+    workflow.replace("          [[ \"$frontend_sha\" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected frontend commit SHA'; exit 1; }\n", ""),
+    workflow.replace("      - name: Bind frontend build identity to checked-out commit", "      - name: Bind frontend build identity to checked-out commit\n        if: false"),
+    workflow.replace("    env:\n", "    env:\n      NEXT_DEPLOYMENT_ID: stale-override\n"),
+  ]) assert.throws(() => validateQualityWorkflow(changed), /identitas build frontend/);
+});
+
 test("workflow Quality menolak permission write", () => {
   assert.throws(
     () => validateQualityWorkflow(workflow.replace("contents: read", "contents: write")),

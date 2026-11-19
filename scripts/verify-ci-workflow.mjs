@@ -53,6 +53,48 @@ export function validateFrontendNpmPolicyWorkflow(source, jobId = "release-quali
   return { npm_version: "11.21.0", age_check_before_ci: true };
 }
 
+// This checks the authored Quality layout, not arbitrary YAML or shell scripts.
+export function validateFrontendReleaseIdentityWorkflow(source) {
+  const text = String(source || "").replaceAll("\r\n", "\n").replace(/^\s*#.*$/gm, "");
+  const body = text.split(/^  release-quality:\s*$/m)[1]?.split(/^  [A-Za-z_][A-Za-z0-9_-]*:\s*$/m)[0] || "";
+  const steps = body.split(/^      - /m).slice(1).map(block => `      - ${block}`);
+  const name = "      - name: Bind frontend build identity to checked-out commit";
+  const binding = steps.findIndex(step => step.split("\n")[0] === name);
+  const selected = steps[binding] || "";
+  const checkout = steps.findIndex(step => /^\s+path:\s*frontend-production\s*$/m.test(step));
+  const repositoryDeclarations = (steps[checkout] || "").match(/^\s+repository:\s*.*$/gm) || [];
+  const frontendInstall = steps.findIndex(step => /^      - name: Install frontend dependencies\s*$/m.test(step));
+  const gate = steps.findIndex(step => /^\s+run:\s*npm run quality:release\s*$/m.test(step));
+  const rows = selected.split("\n");
+  const run = rows.findIndex(line => line === "        run: |");
+  const commands = [];
+  if (run >= 0) for (const line of rows.slice(run + 1)) {
+    if (!line.trim()) continue;
+    if (!line.startsWith("          ")) break;
+    commands.push(line.slice(10));
+  }
+  const expected = [
+    "set -euo pipefail",
+    "frontend_sha=$(git -C frontend-production rev-parse --verify HEAD)",
+    "[[ \"$frontend_sha\" =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected frontend commit SHA'; exit 1; }",
+    String.raw`printf 'NEXT_DEPLOYMENT_ID=%s\nNEXT_PUBLIC_APP_RELEASE=%s\n' "$frontend_sha" "$frontend_sha" >> "$GITHUB_ENV"`,
+  ];
+  if (steps.filter(step => step.split("\n")[0] === name).length !== 1 ||
+      checkout < 0 || steps.filter(step => /^\s+path:\s*frontend-production\s*$/m.test(step)).length !== 1 ||
+      !/uses:\s*actions\/checkout@[0-9a-f]{40}/.test(steps[checkout] || "") ||
+      repositoryDeclarations.length !== 1 ||
+      !/^\s+repository:\s*falll-git\/frontend-production\s*$/m.test(steps[checkout]) ||
+      !(checkout < binding && binding < frontendInstall && frontendInstall < gate) ||
+      !/^        shell: bash\s*$/m.test(selected) ||
+      /^\s+(?:if|continue-on-error|working-directory|env):/m.test(selected) ||
+      JSON.stringify(commands) !== JSON.stringify(expected) ||
+      steps.some((step, index) => index !== binding && /NEXT_DEPLOYMENT_ID|NEXT_PUBLIC_APP_RELEASE/.test(step)) ||
+      /^\s+(?:NEXT_DEPLOYMENT_ID|NEXT_PUBLIC_APP_RELEASE)\s*:/m.test(body)) {
+    throw new Error("Workflow identitas build frontend wajib berasal dari checkout frontend, divalidasi40hex sebelum ekspor, dan tersedia sebelum install/build tanpa override atau skip.");
+  }
+  return { frontend_commit_source: "frontend-production/HEAD", sha_length: 40 };
+}
+
 const REQUIRED_PATTERNS = Object.freeze([
   [/^name:\s*Quality\s*$/m, "nama workflow Quality"],
   [/^\s*pull_request:\s*$/m, "trigger pull_request"],
@@ -167,6 +209,7 @@ export function validateQualityWorkflow(source) {
     throw new Error(`Workflow Quality tidak aman:\n- ${errors.join("\n- ")}`);
   }
 
+  validateFrontendReleaseIdentityWorkflow(text);
   return { checkout_count: checkoutCount, deployment_capability: false };
 }
 
