@@ -24,6 +24,7 @@ function wire({factoryCode='EEXIST',probeFailure=false}={}){
     './sj-owned-ui-key':{createOwnedUiKey(){factories++;const error=Error('UNIT_SETUP_REFUSAL');error.code=factoryCode;throw error;}},
     './sj-step6-browser-observer':{installBrowserObserver(){},readBrowserObserver(){}},
     './sj-step6-review-ui':{decideThroughUi:forbidden},'./sj-step6-visible-media':{collectVisibleMedia:forbidden},
+    '../../modules/seputar-jaminan/deliveryEvidence':{readEvidenceBody:forbidden},
     './sj-browser-toolchain':{resolveCliToolchain:()=>({entry:'UNIT_CLI_NOT_EXECUTED'})},
     './sj-step6-browser-profile':{ownedBrowserProfile:()=>null},
     './sj-browser-selection':{resolveTestBrowserSelection:forbidden,browserCommandArgs:args=>args}
