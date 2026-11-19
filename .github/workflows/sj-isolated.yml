@@ -105,6 +105,17 @@ jobs:
       - name: Validate harness guards and companion workflow
         working-directory: backend-production
         run: node --test src/integration/support/sj-ci-portability.test.js src/integration/support/sj-disposable-guard.test.js src/integration/support/sj-contract-double.test.js
+      - name: Prepare pinned images for owned fixture suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          pull_fixture() {
+            docker pull "$1"
+            docker tag "$1" "$2"
+          }
+          pull_fixture postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 postgres:17-alpine
+          pull_fixture redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf redis:7.4.11-alpine
+          docker pull clamav/clamav@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4
       - name: Run all five owned-resource suites with real scanner
         id: gate
         working-directory: backend-production

@@ -13,6 +13,10 @@ test('CI explicitly covers all five modes without business credentials or a cont
   assert.match(workflow,/cancel-in-progress: false/);
   assert.doesNotMatch(workflow,/secrets\.|persist-credentials: true|ref: main|pull_request_target|services:|container:/);
   assert.equal((workflow.match(/persist-credentials: false/g)||[]).length,4);
+  const imagePreparation=workflow.indexOf('- name: Prepare pinned images for owned fixture suites');
+  assert(imagePreparation>=0&&imagePreparation<workflow.indexOf('run: node scripts/run-sj-ci-gate.js'));
+  assert(workflow.includes(`docker pull ${SCANNER_IMAGE}`),'scanner image must exist before prepareScanner inspects it');
+  for(const image of ['postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 postgres:17-alpine','redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf redis:7.4.11-alpine'])assert(workflow.includes(`pull_fixture ${image}`));
   for(const ref of ['frontend_ref','control_ref','central_ref'])assert.ok(workflow.includes('ref: ${{ inputs.'+ref+' }}'));
   for(const line of workflow.split('\n').filter(l=>l.includes('uses:')))assert.match(line,/@[a-f0-9]{40}$/);
 });
